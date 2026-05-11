@@ -1007,7 +1007,7 @@ const StudyCard = () => {
 
   return (
     <Card num="06" title={`Studying — ${study.cert}`} span={4}
-      right={<><span className="tag info">cert track</span><span className="muted mono" style={{fontSize:11}}>{daysOut}d out</span></>}
+      right={<><span className="tag info">cert track</span><span className="muted mono" style={{fontSize:11}}>{study.exam_date ? `${daysOut}d out` : "not scheduled"}</span></>}
     >
       <div style={{
         background:"linear-gradient(135deg,color-mix(in oklch,var(--info) 14%,var(--surface-2)),var(--surface-2))",
@@ -1018,7 +1018,7 @@ const StudyCard = () => {
           <div>
             <div className="muted-2 mono" style={{fontSize:10.5,letterSpacing:".08em"}}>ISACA · {study.cert}</div>
             <div className="serif" style={{fontSize:16,lineHeight:1.15}}>Certified Info Security Manager</div>
-            <div className="muted mono" style={{fontSize:11,marginTop:2}}>exam · {study.exam_date}</div>
+            <div className="muted mono" style={{fontSize:11,marginTop:2}}>{study.exam_date ? `exam · ${study.exam_date}` : study.exam_note || "exam date TBD"}</div>
           </div>
           <div style={{textAlign:"right"}}>
             <div className="mono" style={{fontSize:24,fontWeight:500}}>{Math.round(avgPct)}%</div>

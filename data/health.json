@@ -1,46 +1,26 @@
 {
   "habits": {
-    "2026-05-09": {
-      "workout": true,
-      "water": true,
-      "flea_medicine": false,
-      "guitar_practice": true
-    },
-    "2026-05-10": {
-      "workout": false,
+    "2026-05-11": {
+      "lift": false,
+      "cardio": false,
+      "elbow_rehab": false,
+      "morning_stretch": false,
       "water": false,
-      "flea_medicine": false,
       "guitar_practice": false,
-      "Lift": true,
-      "Sleep 7h": true
+      "flea_medicine": false
     }
   },
   "weight": {
-    "2026-05-09": 185.0
+    "2026-05-11": 230.0
   },
-  "calories": {
-    "2026-05-09": {
-      "goal": 2200,
-      "consumed": 1950,
-      "burned": 320
-    }
-  },
+  "calories": {},
   "habit_list": [
-    {
-      "id": "workout",
-      "label": "Workout"
-    },
-    {
-      "id": "water",
-      "label": "Water (64oz)"
-    },
-    {
-      "id": "guitar_practice",
-      "label": "Guitar practice"
-    },
-    {
-      "id": "flea_medicine",
-      "label": "Dog flea meds"
-    }
+    {"id": "lift",            "label": "Lift (PPL)"},
+    {"id": "cardio",          "label": "Cardio 30min"},
+    {"id": "elbow_rehab",     "label": "Elbow rehab"},
+    {"id": "morning_stretch", "label": "Morning stretch"},
+    {"id": "water",           "label": "Water (64oz)"},
+    {"id": "guitar_practice", "label": "Guitar practice"},
+    {"id": "flea_medicine",   "label": "Dog flea meds"}
   ]
 }

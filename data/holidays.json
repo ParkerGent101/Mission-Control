@@ -1,17 +1,16 @@
 [
   {
     "id": 1,
-    "name": "Nashville, TN",
-    "location": "Nashville, TN",
-    "start": "2026-07-18",
-    "end": "2026-07-21",
-    "budget": 600,
+    "name": "Alaska",
+    "location": "Alaska",
+    "start": "2026-05-15",
+    "end": "2026-05-23",
+    "budget": 0,
     "checklist": [
-      {"text": "Book hotel", "done": false},
-      {"text": "Buy concert tickets", "done": false},
-      {"text": "Research venues / EPK drops", "done": true},
-      {"text": "Pack guitar", "done": false}
+      {"text": "Pack bags", "done": false},
+      {"text": "Confirm travel arrangements", "done": false},
+      {"text": "Download offline maps", "done": false}
     ],
-    "notes": "Music City — band scouting + personal trip"
+    "notes": ""
   }
 ]

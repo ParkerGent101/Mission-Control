@@ -1,13 +1,14 @@
-﻿{
+{
   "cert": "CISM",
-  "exam_date": "2026-08-16",
+  "exam_date": null,
+  "exam_note": "Not scheduled — purchase CISM review manual first",
   "domains": [
-    {"id": 1, "name": "1. Info Security Governance",      "pct": 78, "weight": 17},
-    {"id": 2, "name": "2. Risk Management",               "pct": 64, "weight": 20},
-    {"id": 3, "name": "3. Security Program Dev. & Mgmt",  "pct": 41, "weight": 33},
-    {"id": 4, "name": "4. Incident Mgmt & Response",      "pct": 22, "weight": 30}
+    {"id": 1, "name": "1. Info Security Governance",      "pct": 0, "weight": 17},
+    {"id": 2, "name": "2. Risk Management",               "pct": 0, "weight": 20},
+    {"id": 3, "name": "3. Security Program Dev. & Mgmt",  "pct": 0, "weight": 33},
+    {"id": 4, "name": "4. Incident Mgmt & Response",      "pct": 0, "weight": 30}
   ],
-  "practice_scores": [54, 58, 61, 59, 67, 72],
+  "practice_scores": [],
   "sessions": [],
   "total_hours": 0
 }
