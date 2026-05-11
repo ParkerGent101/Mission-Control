@@ -2,7 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Mission Control" />
+<meta name="theme-color" content="#1e1a16" />
 <title>Mission Control</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -287,44 +292,119 @@
     .grid > * { grid-column: span 12 !important; }
   }
 
+  /* ─── Agenda grid ──────────────────────── */
+  .agenda-grid {
+    display: grid;
+    grid-template-columns: 1.1fr 1.1fr 1fr;
+  }
+  @media (max-width: 900px) {
+    .agenda-grid { grid-template-columns: 1fr; }
+    .agenda-grid > div { border-right: none !important; border-bottom: 1px solid var(--line-soft); }
+    .agenda-grid > div:last-child { border-bottom: none; }
+  }
+
+  /* ─── Talk grid ─────────────────────────── */
+  .talk-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
   @media (max-width: 768px) {
-    /* Collapse sidebar and statusbar */
-    .app { --sidebar-w: 0px !important; grid-template-rows: 50px 1fr; }
+    .talk-grid { grid-template-columns: 1fr; }
+    .talk-grid > div:first-child { border-right: none !important; border-bottom: 1px solid var(--line-soft); }
+  }
+
+  /* ─── Mobile bottom nav ─────────────────── */
+  .mobile-nav { display: none; }
+
+  /* ─── Mobile breakpoint ─────────────────── */
+  @media (max-width: 768px) {
+    /* Layout: sidebar collapses, add bottom nav room */
+    .app {
+      --sidebar-w: 0px !important;
+      grid-template-rows: 48px 1fr 60px;
+      grid-template-columns: 1fr;
+    }
+    .topbar { grid-column: 1 / -1; grid-template-columns: auto 1fr auto; }
     .sidebar { display: none; }
     .statusbar { display: none; }
 
-    /* Topbar: hide search bar and brand name, keep right controls */
-    .topbar { grid-template-columns: auto 1fr auto; }
+    /* Topbar */
     .brand-name { display: none; }
     .topbar-center { display: none; }
     .topbar-right { padding: 0 8px; gap: 4px; }
+    .topbar-date { display: none; }
 
-    /* Main content */
-    main { padding: 10px 10px 24px; }
-    main > .page-head { margin-bottom: 10px; }
-    main > .page-head h1 { font-size: 18px; }
-    main > .page-head .date { display: none; }
+    /* Main */
+    main { grid-column: 1 / -1; padding: 10px 8px 8px; }
+    .page-head { margin-bottom: 10px; }
+    .page-head h1 { font-size: 20px; }
+    .page-head .date { display: none; }
 
     /* Cards */
-    .card-head { flex-wrap: wrap; gap: 4px; }
+    .card-head { flex-wrap: wrap; gap: 4px; padding: 8px 10px; }
     .card-head .right { flex-wrap: wrap; gap: 4px; }
+    .card-body { padding: 10px; }
 
     /* Bigger touch targets */
-    .btn { padding: 8px 12px; min-height: 36px; }
-    .txn { padding: 10px 4px; }
+    .btn { padding: 7px 10px; }
+    .txn { padding: 8px 2px; }
+    .agenda-row { padding: 8px 4px; gap: 8px; }
+    .checkbox { width: 20px; height: 20px; }
 
-    /* Finance stats: 2×2 grid, hide sparkline */
+    /* Finance stats: 2×2 */
     .finance-stats { grid-template-columns: 1fr 1fr; }
-    .finance-stats .spark-wrap { display: none; }
     .stat-block .v.serif { font-size: 18px; }
-
-    /* Finance budget bars: drop % column */
     .bar-row { grid-template-columns: 1fr auto auto; }
     .bar-row .pct { display: none; }
     .bar-row .amt { font-size: 11px; }
-
-    /* Finance transactions/savings: single column */
     .finance-detail { grid-template-columns: 1fr; gap: 0; }
+
+    /* Habit grid: smaller */
+    .habit-week { grid-template-columns: 50px repeat(7, 1fr); gap: 3px; }
+    .habit-cell { border-radius: 3px; }
+
+    /* Bottom navigation */
+    .mobile-nav {
+      display: flex;
+      grid-row: 3 / 4; grid-column: 1 / -1;
+      background: var(--bg-2);
+      border-top: 1px solid var(--line);
+      align-items: stretch;
+      z-index: 50;
+    }
+    .mobile-nav-item {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 3px;
+      padding: 6px 4px 8px;
+      color: var(--ink-3);
+      cursor: pointer;
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      letter-spacing: 0.04em;
+      transition: color .12s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .mobile-nav-item.active { color: var(--accent); }
+    .mobile-nav-item svg { width: 20px; height: 20px; }
+
+    /* Input bigger on mobile */
+    .input, textarea.input { font-size: 16px; } /* prevents iOS zoom */
+
+    /* Journal textarea */
+    .journal-text { font-size: 16px; }
+
+    /* Media covers smaller */
+    .media-cover { font-size: 9px; }
+
+    /* Scrollbar thinner */
+    *::-webkit-scrollbar { width: 4px; height: 4px; }
+  }
+
+  /* ─── Tablet ────────────────────────────── */
+  @media (min-width: 769px) and (max-width: 1100px) {
+    .app { --sidebar-w: 56px; }
+    .sb-section, .sb-label, .sb-badge { display: none; }
+    .sb-item { justify-content: center; padding: 8px; }
   }
 
   .app[data-density="compact"] { font-size: 12px; }
@@ -443,12 +523,13 @@
 
   .spark { width: 100%; height: 36px; }
 
-  /* Finance card responsive internals */
+  /* Finance card */
   .finance-stats {
     display: grid;
-    grid-template-columns: repeat(4, 1fr) auto;
+    grid-template-columns: repeat(4, 1fr);
     gap: 14px;
-    align-items: center;
+    align-items: start;
+    margin-bottom: 2px;
   }
   .finance-detail {
     display: grid;
@@ -518,17 +599,17 @@
 
   .bar-row {
     display: grid;
-    grid-template-columns: 1fr 80px 80px 56px;
-    gap: 8px;
+    grid-template-columns: 1fr 72px 72px 48px;
+    gap: 6px;
     align-items: center;
     padding: 7px 0;
     border-bottom: 1px solid var(--line-soft);
   }
   .bar-row:last-child { border-bottom: none; }
   .bar-row .cat { display: flex; align-items: center; gap: 8px; min-width: 0; }
-  .bar-row .cat-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-row .cat-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
   .bar-row .swatch { width: 8px; height: 8px; border-radius: 2px; flex: 0 0 auto; }
-  .bar-row .amt { font-family: var(--font-mono); font-feature-settings: "tnum" 1; text-align: right; font-size: 11.5px; }
+  .bar-row .amt { font-family: var(--font-mono); font-feature-settings: "tnum" 1; text-align: right; font-size: 11px; }
   .bar-row .pct { font-family: var(--font-mono); text-align: right; font-size: 11px; color: var(--ink-3); }
   .mini-bar { height: 4px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin-top: 4px; grid-column: 1 / -1; }
   .mini-bar .fill { height: 100%; transition: width .4s ease; }

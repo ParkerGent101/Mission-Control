@@ -26,31 +26,37 @@ BAND_DIR    = Path(os.environ.get("BAND_DIR", "C:/Users/Parker/projects/coming-u
 DATA_DIR    = Path(os.environ.get("DATA_DIR", str(Path(__file__).parent / "data")))
 DATA_DIR.mkdir(exist_ok=True)
 
-SHOWS_FILE    = BAND_DIR / "shows.json" if BAND_DIR.exists() else DATA_DIR / "shows.json"
-VIDEOS_FILE   = BAND_DIR / "videos.json" if BAND_DIR.exists() else DATA_DIR / "videos.json"
-FINANCE_FILE  = DATA_DIR / "finances.json"
-TASKS_FILE    = DATA_DIR / "tasks.json"
-REMINDERS_FILE = DATA_DIR / "reminders.json"
-SAVINGS_FILE  = DATA_DIR / "savings.json"
-CONTENT_FILE  = DATA_DIR / "band_content.json"
-AGENDA_FILE   = DATA_DIR / "agenda.json"
-HEALTH_FILE   = DATA_DIR / "health.json"
-WORK_FILE     = DATA_DIR / "work_tasks.json"
-STUDY_FILE    = DATA_DIR / "study.json"
-READING_FILE  = DATA_DIR / "reading.json"
-GAMING_FILE   = DATA_DIR / "gaming.json"
-HOLIDAYS_FILE = DATA_DIR / "holidays.json"
-JOURNAL_FILE  = DATA_DIR / "journal.json"
+SHOWS_FILE       = BAND_DIR / "shows.json" if BAND_DIR.exists() else DATA_DIR / "shows.json"
+VIDEOS_FILE      = BAND_DIR / "videos.json" if BAND_DIR.exists() else DATA_DIR / "videos.json"
+FINANCE_FILE     = DATA_DIR / "finances.json"
+SUBS_FILE        = DATA_DIR / "subscriptions.json"
+TASKS_FILE       = DATA_DIR / "tasks.json"
+REMINDERS_FILE   = DATA_DIR / "reminders.json"
+SAVINGS_FILE     = DATA_DIR / "savings.json"
+CONTENT_FILE     = DATA_DIR / "band_content.json"
+BAND_CONTACTS_FILE = DATA_DIR / "band_contacts.json"
+AGENDA_FILE      = DATA_DIR / "agenda.json"
+HEALTH_FILE      = DATA_DIR / "health.json"
+WORK_FILE        = DATA_DIR / "work_tasks.json"
+STUDY_FILE       = DATA_DIR / "study.json"
+READING_FILE     = DATA_DIR / "reading.json"
+GAMING_FILE      = DATA_DIR / "gaming.json"
+HOLIDAYS_FILE    = DATA_DIR / "holidays.json"
+JOURNAL_FILE     = DATA_DIR / "journal.json"
 
 GCAL_SCOPES    = ['https://www.googleapis.com/auth/calendar.readonly']
 GCAL_CREDS_FILE = Path(__file__).parent / "credentials.json"
 GCAL_TOKEN_FILE = Path(__file__).parent / "token.json"
 
-def _load(path):
+def _load(path, default=None):
     p = Path(path)
     if not p.exists():
-        p.write_text("[]")
-    return json.loads(p.read_text(encoding="utf-8"))
+        init = json.dumps(default) if default is not None else "[]"
+        p.write_text(init, encoding="utf-8")
+    try:
+        return json.loads(p.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return default if default is not None else []
 
 def _save(path, data):
     Path(path).write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -431,6 +437,28 @@ def post_savings():
     _save(SAVINGS_FILE, savings)
     return jsonify({"message": f"{acct} updated: ${d['balance']}"})
 
+# ── Subscriptions ─────────────────────────────────────────────────────────────
+
+@app.route("/api/finances/subscriptions", methods=["GET"])
+def get_subscriptions():
+    return jsonify(_load(SUBS_FILE))
+
+@app.route("/api/finances/subscriptions", methods=["POST"])
+def post_subscription():
+    d = request.json
+    subs = _load(SUBS_FILE)
+    sid = max((s["id"] for s in subs), default=0) + 1
+    subs.append({"id": sid, "name": d.get("name",""), "acct": d.get("acct",""), "amt": float(d.get("amt",0)), "due": d.get("due","")})
+    _save(SUBS_FILE, subs)
+    return jsonify({"id": sid})
+
+@app.route("/api/finances/subscriptions/<int:sid>", methods=["DELETE"])
+def delete_subscription(sid):
+    subs = _load(SUBS_FILE)
+    subs = [s for s in subs if s["id"] != sid]
+    _save(SUBS_FILE, subs)
+    return jsonify({"ok": True})
+
 # ── Band Content Queue ─────────────────────────────────────────────────────────
 
 @app.route("/api/band/content", methods=["GET"])
@@ -456,6 +484,43 @@ def done_content(cid):
             _save(CONTENT_FILE, content)
             return jsonify({"message": f"Done: {c['title']}"})
     return jsonify({"error": "not found"}), 404
+
+# ── Band Contacts ──────────────────────────────────────────────────────────────
+
+@app.route("/api/band/contacts", methods=["GET"])
+def get_band_contacts():
+    return jsonify(_load(BAND_CONTACTS_FILE))
+
+@app.route("/api/band/contacts", methods=["POST"])
+def post_band_contact():
+    d = request.json
+    contacts = _load(BAND_CONTACTS_FILE)
+    cid = max((c["id"] for c in contacts), default=0) + 1
+    contacts.append({
+        "id": cid, "name": d.get("name",""), "venue": d.get("venue",""),
+        "city": d.get("city",""), "last": d.get("last","—"),
+        "status": d.get("status","not contacted"), "notes": d.get("notes","")
+    })
+    _save(BAND_CONTACTS_FILE, contacts)
+    return jsonify({"id": cid})
+
+@app.route("/api/band/contacts/<int:cid>", methods=["PUT"])
+def update_band_contact(cid):
+    d = request.json
+    contacts = _load(BAND_CONTACTS_FILE)
+    for c in contacts:
+        if c["id"] == cid:
+            c.update({k: v for k, v in d.items() if k != "id"})
+            _save(BAND_CONTACTS_FILE, contacts)
+            return jsonify({"ok": True})
+    return jsonify({"error": "not found"}), 404
+
+@app.route("/api/band/contacts/<int:cid>", methods=["DELETE"])
+def delete_band_contact(cid):
+    contacts = _load(BAND_CONTACTS_FILE)
+    contacts = [c for c in contacts if c["id"] != cid]
+    _save(BAND_CONTACTS_FILE, contacts)
+    return jsonify({"ok": True})
 
 # ── Google Calendar ────────────────────────────────────────────────────────────
 
@@ -560,12 +625,24 @@ def post_agenda():
 @app.route("/api/agenda/<int:aid>/toggle", methods=["POST"])
 def toggle_agenda(aid):
     items = _load(AGENDA_FILE)
-    for item in items:
-        if item["id"] == aid:
-            item["done"] = not item.get("done", False)
-            _save(AGENDA_FILE, items)
-            return jsonify({"done": item["done"]})
-    return jsonify({"error": "not found"}), 404
+    item = next((i for i in items if i["id"] == aid), None)
+    if not item:
+        return jsonify({"error": "not found"}), 404
+    was_done = item.get("done", False)
+    if not was_done:
+        items = [i for i in items if i["id"] != aid]
+        _save(AGENDA_FILE, items)
+        return jsonify({"done": True, "removed": True})
+    item["done"] = False
+    _save(AGENDA_FILE, items)
+    return jsonify({"done": False})
+
+@app.route("/api/agenda/<int:aid>", methods=["DELETE"])
+def delete_agenda(aid):
+    items = _load(AGENDA_FILE)
+    items = [i for i in items if i["id"] != aid]
+    _save(AGENDA_FILE, items)
+    return jsonify({"ok": True})
 
 # ── Health ─────────────────────────────────────────────────────────────────────
 
@@ -631,18 +708,35 @@ def post_work():
 @app.route("/api/work/<int:wid>/done", methods=["POST"])
 def done_work(wid):
     items = _load(WORK_FILE)
-    for item in items:
-        if item["id"] == wid:
-            item["done"] = True
-            _save(WORK_FILE, items)
-            return jsonify({"ok": True})
-    return jsonify({"error": "not found"}), 404
+    items = [i for i in items if i["id"] != wid]
+    _save(WORK_FILE, items)
+    return jsonify({"ok": True})
+
+@app.route("/api/work/<int:wid>", methods=["DELETE"])
+def delete_work(wid):
+    items = _load(WORK_FILE)
+    items = [i for i in items if i["id"] != wid]
+    _save(WORK_FILE, items)
+    return jsonify({"ok": True})
 
 # ── Study ──────────────────────────────────────────────────────────────────────
 
 @app.route("/api/study", methods=["GET"])
 def get_study():
-    return jsonify(_load(STUDY_FILE))
+    data = _load(STUDY_FILE)
+    if isinstance(data, list):
+        return jsonify({})
+    return jsonify(data)
+
+@app.route("/api/study/score", methods=["POST"])
+def post_study_score():
+    d = request.json
+    study = _load(STUDY_FILE)
+    if not isinstance(study, dict):
+        study = {}
+    study.setdefault("practice_scores", []).append(d.get("score", 0))
+    _save(STUDY_FILE, study)
+    return jsonify({"ok": True})
 
 @app.route("/api/study/domain/<int:did>", methods=["POST"])
 def post_study_domain(did):
@@ -673,19 +767,40 @@ def post_study_session():
 
 @app.route("/api/reading", methods=["GET"])
 def get_reading():
-    return jsonify(_load(READING_FILE))
+    data = _load(READING_FILE)
+    if isinstance(data, list):
+        return jsonify({})
+    return jsonify(data)
 
 @app.route("/api/reading/progress", methods=["POST"])
 def post_reading_progress():
     d = request.json
     reading = _load(READING_FILE)
-    for book in reading:
-        if book["id"] == d.get("id"):
-            book["current_page"] = d.get("page", book.get("current_page", 0))
-            book["last_read"] = datetime.now().strftime("%Y-%m-%d")
-            _save(READING_FILE, reading)
-            return jsonify({"ok": True})
-    return jsonify({"error": "not found"}), 404
+    if not isinstance(reading, dict):
+        reading = {}
+    if reading.get("current"):
+        reading["current"]["page"] = d.get("page", reading["current"].get("page", 0))
+        reading["current"]["last_read"] = datetime.now().strftime("%Y-%m-%d")
+        _save(READING_FILE, reading)
+        return jsonify({"ok": True})
+    return jsonify({"error": "no current book"}), 404
+
+@app.route("/api/reading", methods=["POST"])
+def post_reading():
+    d = request.json
+    reading = _load(READING_FILE)
+    if not isinstance(reading, dict):
+        reading = {"queue": [], "completed_2026": 0, "goal_2026": 30}
+    action = d.get("action", "update_page")
+    if action == "set_current":
+        reading["current"] = {"title": d["title"], "author": d.get("author",""), "page": d.get("page",0), "total_pages": d.get("total_pages",0), "started": datetime.now().strftime("%Y-%m-%d")}
+    elif action == "add_queue":
+        reading.setdefault("queue", []).append({"title": d["title"], "author": d.get("author","")})
+    elif action == "complete":
+        reading["completed_2026"] = reading.get("completed_2026", 0) + 1
+        reading["current"] = None
+    _save(READING_FILE, reading)
+    return jsonify({"ok": True})
 
 # ── Gaming ─────────────────────────────────────────────────────────────────────
 
@@ -709,37 +824,42 @@ def post_gaming_backlog():
 
 @app.route("/api/holidays", methods=["GET"])
 def get_holidays():
-    return jsonify(_load(HOLIDAYS_FILE))
+    data = _load(HOLIDAYS_FILE)
+    # Support both old dict format and new array format
+    if isinstance(data, dict):
+        return jsonify(data.get("trips", []))
+    return jsonify(data)
 
 @app.route("/api/holidays", methods=["POST"])
 def post_holiday():
     d = request.json
-    holidays = _load(HOLIDAYS_FILE)
-    if not isinstance(holidays, dict):
-        holidays = {"trips": []}
-    trips = holidays.setdefault("trips", [])
+    trips = _load(HOLIDAYS_FILE)
+    if isinstance(trips, dict):
+        trips = trips.get("trips", [])
     tid = max((t.get("id", 0) for t in trips), default=0) + 1
     trips.append({
-        "id": tid, "destination": d.get("destination", ""),
-        "dates": d.get("dates", ""), "checklist": d.get("checklist", [])
+        "id": tid, "name": d.get("name", d.get("destination", "")),
+        "location": d.get("location", ""), "start": d.get("start", ""),
+        "end": d.get("end", ""), "budget": d.get("budget", 0),
+        "checklist": d.get("checklist", []), "notes": d.get("notes", "")
     })
-    _save(HOLIDAYS_FILE, holidays)
+    _save(HOLIDAYS_FILE, trips)
     return jsonify({"id": tid})
 
 @app.route("/api/holidays/<int:tid>/checklist/<int:idx>", methods=["POST"])
 def toggle_holiday_checklist(tid, idx):
-    holidays = _load(HOLIDAYS_FILE)
-    if not isinstance(holidays, dict):
-        return jsonify({"error": "not found"}), 404
-    for trip in holidays.get("trips", []):
+    trips = _load(HOLIDAYS_FILE)
+    if isinstance(trips, dict):
+        trips = trips.get("trips", [])
+    for trip in trips:
         if trip["id"] == tid:
             cl = trip.get("checklist", [])
             if 0 <= idx < len(cl):
                 if isinstance(cl[idx], dict):
                     cl[idx]["done"] = not cl[idx].get("done", False)
                 else:
-                    cl[idx] = {"label": cl[idx], "done": True}
-            _save(HOLIDAYS_FILE, holidays)
+                    cl[idx] = {"text": cl[idx], "done": True}
+            _save(HOLIDAYS_FILE, trips)
             return jsonify({"ok": True})
     return jsonify({"error": "not found"}), 404
 

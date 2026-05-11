@@ -1,0 +1,9 @@
+[
+  {"id": 1, "name": "Marcus Kellan",   "venue": "Sound Bar",       "city": "Rogers, AR",    "last": "2026-04-20", "status": "responded",    "notes": ""},
+  {"id": 2, "name": "J. Pham",         "venue": "Eddie's Attic",   "city": "Decatur, GA",   "last": "2026-03-15", "status": "follow up",    "notes": "Sent EPK, no reply"},
+  {"id": 3, "name": "Sarah",           "venue": "WUOG Radio",      "city": "Athens, GA",    "last": "2026-03-20", "status": "EPK sent",     "notes": ""},
+  {"id": 4, "name": "Hal",             "venue": "George's Majestic","city": "Fayetteville, AR","last": "2026-05-01","status": "confirmed",  "notes": "Booked June 27"},
+  {"id": 5, "name": "—",              "venue": "Smoke & Barrel",  "city": "Fayetteville, AR","last": "—",         "status": "not contacted","notes": ""},
+  {"id": 6, "name": "—",              "venue": "JJ's Live",        "city": "Fayetteville, AR","last": "—",         "status": "not contacted","notes": ""},
+  {"id": 7, "name": "—",              "venue": "Walton Arts Center","city": "Fayetteville, AR","last": "—",        "status": "not contacted","notes": ""}
+]

@@ -7,7 +7,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "sidebar": "full",
   "modules": {
     "talk": true, "agenda": true, "finance": true, "band": true, "health": true,
-    "work": true, "study": true, "reading": true, "gaming": true,
+    "work": true, "study": true, "reading": true,
     "holidays": true, "journal": true
   }
 }/*EDITMODE-END*/;
@@ -23,9 +23,17 @@ const SIDEBAR_NAV = [
   { id: "work",       icon: "briefcase",  label: "Work",        badge: "" },
   { id: "study",      icon: "graduation", label: "Studying",    badge: "" },
   { id: "reading",    icon: "book",       label: "Reading",     badge: "" },
-  { id: "gaming",     icon: "gamepad",    label: "Gaming",      badge: "" },
   { id: "holidays",   icon: "plane",      label: "Holidays",    badge: "" },
   { id: "journal",    icon: "feather",    label: "Journal",     badge: "" },
+];
+
+// Bottom nav items for mobile (most important ones)
+const MOBILE_NAV = [
+  { id: "dashboard", icon: "home",      label: "Home" },
+  { id: "agenda",    icon: "calendar",  label: "Today" },
+  { id: "work",      icon: "briefcase", label: "Work" },
+  { id: "band",      icon: "music",     label: "Band" },
+  { id: "finance",   icon: "wallet",    label: "Finance" },
 ];
 
 const App = () => {
@@ -39,7 +47,6 @@ const App = () => {
     return () => clearInterval(id);
   }, []);
 
-  // ⌘K
   useEffectApp(() => {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
@@ -83,10 +90,13 @@ const App = () => {
     { id: "work",     el: <M.WorkCard /> },
     { id: "study",    el: <M.StudyCard /> },
     { id: "reading",  el: <M.ReadingCard /> },
-    { id: "gaming",   el: <M.GamingCard /> },
     { id: "holidays", el: <M.HolidayCard /> },
     { id: "journal",  el: <M.JournalCard /> },
   ];
+
+  const pageTitle = active === "dashboard"
+    ? `Good ${now.getHours() < 12 ? "morning" : now.getHours() < 17 ? "afternoon" : "evening"}, Parker.`
+    : SIDEBAR_NAV.find(n => n.id === active)?.label || "Mission Control";
 
   return (
     <div className="app" data-density={t.density} data-sidebar={t.sidebar}>
@@ -105,7 +115,7 @@ const App = () => {
           <span className="pill"><span className="dot"/>localhost:5000</span>
         </div>
         <div className="topbar-right">
-          <span className="mono" style={{ padding: "0 10px", color: "var(--ink-2)" }}>{date}</span>
+          <span className="mono topbar-date" style={{ padding: "0 10px", color: "var(--ink-2)" }}>{date}</span>
           <button className="icon-btn" title="Settings" onClick={() => window.postMessage({ type: "__activate_edit_mode" }, "*")}>
             <Icon name="settings" size={15}/>
           </button>
@@ -152,7 +162,7 @@ const App = () => {
       {/* Main */}
       <main>
         <div className="page-head">
-          <h1>Good {now.getHours() < 12 ? "morning" : now.getHours() < 17 ? "afternoon" : "evening"}, Parker.</h1>
+          <h1>{pageTitle}</h1>
           <span className="date">{date} — week {weekNum} of {now.getFullYear()}</span>
           <div className="spacer"/>
         </div>
@@ -165,7 +175,7 @@ const App = () => {
             ))}
           </div>
         ) : (
-          <div>
+          <div className="grid">
             {cards.filter(c => c.id === active).map(c => (
               <React.Fragment key={c.id}>{c.el}</React.Fragment>
             ))}
@@ -186,6 +196,20 @@ const App = () => {
         <a onClick={() => setCmdOpen(true)} style={{ cursor: "pointer" }}>⌘K commands</a>
       </div>
 
+      {/* Mobile bottom nav */}
+      <nav className="mobile-nav">
+        {MOBILE_NAV.map(n => (
+          <div key={n.id} className={"mobile-nav-item" + (active === n.id ? " active" : "")} onClick={() => setActive(n.id)}>
+            <Icon name={n.icon} size={20}/>
+            <span>{n.label}</span>
+          </div>
+        ))}
+        <div className="mobile-nav-item" onClick={() => setCmdOpen(true)}>
+          <Icon name="search" size={20}/>
+          <span>Search</span>
+        </div>
+      </nav>
+
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onAction={onAction} />
 
       <TweaksPanel>
@@ -199,7 +223,7 @@ const App = () => {
         <TweakSection label="Modules">
           {[["talk","Talk to Mission Control"],["agenda","Today / Agenda"],["finance","Finance"],["band","Band"],
             ["health","Health & Fitness"],["work","Work"],["study","Studying"],["reading","Reading"],
-            ["gaming","Gaming"],["holidays","Holidays"],["journal","Journal"],
+            ["holidays","Holidays"],["journal","Journal"],
           ].map(([k, label]) => (
             <TweakToggle key={k} label={label} value={t.modules[k] !== false}
               onChange={(v) => setTweak("modules", { ...t.modules, [k]: v })} />
