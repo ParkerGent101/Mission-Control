@@ -275,12 +275,12 @@ const FinanceCard = () => {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr) auto", gap: 14, alignItems: "center" }}>
+      <div className="finance-stats">
         <div className="stat-block"><span className="l">Income</span><span className="v serif" style={{color:"var(--accent-2)"}}>{fmtMoney(totalIn,{cents:false})}</span></div>
         <div className="stat-block"><span className="l">Spent</span><span className="v serif">{fmtMoney(totalEx,{cents:false})}</span></div>
         <div className="stat-block"><span className="l">Budget</span><span className="v serif muted">{fmtMoney(totalBudget,{cents:false})}</span></div>
         <div className="stat-block"><span className="l">Net / Savings</span><span className="v serif" style={{color:net>=0?"var(--accent)":"var(--danger)"}}>{fmtMoney(net,{cents:false})}</span></div>
-        <div style={{width:120}}><Sparkline data={[3950,4200,4080,4300,4150,4307]}/></div>
+        <div className="spark-wrap" style={{width:120}}><Sparkline data={[3950,4200,4080,4300,4150,4307]}/></div>
       </div>
 
       <div className="section-h"><span>Budget vs Actual</span><span className="line"/><span className="muted-2">{Math.round((totalEx/totalBudget)*100)}% of budget</span></div>
@@ -300,16 +300,20 @@ const FinanceCard = () => {
         })}
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"1.4fr 1fr", gap:18, marginTop:14 }}>
+      <div className="finance-detail">
         <div>
           <div className="section-h"><span>Recent Transactions</span><span className="line"/></div>
           {txns.length === 0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 0'}}>No transactions this month.</div>}
           {[...txns].slice(0,8).map((t,i) => (
-            <div key={i} className="txn">
+            <div key={i} className="txn" style={{gridTemplateColumns:"22px 1fr auto auto"}}>
               <span className="cat-dot" style={{background:t.amount>0?"var(--accent-2)":"var(--ink-4)"}}/>
               <div><div className="merchant">{t.merchant}</div><div className="meta">{t.date} · {t.cat}</div></div>
               <span className="amount" style={{color:t.amount>0?"var(--accent-2)":"var(--ink)"}}>
                 {t.amount>0?"+":""}{fmtMoney(Math.abs(t.amount))}
+              </span>
+              <span style={{cursor:"pointer",color:"var(--ink-4)",padding:"0 2px",lineHeight:1}} title="Remove"
+                onClick={async()=>{ await fetch(`/api/finances/${t.id}`,{method:"DELETE"}); loadFinances(month); }}>
+                ×
               </span>
             </div>
           ))}

@@ -379,6 +379,13 @@ def post_finance():
     d = request.json
     return jsonify({"message": tool_add_transaction(d["description"], d["amount"], d["type"], d["category"], d.get("date",""))})
 
+@app.route("/api/finances/<int:tid>", methods=["DELETE"])
+def delete_finance(tid):
+    finances = _load(FINANCE_FILE)
+    finances = [t for t in finances if t.get("id") != tid]
+    _save(FINANCE_FILE, finances)
+    return jsonify({"ok": True})
+
 @app.route("/api/finances/summary", methods=["GET"])
 def finance_summary():
     return jsonify({"summary": tool_financial_summary()})
