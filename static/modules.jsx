@@ -841,15 +841,19 @@ const HealthCard = () => {
 // =========================================================
 // WORK
 // =========================================================
-const WORK_LINKS = [
-  { label: "SharePoint Home",  url: "https://groundlevel.sharepoint.com",              icon: "briefcase", group: "GLS" },
-  { label: "Azure Portal",     url: "https://portal.azure.com",                        icon: "external",  group: "GLS" },
-  { label: "Intune / MDM",     url: "https://intune.microsoft.com",                    icon: "phone",     group: "GLS" },
-  { label: "Rightworks",       url: "https://app.rightworks.com",                      icon: "briefcase", group: "GLS" },
-  { label: "GLS Portal",       url: "https://groundlevelservices.com",                 icon: "home",      group: "GLS" },
-  { label: "Mission Control",  url: "https://github.com/parkergent/mission-control",   icon: "external",  group: "Code" },
-  { label: "Coming Up Aces",   url: "https://github.com/parkergent/coming-up-aces",    icon: "external",  group: "Code" },
-  { label: "aGent Security",   url: "https://github.com/parkergent",                   icon: "external",  group: "Code" },
+const GLS_LINKS = [
+  { label: "SharePoint Home", url: "https://groundlevel.sharepoint.com",  icon: "briefcase" },
+  { label: "Azure Portal",    url: "https://portal.azure.com",            icon: "external"  },
+  { label: "Intune / MDM",    url: "https://intune.microsoft.com",        icon: "phone"     },
+  { label: "Rightworks",      url: "https://app.rightworks.com",          icon: "briefcase" },
+  { label: "GLS Portal",      url: "https://groundlevelservices.com",     icon: "home"      },
+];
+
+const CPG_LINKS = [
+  { label: "GitHub Repo",     url: "https://github.com/parkergent",        icon: "external", color: "var(--violet)" },
+  { label: "Twilio Console",  url: "https://console.twilio.com",           icon: "phone",    color: "var(--info)"   },
+  { label: "Twilio Studio",   url: "https://console.twilio.com/us1/studio",icon: "sparkles", color: "var(--info)"   },
+  { label: "Mission Control", url: "https://github.com/parkergent/mission-control", icon: "external", color: "var(--violet)" },
 ];
 
 const GLS_PROJECTS = ["GLS Security","GLS IT","GLS Admin","GLS SharePoint","GLS Projects"];
@@ -858,105 +862,181 @@ const WorkCard = () => {
   const [allTasks, setAllTasks] = useState([]);
   const [newTask, setNewTask] = useState("");
   const [tab, setTab] = useState("gls");
+  const [cpgRevenue, setCpgRevenue] = useState([]);
+  const [cpgNotes, setCpgNotes] = useState(() => localStorage.getItem('cpg_notes') || '');
   const priMap = {high:"P0", normal:"P1", low:"P2"};
 
   useEffect(() => {
     fetch('/api/work').then(r=>r.json()).then(data => {
       if (data && data.length) {
         setAllTasks(data.filter(t=>!t.done).map(t=>({
-          ...t,
-          label: t.title || t.label || '',
+          ...t, label: t.title || t.label || '',
           priority: priMap[t.priority] || t.priority || 'P2'
         })));
       }
     }).catch(()=>{});
   }, []);
 
-  const toggle = async (id) => {
-    await fetch(`/api/work/${id}/done`,{method:'POST'}).catch(()=>{});
+  useEffect(() => {
+    if (tab !== 'cpg') return;
+    fetch('/api/finances').then(r=>r.json()).then(data => {
+      const cpg = (data||[]).filter(t =>
+        t.type === 'income' &&
+        (t.category === 'coding' || (t.description||'').toLowerCase().includes('consumer'))
+      );
+      setCpgRevenue(cpg);
+    }).catch(()=>{});
+  }, [tab]);
+
+  const markDone = async (id) => {
+    await fetch(`/api/work/${id}/done`, {method:'POST'}).catch(()=>{});
     setAllTasks(xs => xs.filter(x => x.id !== id));
     if (window.__toast) window.__toast('Task done ✓');
+  };
+
+  const deleteTask = async (id) => {
+    await fetch(`/api/work/${id}`, {method:'DELETE'}).catch(()=>{});
+    setAllTasks(xs => xs.filter(x => x.id !== id));
   };
 
   const addTask = async (e) => {
     if (e.key !== 'Enter' || !newTask.trim()) return;
     const parts = newTask.match(/P[0-3]/);
-    const priority = parts ? parts[0] : "P2";
+    const priority = parts ? parts[0] : "P1";
     const label = newTask.replace(/P[0-3]/,'').trim();
-    const proj = tab === 'code' ? 'Code' : '';
-    const res = await fetch('/api/work',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({title:label,priority:priority==='P0'?'high':priority==='P1'?'normal':'low',project:proj})})
+    const res = await fetch('/api/work', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({title:label, priority: priority==='P0'?'high':priority==='P1'?'normal':'low', project:''})})
       .then(r=>r.json()).catch(()=>({id:Date.now()}));
-    setAllTasks(xs=>[...xs,{id:res.id||Date.now(),label,priority,project:proj,done:false}]);
+    setAllTasks(xs=>[...xs, {id:res.id||Date.now(), label, priority, project:'', done:false}]);
     setNewTask('');
     if (window.__toast) window.__toast('Task added');
   };
 
-  const pcolor = (p) => p==="P0"?"red":p==="P1"?"amber":p==="P2"?"info":"";
+  const pcolor = (p) => p==="P0"?"red":p==="P1"?"amber":"info";
 
-  const glsTasks = allTasks.filter(t => !t.project || GLS_PROJECTS.includes(t.project) || (!['Code','band','personal'].includes(t.project)));
-  const codeTasks = allTasks.filter(t => t.project === 'Code' || t.project === 'band');
-  const tasks = tab === 'gls' ? glsTasks : codeTasks;
+  const glsTasks = allTasks.filter(t => !t.project || GLS_PROJECTS.includes(t.project) || !['band','personal'].includes(t.project));
+  const byProject = glsTasks.reduce((acc,t) => { const p = t.project||'General'; (acc[p]=acc[p]||[]).push(t); return acc; }, {});
 
-  const byProject = tasks.reduce((acc,t) => {
-    const p = t.project||'General';
-    (acc[p] = acc[p]||[]).push(t);
+  const cpgTotal = cpgRevenue.reduce((s,t) => s + (t.amount||0), 0);
+  const cpgByMonth = cpgRevenue.reduce((acc,t) => {
+    const m = (t.date||'').slice(0,7);
+    acc[m] = (acc[m]||0) + t.amount;
     return acc;
   }, {});
 
-  const links = WORK_LINKS.filter(l => tab === 'gls' ? l.group === 'GLS' : l.group === 'Code');
+  const saveNotes = (v) => { setCpgNotes(v); localStorage.setItem('cpg_notes', v); };
+
+  const tabStyle = (id) => tab===id ? {background:'var(--surface-3)',borderColor:'var(--accent)',color:'var(--ink)'} : {};
 
   return (
     <Card num="05" title="Work" span={4}
       right={<>
-        <span className="muted mono" style={{fontSize:11}}>{allTasks.length} open</span>
-        <button className="btn" onClick={()=>setTab('gls')} style={tab==='gls'?{background:'var(--surface-3)',borderColor:'var(--accent)'}:{}}>GLS</button>
-        <button className="btn" onClick={()=>setTab('code')} style={tab==='code'?{background:'var(--surface-3)',borderColor:'var(--accent)'}:{}}>Code</button>
-        <button className="btn" onClick={()=>setTab('links')} style={tab==='links'?{background:'var(--surface-3)',borderColor:'var(--accent)'}:{}}>Links</button>
+        <span className="muted mono" style={{fontSize:11}}>{glsTasks.length} open</span>
+        <button className="btn" onClick={()=>setTab('gls')}   style={tabStyle('gls')}>GLS</button>
+        <button className="btn" onClick={()=>setTab('cpg')}   style={tabStyle('cpg')}>CPG</button>
+        <button className="btn" onClick={()=>setTab('links')} style={tabStyle('links')}>Links</button>
       </>}
     >
-      {tab === 'links' ? (
+      {/* ── GLS Tasks ── */}
+      {tab === 'gls' && (<>
+        {Object.entries(byProject).map(([proj, ptasks]) => (
+          <div key={proj} style={{marginBottom:8}}>
+            <div className="muted-2 mono" style={{fontSize:10,letterSpacing:'.06em',padding:'4px 0 2px',textTransform:'uppercase'}}>{proj}</div>
+            {ptasks.map(t => (
+              <div key={t.id} style={{display:'grid',gridTemplateColumns:'22px 1fr auto auto',gap:'4px 6px',alignItems:'start',padding:'5px 4px',borderRadius:'var(--r)'}}>
+                <Checkbox checked={false} onClick={()=>markDone(t.id)}/>
+                <div>
+                  <div style={{fontSize:12.5,lineHeight:1.35}}>{t.label||t.title}</div>
+                  {t.notes && <div className="muted-2 mono" style={{fontSize:10,marginTop:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.notes}</div>}
+                </div>
+                <span className={"tag "+pcolor(t.priority)} style={{fontSize:10}}>{t.priority}</span>
+                <button onClick={()=>deleteTask(t.id)} style={{background:'transparent',border:'none',cursor:'pointer',color:'var(--ink-4)',padding:'2px',display:'flex',alignItems:'center',borderRadius:'var(--r-sm)'}}
+                  title="Remove">
+                  <Icon name="x" size={12}/>
+                </button>
+              </div>
+            ))}
+          </div>
+        ))}
+        {glsTasks.length===0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 0',textAlign:'center'}}>No open tasks</div>}
+        <div className="row" style={{marginTop:10,gap:6}}>
+          <input className="input" placeholder="Add task… P0/P1/P2 prefix for priority" value={newTask}
+            onChange={e=>setNewTask(e.target.value)} onKeyDown={addTask} style={{fontSize:12}}/>
+          <button className="btn primary" onClick={()=>addTask({key:'Enter'})}><Icon name="plus" size={13}/></button>
+        </div>
+      </>)}
+
+      {/* ── Consumer Products Group ── */}
+      {tab === 'cpg' && (
+        <div style={{display:'flex',flexDirection:'column',gap:14}}>
+          {/* Links grid */}
+          <div>
+            <div className="muted-2 mono" style={{fontSize:10,letterSpacing:'.06em',marginBottom:6}}>QUICK ACCESS</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
+              {CPG_LINKS.map((l,i) => (
+                <a key={i} href={l.url} target="_blank" rel="noopener"
+                  style={{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',borderRadius:'var(--r)',
+                    textDecoration:'none',color:'var(--ink-2)',background:'var(--surface)',border:'1px solid var(--line)'}}>
+                  <Icon name={l.icon} size={13} style={{color:l.color,flexShrink:0}}/>
+                  <span style={{fontSize:12,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l.label}</span>
+                  <Icon name="external" size={11} style={{color:'var(--ink-4)'}}/>
+                </a>
+              ))}
+            </div>
+          </div>
+
+          {/* Revenue summary */}
+          <div>
+            <div className="muted-2 mono" style={{fontSize:10,letterSpacing:'.06em',marginBottom:6}}>REVENUE 2026</div>
+            {cpgRevenue.length === 0
+              ? <div className="muted" style={{fontSize:12}}>No CPG income logged yet</div>
+              : (<>
+                  <div style={{display:'flex',alignItems:'baseline',gap:8,marginBottom:8}}>
+                    <span className="mono" style={{fontSize:22,fontWeight:500}}>${cpgTotal.toFixed(0)}</span>
+                    <span className="muted-2 mono" style={{fontSize:11}}>total · {cpgRevenue.length} payments</span>
+                  </div>
+                  <div style={{display:'flex',flexDirection:'column',gap:3}}>
+                    {Object.entries(cpgByMonth).sort().map(([m,amt]) => (
+                      <div key={m} style={{display:'flex',alignItems:'center',gap:8}}>
+                        <span className="mono muted-2" style={{fontSize:10,width:52}}>{m}</span>
+                        <div style={{flex:1,height:4,background:'var(--surface-3)',borderRadius:2}}>
+                          <div style={{height:4,borderRadius:2,background:'var(--accent-2)',width:`${Math.min(100,(amt/Math.max(...Object.values(cpgByMonth)))*100)}%`}}/>
+                        </div>
+                        <span className="mono" style={{fontSize:11,color:'var(--accent-2)',width:44,textAlign:'right'}}>${amt.toFixed(0)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>)
+            }
+          </div>
+
+          {/* Notes / log */}
+          <div>
+            <div className="muted-2 mono" style={{fontSize:10,letterSpacing:'.06em',marginBottom:6}}>NOTES / LOG</div>
+            <textarea value={cpgNotes} onChange={e=>saveNotes(e.target.value)}
+              placeholder="Project notes, ideas, issues…"
+              style={{width:'100%',minHeight:80,background:'var(--surface)',border:'1px solid var(--line)',
+                borderRadius:'var(--r)',color:'var(--ink)',fontFamily:'var(--font-sans)',fontSize:12,
+                padding:'8px 10px',resize:'vertical',outline:'none',lineHeight:1.5}}/>
+          </div>
+        </div>
+      )}
+
+      {/* ── GLS Links ── */}
+      {tab === 'links' && (
         <div style={{display:'flex',flexDirection:'column',gap:2}}>
           <div className="muted-2 mono" style={{fontSize:10,letterSpacing:'.06em',padding:'2px 0 6px'}}>GLS TOOLS</div>
-          {WORK_LINKS.filter(l=>l.group==='GLS').map((l,i) => (
-            <a key={i} href={l.url} target="_blank" rel="noopener" style={{display:'flex',alignItems:'center',gap:10,padding:'8px 6px',borderRadius:'var(--r)',textDecoration:'none',color:'var(--ink-2)',borderBottom:'1px solid var(--line-soft)'}}>
+          {GLS_LINKS.map((l,i) => (
+            <a key={i} href={l.url} target="_blank" rel="noopener"
+              style={{display:'flex',alignItems:'center',gap:10,padding:'8px 6px',borderRadius:'var(--r)',
+                textDecoration:'none',color:'var(--ink-2)',borderBottom:'1px solid var(--line-soft)'}}>
               <Icon name={l.icon} size={14} style={{color:'var(--accent)',flexShrink:0}}/>
               <span style={{flex:1,fontSize:12.5}}>{l.label}</span>
               <Icon name="external" size={12} style={{color:'var(--ink-4)'}}/>
             </a>
           ))}
-          <div className="muted-2 mono" style={{fontSize:10,letterSpacing:'.06em',padding:'10px 0 6px'}}>CODE / GITHUB</div>
-          {WORK_LINKS.filter(l=>l.group==='Code').map((l,i) => (
-            <a key={i} href={l.url} target="_blank" rel="noopener" style={{display:'flex',alignItems:'center',gap:10,padding:'8px 6px',borderRadius:'var(--r)',textDecoration:'none',color:'var(--ink-2)',borderBottom:'1px solid var(--line-soft)'}}>
-              <Icon name={l.icon} size={14} style={{color:'var(--violet)',flexShrink:0}}/>
-              <span style={{flex:1,fontSize:12.5}}>{l.label}</span>
-              <Icon name="external" size={12} style={{color:'var(--ink-4)'}}/>
-            </a>
-          ))}
         </div>
-      ) : (<>
-        {Object.entries(byProject).map(([proj, ptasks]) => (
-          <div key={proj} style={{marginBottom:8}}>
-            <div className="muted-2 mono" style={{fontSize:10,letterSpacing:'.06em',padding:'4px 0 2px',textTransform:'uppercase'}}>{proj}</div>
-            {ptasks.map((t) => (
-              <div key={t.id} style={{display:"grid",gridTemplateColumns:"22px 1fr auto",gap:"4px 8px",alignItems:"start",padding:"5px 4px",borderRadius:"var(--r)"}}>
-                <Checkbox checked={false} onClick={()=>toggle(t.id)}/>
-                <div>
-                  <div style={{fontSize:12.5,lineHeight:1.35}}>{t.label||t.title}</div>
-                  {t.notes && <div className="muted-2 mono" style={{fontSize:10,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.notes}</div>}
-                </div>
-                <span className={"tag "+pcolor(t.priority)} style={{fontSize:10}}>{t.priority}</span>
-              </div>
-            ))}
-          </div>
-        ))}
-        {tasks.length===0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 0',textAlign:'center'}}>No open tasks 🎉</div>}
-        <div className="row" style={{marginTop:10,gap:6}}>
-          <input className="input" placeholder={tab==='code'?"Add task… (e.g. 'Fix login P1')":"Add GLS task…"} value={newTask}
-            onChange={e=>setNewTask(e.target.value)} onKeyDown={addTask} style={{fontSize:12}}/>
-          <button className="btn primary" onClick={()=>addTask({key:'Enter'})}><Icon name="plus" size={13}/></button>
-        </div>
-      </>)}
+      )}
     </Card>
   );
 };
