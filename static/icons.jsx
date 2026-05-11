@@ -42,6 +42,8 @@ const Icon = ({ name, size = 16, stroke = 1.6, ...rest }) => {
     case "phone":       return (<svg {...common}><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.7A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .3 2 .6 3a2 2 0 0 1-.5 2L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2-.4c1 .3 2 .5 3 .6a2 2 0 0 1 1.7 2z"/></svg>);
     case "flag":        return (<svg {...common}><path d="M4 22V4M4 4h14l-3 5 3 5H4"/></svg>);
     case "trending-up": return (<svg {...common}><path d="m22 7-8.5 8.5-5-5L2 17M16 7h6v6"/></svg>);
+    case "mic":         return (<svg {...common}><path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8"/></svg>);
+    case "loader":      return (<svg {...common} style={{animation:"spin .9s linear infinite",...(rest.style||{})}}><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>);
     default:            return (<svg {...common}><circle cx="12" cy="12" r="9"/></svg>);
   }
 };

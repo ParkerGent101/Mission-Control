@@ -43,6 +43,7 @@ READING_FILE     = DATA_DIR / "reading.json"
 GAMING_FILE      = DATA_DIR / "gaming.json"
 HOLIDAYS_FILE    = DATA_DIR / "holidays.json"
 JOURNAL_FILE     = DATA_DIR / "journal.json"
+BRIEF_FILE       = DATA_DIR / "brief.json"
 
 GCAL_SCOPES    = ['https://www.googleapis.com/auth/calendar.readonly']
 GCAL_CREDS_FILE = Path(__file__).parent / "credentials.json"
@@ -713,6 +714,81 @@ def talk():
         return jsonify({"reply": reply})
     except Exception as e:
         return jsonify({"reply": f"Error: {e}"}), 500
+
+# ── Morning Brief ─────────────────────────────────────────────────────────────
+
+@app.route("/api/brief")
+def get_brief():
+    today = datetime.now().date().isoformat()
+    if BRIEF_FILE.exists():
+        cached = _load(BRIEF_FILE, {})
+        if cached.get("date") == today:
+            return jsonify(cached)
+
+    today_dt = datetime.now().date()
+    agenda_today = [i for i in _load(AGENDA_FILE) if i.get("date") == today and not i.get("done")]
+    work_high = [t for t in _load(WORK_FILE) if not t.get("done") and t.get("priority") == "high"][:3]
+
+    trip_lines = []
+    for h in _load(HOLIDAYS_FILE):
+        try:
+            days_out = (datetime.strptime(h["start"], "%Y-%m-%d").date() - today_dt).days
+            if -7 <= days_out <= 60:
+                label = f"{h['name']}: in progress" if days_out < 0 else f"{h['name']}: today" if days_out == 0 else f"{h['name']} in {days_out}d"
+                trip_lines.append(label)
+        except Exception:
+            pass
+
+    health = _load(HEALTH_FILE)
+    habits = [h.get("label", h.get("id", "")) for h in health.get("habit_list", [])][:4]
+
+    context = (
+        f"Today is {today} ({datetime.now().strftime('%A')}).\n"
+        f"Agenda: {', '.join(i['label'] for i in agenda_today) or 'nothing scheduled'}\n"
+        f"High priority work: {', '.join(t['title'] for t in work_high) or 'none'}\n"
+        f"Trips: {', '.join(trip_lines) or 'none upcoming'}\n"
+        f"Daily habits: {', '.join(habits)}"
+    )
+
+    try:
+        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=150,
+            system="You are Mission Control. Write a 1-2 sentence morning brief for Parker. Be specific and direct — mention what's on today and what matters most. No greeting, no sign-off, no emojis.",
+            messages=[{"role": "user", "content": context}]
+        )
+        text = resp.content[0].text
+    except Exception as e:
+        text = f"Good morning, Parker. {', '.join(i['label'] for i in agenda_today[:2]) or 'Clear schedule today'}."
+
+    result = {"date": today, "text": text}
+    _save(BRIEF_FILE, result)
+    return jsonify(result)
+
+# ── Today Hub ──────────────────────────────────────────────────────────────────
+
+@app.route("/api/today")
+def get_today():
+    today = datetime.now().date().isoformat()
+    today_dt = datetime.now().date()
+
+    agenda = [i for i in _load(AGENDA_FILE) if i.get("date") == today]
+    health = _load(HEALTH_FILE)
+    habits_today = health.get("habits", {}).get(today, {})
+    habit_list = health.get("habit_list", [])
+    work = [t for t in _load(WORK_FILE) if not t.get("done") and t.get("priority") == "high"][:5]
+
+    trips = []
+    for h in _load(HOLIDAYS_FILE):
+        try:
+            days_out = (datetime.strptime(h["start"], "%Y-%m-%d").date() - today_dt).days
+            if -7 <= days_out <= 30:
+                trips.append({**h, "days_out": days_out})
+        except Exception:
+            pass
+
+    return jsonify({"agenda": agenda, "habits": {"today": habits_today, "list": habit_list}, "work_priority": work, "trips": trips})
 
 # ── Agenda ─────────────────────────────────────────────────────────────────────
 

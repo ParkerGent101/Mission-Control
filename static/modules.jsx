@@ -1455,7 +1455,124 @@ const TalkCard = () => {
   );
 };
 
+// ── Today Hub ────────────────────────────────────────────────────────────────
+const TodayHub = () => {
+  const [data, setData] = React.useState(null);
+  const today = new Date().toISOString().slice(0, 10);
+
+  const load = () => fetch('/api/today').then(r => r.json()).then(setData).catch(() => {});
+
+  React.useEffect(() => {
+    load();
+    window.addEventListener('mc:refresh', load);
+    return () => window.removeEventListener('mc:refresh', load);
+  }, []);
+
+  if (!data) return null;
+
+  const { agenda, habits, work_priority, trips } = data;
+  const habitsToday = habits.today || {};
+  const habitList = habits.list || [];
+  const doneCount = habitList.filter(h => habitsToday[h.id]).length;
+
+  const toggleHabit = async (hid) => {
+    await fetch('/api/health/habit', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({habit: hid, date: today})
+    }).catch(() => {});
+    setData(d => ({...d, habits: {...d.habits, today: {...d.habits.today, [hid]: !habitsToday[hid]}}}));
+  };
+
+  return (
+    <Card num="00" title="Today" span={12} right={
+      <span className="muted mono" style={{fontSize:11}}>
+        {new Date().toLocaleDateString('en-US', {weekday:'long', month:'short', day:'numeric'})}
+      </span>
+    }>
+      <div className="today-grid">
+        {/* Schedule */}
+        <div>
+          <div className="section-h"><span>Schedule</span><span className="line"/></div>
+          {agenda.length === 0
+            ? <div className="muted" style={{fontSize:12,padding:'6px 0'}}>Nothing scheduled today</div>
+            : agenda.map(item => (
+              <div key={item.id} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0',borderBottom:'1px solid var(--line-soft)'}}>
+                <span className="mono muted-2" style={{fontSize:10.5,width:34,flexShrink:0}}>{item.time}</span>
+                <span style={{flex:1,fontSize:12}}>{item.label}</span>
+                {item.tag && <span className="tag">{item.tag}</span>}
+              </div>
+            ))
+          }
+        </div>
+
+        {/* Habits */}
+        <div>
+          <div className="section-h">
+            <span>Habits</span>
+            <span className="muted-2 mono" style={{fontSize:10}}>{doneCount}/{habitList.length}</span>
+            <span className="line"/>
+          </div>
+          {habitList.map(h => {
+            const done = !!habitsToday[h.id];
+            return (
+              <div key={h.id} onClick={() => toggleHabit(h.id)}
+                style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0',cursor:'pointer',borderBottom:'1px solid var(--line-soft)'}}>
+                <span style={{
+                  width:15, height:15, borderRadius:3, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center',
+                  border: `1.5px solid ${done ? 'var(--accent-2)' : 'var(--line)'}`,
+                  background: done ? 'color-mix(in oklch,var(--accent-2) 20%,transparent)' : 'transparent'
+                }}>
+                  {done && <Icon name="check" size={9} style={{color:'var(--accent-2)'}}/>}
+                </span>
+                <span style={{fontSize:12, color: done ? 'var(--ink-3)' : 'var(--ink)', textDecoration: done ? 'line-through' : 'none'}}>
+                  {h.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Priority work + trips */}
+        <div>
+          {work_priority.length > 0 && <>
+            <div className="section-h"><span>Priority</span><span className="line"/></div>
+            {work_priority.map(t => (
+              <div key={t.id} style={{padding:'3px 0', borderBottom:'1px solid var(--line-soft)'}}>
+                <div style={{display:'flex',alignItems:'center',gap:6}}>
+                  <span className="dot red" style={{width:5,height:5,flexShrink:0}}/>
+                  <span style={{fontSize:12}}>{t.title}</span>
+                </div>
+                {t.project && <div className="muted-2 mono" style={{fontSize:10,paddingLeft:11}}>{t.project}</div>}
+              </div>
+            ))}
+          </>}
+          {trips.length > 0 && <>
+            <div className="section-h" style={{marginTop: work_priority.length > 0 ? 14 : 0}}>
+              <span>Trips</span><span className="line"/>
+            </div>
+            {trips.map(trip => (
+              <div key={trip.id} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0'}}>
+                <Icon name="plane" size={12} style={{color:'var(--accent)',flexShrink:0}}/>
+                <span style={{fontSize:12,flex:1}}>{trip.name}</span>
+                <span className="mono muted" style={{fontSize:11}}>
+                  {trip.days_out < 0 ? 'in progress' : trip.days_out === 0 ? 'today!' : `${trip.days_out}d`}
+                </span>
+              </div>
+            ))}
+          </>}
+          {work_priority.length === 0 && trips.length === 0 && (
+            <div>
+              <div className="section-h"><span>Status</span><span className="line"/></div>
+              <div className="muted" style={{fontSize:12,padding:'6px 0'}}>All clear — nothing urgent.</div>
+            </div>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+};
+
 window.MissionModules = {
   TalkCard, AgendaCard, FinanceCard, BandCard, HealthCard, WorkCard,
-  StudyCard, ReadingCard, HolidayCard, JournalCard
+  StudyCard, ReadingCard, HolidayCard, JournalCard, TodayHub
 };

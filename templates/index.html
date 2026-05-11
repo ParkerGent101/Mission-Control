@@ -789,6 +789,78 @@
   .toast-success { border-color: color-mix(in oklch, var(--accent-2) 45%, var(--line)); color: var(--accent-2); }
   .toast-error   { border-color: color-mix(in oklch, var(--danger) 45%, var(--line)); color: var(--danger); }
   @keyframes toastIn { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ─── Talk bar ──────────────────────────────────────────────── */
+  .talk-bar {
+    position: fixed;
+    bottom: 32px;
+    left: calc(var(--sidebar-w, 224px) + 20px);
+    right: 20px;
+    z-index: 95;
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 8px 7px 12px;
+    background: color-mix(in oklch, var(--surface-2) 92%, transparent);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 6px 28px rgba(0,0,0,.45);
+    backdrop-filter: blur(10px);
+  }
+  .talk-bar-input {
+    flex: 1; min-width: 0;
+    background: transparent; border: none; outline: none;
+    font-family: var(--font-sans); font-size: 13px; color: var(--ink);
+    padding: 0 4px;
+  }
+  .talk-bar-input::placeholder { color: var(--ink-4); }
+  .talk-bar-btn {
+    width: 28px; height: 28px; flex-shrink: 0;
+    border-radius: var(--r); border: 1px solid var(--line);
+    background: var(--surface-3); color: var(--ink-3);
+    display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: all .1s;
+  }
+  .talk-bar-btn:hover:not(:disabled) { background: var(--surface-3); color: var(--ink); border-color: var(--surface-3); }
+  .talk-bar-btn.accent {
+    background: color-mix(in oklch, var(--accent) 15%, var(--surface-2));
+    border-color: color-mix(in oklch, var(--accent) 35%, var(--line));
+    color: var(--accent);
+  }
+  .talk-bar-btn.accent:hover:not(:disabled) { background: color-mix(in oklch, var(--accent) 25%, var(--surface-2)); }
+  .talk-bar-btn:disabled { opacity: .35; cursor: default; }
+  .talk-bar-btn.listening { color: var(--danger); border-color: color-mix(in oklch, var(--danger) 40%, var(--line)); }
+
+  /* ─── Morning brief banner ──────────────────────────────────── */
+  .brief-banner {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 12px;
+    background: color-mix(in oklch, var(--accent) 7%, var(--surface));
+    border: 1px solid color-mix(in oklch, var(--accent) 22%, var(--line));
+    border-radius: var(--r);
+    font-size: 13px; line-height: 1.5;
+  }
+  .brief-text { flex: 1; color: var(--ink-2); }
+  .brief-x {
+    background: transparent; border: none; cursor: pointer; padding: 2px;
+    color: var(--ink-4); border-radius: var(--r-sm);
+    display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .brief-x:hover { color: var(--ink); background: var(--surface-2); }
+
+  /* ─── Today hub ─────────────────────────────────────────────── */
+  .today-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+  }
+
+  @media (max-width: 768px) {
+    .talk-bar { bottom: 64px; left: 8px; right: 8px; }
+    main { padding-bottom: 120px !important; }
+    .today-grid { grid-template-columns: 1fr; }
+    .finance-body { grid-template-columns: 1fr !important; }
+  }
 </style>
 </head>
 <body>

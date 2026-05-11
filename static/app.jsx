@@ -1,6 +1,66 @@
 /* Mission Control — App shell */
 const { useState: useStateApp, useEffect: useEffectApp } = React;
 
+const TalkBar = ({ onNavigate }) => {
+  const [val, setVal] = useStateApp('');
+  const [busy, setBusy] = useStateApp(false);
+  const [listening, setListening] = useStateApp(false);
+
+  const submit = async (text) => {
+    const t = (text || '').trim();
+    if (!t || busy) return;
+    setBusy(true);
+    try {
+      const r = await fetch('/api/talk', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text: t})
+      });
+      const d = await r.json();
+      const raw = d.reply || '';
+      let parsed = null;
+      try { parsed = JSON.parse(raw); } catch {}
+      const msg = parsed?.summary || parsed?.reply || raw;
+      if (window.__toast) window.__toast(msg.slice(0, 90), 'success');
+      if (parsed?.module && onNavigate) onNavigate(parsed.module);
+      window.dispatchEvent(new CustomEvent('mc:refresh', {detail: {module: parsed?.module}}));
+    } catch {
+      if (window.__toast) window.__toast('Could not reach Mission Control', 'error');
+    }
+    setVal('');
+    setBusy(false);
+  };
+
+  const startVoice = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { window.__toast?.('Voice input not supported in this browser', 'error'); return; }
+    const rec = new SR();
+    rec.lang = 'en-US'; rec.interimResults = false; rec.maxAlternatives = 1;
+    rec.onstart = () => setListening(true);
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+    rec.onresult = (e) => { const t = e.results[0][0].transcript; setVal(t); submit(t); };
+    rec.start();
+  };
+
+  return (
+    <div className="talk-bar">
+      <Icon name="sparkles" size={13} style={{color: 'var(--accent)', flexShrink: 0}}/>
+      <input className="talk-bar-input" placeholder="Tell Mission Control anything…"
+        value={val} onChange={e => setVal(e.target.value)}
+        onKeyDown={e => e.key === 'Enter' && !e.shiftKey && submit(val)}
+        disabled={busy}/>
+      <button className={"talk-bar-btn" + (listening ? " listening" : "")}
+        onClick={startVoice} disabled={busy} title="Voice input">
+        <Icon name={listening ? "x" : "mic"} size={13}/>
+      </button>
+      <button className="talk-bar-btn accent" onClick={() => submit(val)}
+        disabled={busy || !val.trim()} title="Send">
+        <Icon name={busy ? "loader" : "send"} size={13}/>
+      </button>
+    </div>
+  );
+};
+
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "accent": "#e0a857",
   "density": "balanced",
@@ -50,6 +110,17 @@ const App = () => {
   const [now, setNow] = useStateApp(new Date());
   const [toasts, setToasts] = useStateApp([]);
   const [showSheet, setShowSheet] = useStateApp(false);
+  const [brief, setBrief] = useStateApp(null);
+  const [briefDismissed, setBriefDismissed] = useStateApp(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return localStorage.getItem('brief_dismissed') === today;
+  });
+
+  useEffectApp(() => {
+    if (!briefDismissed) {
+      fetch('/api/brief').then(r => r.json()).then(setBrief).catch(() => {});
+    }
+  }, [briefDismissed]);
 
   useEffectApp(() => {
     window.__toast = (msg, type = "success") => {
@@ -86,6 +157,11 @@ const App = () => {
     } else if (c.action.startsWith("go:")) {
       setActive(c.action.split(":")[1]);
     }
+  };
+
+  const dismissBrief = () => {
+    localStorage.setItem('brief_dismissed', new Date().toISOString().slice(0, 10));
+    setBriefDismissed(true);
   };
 
   const logout = async () => {
@@ -185,6 +261,14 @@ const App = () => {
         </div>
         {active === "dashboard" ? (
           <div className="grid">
+            {brief && !briefDismissed && (
+              <div className="brief-banner span-12">
+                <Icon name="sparkles" size={13} style={{color:'var(--accent)',flexShrink:0,marginTop:1}}/>
+                <span className="brief-text">{brief.text}</span>
+                <button className="brief-x" onClick={dismissBrief}><Icon name="x" size={11}/></button>
+              </div>
+            )}
+            <M.TodayHub />
             {cards.map((c) => (
               <React.Fragment key={c.id}>
                 {t.modules[c.id] !== false && c.el}
@@ -264,10 +348,12 @@ const App = () => {
         </div>
       )}
 
+      <TalkBar onNavigate={setActive}/>
+
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onAction={onAction} />
 
       {toasts.length > 0 && (
-        <div style={{ position:"fixed", bottom:72, right:16, display:"flex", flexDirection:"column", gap:6, zIndex:200, pointerEvents:"none" }}>
+        <div style={{ position:"fixed", bottom:120, right:16, display:"flex", flexDirection:"column", gap:6, zIndex:200, pointerEvents:"none" }}>
           {toasts.map(t => (
             <div key={t.id} className={`toast toast-${t.type}`}>{t.msg}</div>
           ))}
