@@ -1,0 +1,46 @@
+{
+  "habits": {
+    "2026-05-09": {
+      "workout": true,
+      "water": true,
+      "flea_medicine": false,
+      "guitar_practice": true
+    },
+    "2026-05-10": {
+      "workout": false,
+      "water": false,
+      "flea_medicine": false,
+      "guitar_practice": false,
+      "Lift": true,
+      "Sleep 7h": true
+    }
+  },
+  "weight": {
+    "2026-05-09": 185.0
+  },
+  "calories": {
+    "2026-05-09": {
+      "goal": 2200,
+      "consumed": 1950,
+      "burned": 320
+    }
+  },
+  "habit_list": [
+    {
+      "id": "workout",
+      "label": "Workout"
+    },
+    {
+      "id": "water",
+      "label": "Water (64oz)"
+    },
+    {
+      "id": "guitar_practice",
+      "label": "Guitar practice"
+    },
+    {
+      "id": "flea_medicine",
+      "label": "Dog flea meds"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+[
+  {"id": 1, "title": "ASR conditional access policies — audit then switch to block mode", "project": "GLS Security", "priority": "high", "done": false, "created": "2026-05-01"},
+  {"id": 2, "title": "Ian MFA enrollment on Rightworks", "project": "GLS IT", "priority": "high", "done": false, "created": "2026-05-08"},
+  {"id": 3, "title": "SharePoint permissions audit Q2", "project": "GLS IT", "priority": "normal", "done": false, "created": "2026-05-05"},
+  {"id": 4, "title": "MDM policy review — new device enrollment flow", "project": "GLS IT", "priority": "normal", "done": false, "created": "2026-05-03"},
+  {"id": 5, "title": "Vendor renewal — review Rightworks pricing", "project": "GLS Admin", "priority": "low", "done": false, "created": "2026-05-06"}
+]

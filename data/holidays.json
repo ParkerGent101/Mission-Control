@@ -1,0 +1,16 @@
+{
+  "trips": [
+    {
+      "id": 1,
+      "destination": "Nashville, TN",
+      "dates": "2026-07-18 – 2026-07-21",
+      "notes": "Music City — band scouting + personal trip",
+      "checklist": [
+        {"label": "Book hotel", "done": false},
+        {"label": "Buy concert tickets", "done": false},
+        {"label": "Pack guitar", "done": false},
+        {"label": "Research venues", "done": true}
+      ]
+    }
+  ]
+}

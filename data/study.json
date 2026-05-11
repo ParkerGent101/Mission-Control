@@ -1,0 +1,18 @@
+{
+  "exam": "CISM",
+  "target_date": "2026-09-01",
+  "total_hours": 12.5,
+  "domains": [
+    {"id": 1, "name": "Information Security Governance", "progress": 65, "questions_done": 42, "questions_total": 80},
+    {"id": 2, "name": "Information Risk Management", "progress": 40, "questions_done": 28, "questions_total": 70},
+    {"id": 3, "name": "Information Security Program", "progress": 20, "questions_done": 12, "questions_total": 60},
+    {"id": 4, "name": "Incident Management", "progress": 10, "questions_done": 6, "questions_total": 50}
+  ],
+  "sessions": [
+    {"date": "2026-05-01", "minutes": 90, "topic": "Domain 1 — Governance frameworks"},
+    {"date": "2026-05-04", "minutes": 75, "topic": "Domain 1 — Board reporting"},
+    {"date": "2026-05-07", "minutes": 60, "topic": "Domain 2 — Risk assessment methods"},
+    {"date": "2026-05-09", "minutes": 45, "topic": "Domain 2 — Risk treatment"}
+  ],
+  "practice_scores": [62, 68, 71, 74, 70, 76]
+}

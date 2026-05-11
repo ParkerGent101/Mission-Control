@@ -1,0 +1,10 @@
+.env
+token.json
+credentials.json
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+data/finances.json
+data/tasks.json
+data/reminders.json

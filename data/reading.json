@@ -1,0 +1,32 @@
+[
+  {
+    "id": 1,
+    "title": "The CISM Review Manual",
+    "author": "ISACA",
+    "total_pages": 420,
+    "current_page": 180,
+    "status": "reading",
+    "last_read": "2026-05-09",
+    "category": "study"
+  },
+  {
+    "id": 2,
+    "title": "The Manager's Path",
+    "author": "Camille Fournier",
+    "total_pages": 244,
+    "current_page": 98,
+    "status": "reading",
+    "last_read": "2026-05-07",
+    "category": "work"
+  },
+  {
+    "id": 3,
+    "title": "Atomic Habits",
+    "author": "James Clear",
+    "total_pages": 320,
+    "current_page": 320,
+    "status": "done",
+    "last_read": "2026-04-20",
+    "category": "personal"
+  }
+]

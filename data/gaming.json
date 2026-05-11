@@ -1,0 +1,19 @@
+{
+  "current": [
+    {"id": 1, "title": "Elden Ring", "platform": "PC", "hours": 42, "status": "playing", "progress": "Mountaintops of Giants"}
+  ],
+  "backlog": [
+    {"id": 2, "title": "Baldur's Gate 3", "platform": "PC", "added": "2026-04-01"},
+    {"id": 3, "title": "Cyberpunk 2077", "platform": "PC", "added": "2026-03-15"},
+    {"id": 4, "title": "Hades II", "platform": "PC", "added": "2026-05-01"}
+  ],
+  "completed": [
+    {"id": 5, "title": "God of War: Ragnarök", "platform": "PS5", "hours": 38, "completed": "2026-03-01"},
+    {"id": 6, "title": "Hollow Knight", "platform": "PC", "hours": 52, "completed": "2026-01-15"}
+  ],
+  "recent_sessions": [
+    {"date": "2026-05-09", "game": "Elden Ring", "minutes": 90},
+    {"date": "2026-05-07", "game": "Elden Ring", "minutes": 120},
+    {"date": "2026-05-05", "game": "Elden Ring", "minutes": 60}
+  ]
+}
