@@ -1,5 +1,7 @@
 import os
-os.environ.setdefault("GIT_PYTHON_GIT_EXECUTABLE", r"C:\Program Files\Git\cmd\git.exe")
+os.environ.setdefault("GIT_PYTHON_REFRESH", "quiet")
+if os.name == "nt":
+    os.environ.setdefault("GIT_PYTHON_GIT_EXECUTABLE", r"C:\Program Files\Git\cmd\git.exe")
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
 from datetime import datetime, timedelta
