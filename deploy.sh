@@ -9,7 +9,7 @@
 
 set -e
 
-PROJECT_ID="YOUR_PROJECT_ID_HERE"
+PROJECT_ID="mission-control-496004"
 REGION="us-central1"
 SERVICE="mission-control"
 BUCKET="parker-mission-control-data"
