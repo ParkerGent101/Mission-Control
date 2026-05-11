@@ -36,12 +36,20 @@ const MOBILE_NAV = [
   { id: "finance",   icon: "wallet",    label: "Finance" },
 ];
 
+const MODULE_LABELS = [
+  ["talk","Talk","sparkles"],["agenda","Today","calendar"],["finance","Finance","wallet"],
+  ["band","Band","music"],["health","Health","heart"],["work","Work","briefcase"],
+  ["study","Study","graduation"],["reading","Reading","book"],
+  ["holidays","Travel","plane"],["journal","Journal","feather"],
+];
+
 const App = () => {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [active, setActive] = useStateApp("dashboard");
   const [cmdOpen, setCmdOpen] = useStateApp(false);
   const [now, setNow] = useStateApp(new Date());
   const [toasts, setToasts] = useStateApp([]);
+  const [showSheet, setShowSheet] = useStateApp(false);
 
   useEffectApp(() => {
     window.__toast = (msg, type = "success") => {
@@ -213,11 +221,48 @@ const App = () => {
             <span>{n.label}</span>
           </div>
         ))}
-        <div className="mobile-nav-item" onClick={() => setCmdOpen(true)}>
-          <Icon name="search" size={20}/>
-          <span>Search</span>
+        <div className="mobile-nav-item" onClick={() => setShowSheet(true)}>
+          <Icon name="more" size={20}/>
+          <span>More</span>
         </div>
       </nav>
+
+      {/* Mobile bottom sheet */}
+      {showSheet && (
+        <div className="sheet-overlay" onClick={() => setShowSheet(false)}>
+          <div className="sheet" onClick={e => e.stopPropagation()}>
+            <div className="sheet-handle"/>
+            <div className="sheet-section-label">Go to</div>
+            <div className="sheet-nav-grid">
+              {SIDEBAR_NAV.map(n => (
+                <div key={n.id} className={"sheet-nav-item" + (active === n.id ? " active" : "")}
+                  onClick={() => { setActive(n.id); setShowSheet(false); }}>
+                  <Icon name={n.icon} size={15} style={{color:"var(--accent)",flexShrink:0}}/>
+                  <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:12}}>{n.label}</span>
+                </div>
+              ))}
+            </div>
+            <div className="sheet-section-label">Show on dashboard</div>
+            <div className="module-grid">
+              {MODULE_LABELS.map(([k, label, icon]) => (
+                <div key={k} className={"module-tile" + (t.modules[k] !== false ? " enabled" : "")}
+                  onClick={() => setTweak("modules", { ...t.modules, [k]: t.modules[k] === false })}>
+                  <Icon name={icon} size={16}/>
+                  <span>{label}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{display:'flex',gap:8,marginTop:4}}>
+              <button className="btn" style={{flex:1}} onClick={() => { setCmdOpen(true); setShowSheet(false); }}>
+                <Icon name="search" size={13}/>Search ⌘K
+              </button>
+              <button className="btn" style={{flex:1}} onClick={() => { window.postMessage({type:"__activate_edit_mode"},"*"); setShowSheet(false); }}>
+                <Icon name="settings" size={13}/>Full settings
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onAction={onAction} />
 

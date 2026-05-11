@@ -236,59 +236,170 @@ def tool_financial_summary(category=None):
     lines.append(f"  {'TOTAL':<12} in:${gi:>8.2f}  out:${ge:>8.2f}  net:${gi-ge:>8.2f}")
     return "\n".join(lines)
 
+# ── Agenda tools ──────────────────────────────────────────────────────────────
+
+def tool_add_agenda_item(label, time="09:00", tag="Personal", date=""):
+    items = _load(AGENDA_FILE)
+    aid = max((a["id"] for a in items), default=0) + 1
+    items.append({"id": aid, "time": time, "label": label, "tag": tag, "done": False,
+                  "date": date or datetime.now().strftime("%Y-%m-%d")})
+    _save(AGENDA_FILE, items)
+    return f"Agenda item added: {label} at {time}"
+
+# ── Work tasks (GLS/Code) ──────────────────────────────────────────────────────
+
+def tool_add_work_task(title, project="", priority="normal", notes=""):
+    items = _load(WORK_FILE)
+    wid = max((w["id"] for w in items), default=0) + 1
+    items.append({"id": wid, "title": title, "project": project, "priority": priority,
+                  "done": False, "notes": notes, "created": datetime.now().strftime("%Y-%m-%d")})
+    _save(WORK_FILE, items)
+    return f"Work task #{wid} added: {title} [{project or 'GLS'}]"
+
+# ── Reading tools ──────────────────────────────────────────────────────────────
+
+def tool_log_reading_page(page):
+    reading = _load(READING_FILE)
+    if not isinstance(reading, dict) or not reading.get("current"):
+        return "No current book to update."
+    reading["current"]["page"] = int(page)
+    reading["current"]["last_read"] = datetime.now().strftime("%Y-%m-%d")
+    _save(READING_FILE, reading)
+    title = reading["current"].get("title", "current book")
+    total = reading["current"].get("total_pages", 0)
+    pct = round((int(page) / total) * 100) if total else 0
+    return f"Reading updated: {title} → p.{page}/{total} ({pct}%)"
+
+# ── Study tools ────────────────────────────────────────────────────────────────
+
+def tool_log_study_session(minutes, topic="", date=""):
+    study = _load(STUDY_FILE)
+    if not isinstance(study, dict):
+        study = {}
+    sessions = study.setdefault("sessions", [])
+    sessions.append({"date": date or datetime.now().strftime("%Y-%m-%d"), "minutes": int(minutes), "topic": topic})
+    study["total_hours"] = round(sum(s.get("minutes", 0) for s in sessions) / 60, 1)
+    _save(STUDY_FILE, study)
+    cert = study.get("cert", "CISM")
+    return f"Study: {minutes}min{f' — {topic}' if topic else ''}. {cert} total: {study['total_hours']}h"
+
+def tool_log_practice_score(score):
+    study = _load(STUDY_FILE)
+    if not isinstance(study, dict):
+        study = {}
+    study.setdefault("practice_scores", []).append(int(score))
+    _save(STUDY_FILE, study)
+    return f"Practice score {score}% logged"
+
+# ── Health tools ───────────────────────────────────────────────────────────────
+
+def tool_log_weight(weight, date=""):
+    health = _load(HEALTH_FILE)
+    if not isinstance(health, dict):
+        health = {"habits": {}, "weight": {}, "calories": {}}
+    health.setdefault("weight", {})[date or datetime.now().strftime("%Y-%m-%d")] = float(weight)
+    _save(HEALTH_FILE, health)
+    return f"Weight logged: {weight} lb"
+
+def tool_log_calories(consumed, burned=0, date=""):
+    health = _load(HEALTH_FILE)
+    if not isinstance(health, dict):
+        health = {"habits": {}, "weight": {}, "calories": {}}
+    d = date or datetime.now().strftime("%Y-%m-%d")
+    cal = health.setdefault("calories", {}).setdefault(d, {})
+    cal["consumed"] = int(consumed)
+    if burned:
+        cal["burned"] = int(burned)
+    _save(HEALTH_FILE, health)
+    return f"Calories: {consumed} in{f', {burned} burned' if burned else ''}"
+
+# ── Journal tools ──────────────────────────────────────────────────────────────
+
+def tool_add_journal_entry(body, date=""):
+    entries = _load(JOURNAL_FILE)
+    eid = max((e.get("id", 0) for e in entries), default=0) + 1
+    entries.append({"id": eid, "date": date or datetime.now().strftime("%Y-%m-%d"), "body": body})
+    _save(JOURNAL_FILE, entries)
+    return f"Journal entry saved ({len(body.split())} words)"
+
 # ── Tool dispatch ──────────────────────────────────────────────────────────────
 
 TOOL_MAP = {
-    "list_shows":         lambda i: tool_list_shows(),
-    "add_show":           lambda i: tool_add_show(**i),
-    "remove_show":        lambda i: tool_remove_show(i["index"]),
-    "add_video":          lambda i: tool_add_video(**i),
-    "push_site":          lambda i: tool_push_site(i.get("message", "Update site content")),
-    "list_reminders":     lambda i: tool_list_reminders(),
-    "add_reminder":       lambda i: tool_add_reminder(**i),
-    "snooze_reminder":    lambda i: tool_snooze_reminder(i["reminder_id"]),
-    "add_task":           lambda i: tool_add_task(**i),
-    "complete_task":      lambda i: tool_complete_task(i["task_id"]),
-    "list_tasks":         lambda i: tool_list_tasks(i.get("role"), i.get("show_done", False)),
-    "add_transaction":    lambda i: tool_add_transaction(**i),
-    "financial_summary":  lambda i: tool_financial_summary(i.get("category")),
+    "list_shows":           lambda i: tool_list_shows(),
+    "add_show":             lambda i: tool_add_show(**i),
+    "remove_show":          lambda i: tool_remove_show(i["index"]),
+    "add_video":            lambda i: tool_add_video(**i),
+    "push_site":            lambda i: tool_push_site(i.get("message", "Update site content")),
+    "list_reminders":       lambda i: tool_list_reminders(),
+    "add_reminder":         lambda i: tool_add_reminder(**i),
+    "snooze_reminder":      lambda i: tool_snooze_reminder(i["reminder_id"]),
+    "add_task":             lambda i: tool_add_task(**i),
+    "complete_task":        lambda i: tool_complete_task(i["task_id"]),
+    "list_tasks":           lambda i: tool_list_tasks(i.get("role"), i.get("show_done", False)),
+    "add_transaction":      lambda i: tool_add_transaction(**i),
+    "financial_summary":    lambda i: tool_financial_summary(i.get("category")),
+    "add_agenda_item":      lambda i: tool_add_agenda_item(**i),
+    "add_work_task":        lambda i: tool_add_work_task(**i),
+    "log_reading_page":     lambda i: tool_log_reading_page(i["page"]),
+    "log_study_session":    lambda i: tool_log_study_session(i["minutes"], i.get("topic",""), i.get("date","")),
+    "log_practice_score":   lambda i: tool_log_practice_score(i["score"]),
+    "log_weight":           lambda i: tool_log_weight(i["weight"], i.get("date","")),
+    "log_calories":         lambda i: tool_log_calories(i["consumed"], i.get("burned",0), i.get("date","")),
+    "add_journal_entry":    lambda i: tool_add_journal_entry(i["body"], i.get("date","")),
 }
 
 TOOLS = [
-    {"name":"list_shows","description":"List all shows in the band website","input_schema":{"type":"object","properties":{}}},
-    {"name":"add_show","description":"Add a show to the Coming Up Aces website","input_schema":{"type":"object","properties":{"date":{"type":"string","description":"YYYY-MM-DD"},"event":{"type":"string"},"venue":{"type":"string"},"city":{"type":"string","description":"City, State"},"tickets":{"type":"string"},"notes":{"type":"string"}},"required":["date","event","venue","city"]}},
-    {"name":"remove_show","description":"Remove a show by index (list_shows first)","input_schema":{"type":"object","properties":{"index":{"type":"integer"}},"required":["index"]}},
-    {"name":"add_video","description":"Add a YouTube or Google Drive video to the band site","input_schema":{"type":"object","properties":{"title":{"type":"string"},"url":{"type":"string"},"date":{"type":"string"}},"required":["title","url"]}},
-    {"name":"push_site","description":"Git commit and push band site so it goes live on comingupaces.net","input_schema":{"type":"object","properties":{"message":{"type":"string"}}}},
-    {"name":"list_reminders","description":"List all reminders with days until due","input_schema":{"type":"object","properties":{}}},
-    {"name":"add_reminder","description":"Add a reminder — one-time or recurring","input_schema":{"type":"object","properties":{"title":{"type":"string"},"due_date":{"type":"string","description":"YYYY-MM-DD"},"category":{"type":"string","enum":["personal","IT","band","coding","learning","shopping"]},"reminder_type":{"type":"string","enum":["one-time","recurring"]},"interval_days":{"type":"integer","description":"Days between recurrences (recurring only)"},"notes":{"type":"string"}},"required":["title","due_date"]}},
-    {"name":"snooze_reminder","description":"Mark a one-time reminder done, or advance a recurring one to next cycle","input_schema":{"type":"object","properties":{"reminder_id":{"type":"integer"}},"required":["reminder_id"]}},
-    {"name":"add_task","description":"Add a task for any of Parker's roles","input_schema":{"type":"object","properties":{"title":{"type":"string"},"role":{"type":"string","enum":["band","IT","coding","personal","learning","shopping"]},"priority":{"type":"string","enum":["high","normal","low"]},"notes":{"type":"string"}},"required":["title","role"]}},
-    {"name":"complete_task","description":"Mark a task done by ID","input_schema":{"type":"object","properties":{"task_id":{"type":"integer"}},"required":["task_id"]}},
-    {"name":"list_tasks","description":"List open tasks, optionally filtered by role","input_schema":{"type":"object","properties":{"role":{"type":"string","enum":["band","IT","coding","personal","learning","shopping"]},"show_done":{"type":"boolean"}}}},
-    {"name":"add_transaction","description":"Log income or expense","input_schema":{"type":"object","properties":{"description":{"type":"string"},"amount":{"type":"number"},"type_":{"type":"string","enum":["income","expense"]},"category":{"type":"string","enum":["band","IT","coding","personal"]},"date":{"type":"string"}},"required":["description","amount","type_","category"]}},
-    {"name":"financial_summary","description":"Get financial summary by category","input_schema":{"type":"object","properties":{"category":{"type":"string","enum":["band","IT","coding","personal"]}}}},
+    {"name":"list_shows","description":"List all shows","input_schema":{"type":"object","properties":{}}},
+    {"name":"add_show","description":"Add a show to comingupaces.net","input_schema":{"type":"object","properties":{"date":{"type":"string"},"event":{"type":"string"},"venue":{"type":"string"},"city":{"type":"string"},"tickets":{"type":"string"},"notes":{"type":"string"}},"required":["date","event","venue","city"]}},
+    {"name":"remove_show","description":"Remove a show by index","input_schema":{"type":"object","properties":{"index":{"type":"integer"}},"required":["index"]}},
+    {"name":"add_video","description":"Add a video to band site","input_schema":{"type":"object","properties":{"title":{"type":"string"},"url":{"type":"string"},"date":{"type":"string"}},"required":["title","url"]}},
+    {"name":"push_site","description":"Push band site live","input_schema":{"type":"object","properties":{"message":{"type":"string"}}}},
+    {"name":"list_reminders","description":"List all reminders","input_schema":{"type":"object","properties":{}}},
+    {"name":"add_reminder","description":"Add a reminder (one-time or recurring)","input_schema":{"type":"object","properties":{"title":{"type":"string"},"due_date":{"type":"string","description":"YYYY-MM-DD"},"category":{"type":"string","enum":["personal","IT","band","coding","learning","shopping"]},"reminder_type":{"type":"string","enum":["one-time","recurring"]},"interval_days":{"type":"integer"},"notes":{"type":"string"}},"required":["title","due_date"]}},
+    {"name":"snooze_reminder","description":"Done/snooze a reminder","input_schema":{"type":"object","properties":{"reminder_id":{"type":"integer"}},"required":["reminder_id"]}},
+    {"name":"add_task","description":"Add a task (tasks.json — general roles)","input_schema":{"type":"object","properties":{"title":{"type":"string"},"role":{"type":"string","enum":["band","IT","coding","personal","learning","shopping"]},"priority":{"type":"string","enum":["high","normal","low"]},"notes":{"type":"string"}},"required":["title","role"]}},
+    {"name":"complete_task","description":"Complete a task by ID","input_schema":{"type":"object","properties":{"task_id":{"type":"integer"}},"required":["task_id"]}},
+    {"name":"list_tasks","description":"List open tasks","input_schema":{"type":"object","properties":{"role":{"type":"string"},"show_done":{"type":"boolean"}}}},
+    {"name":"add_transaction","description":"Log an expense or income","input_schema":{"type":"object","properties":{"description":{"type":"string"},"amount":{"type":"number"},"type_":{"type":"string","enum":["income","expense"]},"category":{"type":"string","enum":["band","IT","coding","personal"]},"date":{"type":"string"}},"required":["description","amount","type_","category"]}},
+    {"name":"financial_summary","description":"Get finance summary","input_schema":{"type":"object","properties":{"category":{"type":"string"}}}},
+    {"name":"add_agenda_item","description":"Add an item to today's agenda","input_schema":{"type":"object","properties":{"label":{"type":"string"},"time":{"type":"string","description":"HH:MM"},"tag":{"type":"string"},"date":{"type":"string"}},"required":["label"]}},
+    {"name":"add_work_task","description":"Add a GLS or coding work task (work_tasks.json)","input_schema":{"type":"object","properties":{"title":{"type":"string"},"project":{"type":"string","description":"e.g. GLS Security, GLS IT, GLS SharePoint, Code"},"priority":{"type":"string","enum":["high","normal","low"]},"notes":{"type":"string"}},"required":["title"]}},
+    {"name":"log_reading_page","description":"Update current book page number","input_schema":{"type":"object","properties":{"page":{"type":"integer"}},"required":["page"]}},
+    {"name":"log_study_session","description":"Log a CISM study session","input_schema":{"type":"object","properties":{"minutes":{"type":"integer"},"topic":{"type":"string"},"date":{"type":"string"}},"required":["minutes"]}},
+    {"name":"log_practice_score","description":"Log a CISM practice test score (0-100)","input_schema":{"type":"object","properties":{"score":{"type":"integer"}},"required":["score"]}},
+    {"name":"log_weight","description":"Log today's weight in lbs","input_schema":{"type":"object","properties":{"weight":{"type":"number"},"date":{"type":"string"}},"required":["weight"]}},
+    {"name":"log_calories","description":"Log calories consumed and/or burned","input_schema":{"type":"object","properties":{"consumed":{"type":"integer"},"burned":{"type":"integer"},"date":{"type":"string"}},"required":["consumed"]}},
+    {"name":"add_journal_entry","description":"Save a journal entry","input_schema":{"type":"object","properties":{"body":{"type":"string"},"date":{"type":"string"}},"required":["body"]}},
 ]
 
-SYSTEM_PROMPT = """You are Mission Control — Parker Gent's personal AI command center, running 24/7 on his machine.
+SYSTEM_PROMPT = """You are Mission Control — Parker Gent's personal AI command center.
 
 PARKER'S PROFILE:
 • IT Manager at Ground Level Services (GLS) — Azure, SharePoint, MDM, security, vendor mgmt, WIP reporting
-• Band Manager & Lead Guitarist — Coming Up Aces (NWA classic rock: Nate Poplin vocals/rhythm, Parker lead guitar/keys/harmonica/backup vocals, Brandon Hargis bass, Riley Gent drums). Sound: Lynyrd Skynyrd + Tom Petty + grunge. Site: comingupaces.net
-• Freelance Developer — building "aGent Security Consultancy" brand
-• Learning: CISM + CRISC + MBA (for consulting practice), guitar solos, piano
-• Personal: has a dog (flea medicine every 3 months), tracks gifts for friends/family, keeps personal reminders
+• Band Manager & Lead Guitarist — Coming Up Aces (NWA classic rock). Site: comingupaces.net
+• Freelance Developer — building "aGent Security Consultancy"
+• Certifications: pursuing CISM (exam 2026-08-16), CRISC
+• Personal: dog (flea medicine every 3 months), tennis elbow rehab
 
-URGENT RIGHT NOW (today is {today}):
-• ASR policies audit→block due 2026-05-22
-• Ian MFA on Rightworks — high priority IT
+TODAY IS {today}. URGENT: ASR policies audit→block due 2026-05-22. Ian MFA on Rightworks is high priority.
 
-BEHAVIOR:
-Act like a sharp chief of staff who knows everything. When Parker dumps notes, emails, or voice-to-text, extract every actionable item and log it without being asked. Be extremely concise. Take action immediately with tools — don't confirm first unless truly ambiguous.
+BEHAVIOR: Act like a sharp chief of staff. Extract ALL actionable items from voice dumps and log them without asking. Be concise. Use tools immediately.
 
-When Parker says things like "learn X" → add_task (role: band or learning). "Buy X" → add_task (role: shopping). "Remind me X" → add_reminder. "Show Y at Z on date" → add_show. "Log $X from gig" → add_transaction. "Push the site" → push_site.
+SMART ROUTING:
+• "spent $X at Y" / "paid $X" → add_transaction (auto-detect category)
+• "gig/show at X on [date]" → add_show
+• "remind me" / "don't forget" → add_reminder
+• "add to today" / "schedule at [time]" → add_agenda_item
+• "read page X" / "on page X" → log_reading_page
+• "studied Xmin" / "X minutes on CISM" → log_study_session
+• "practice test X%" → log_practice_score
+• "weigh Xlb" / "weight is X" → log_weight
+• "ate X cal" / "burned X cal" → log_calories
+• "journal:" / "note to self:" → add_journal_entry
+• "GLS task:" / "work task:" / "code task:" → add_work_task
 
-Surface upcoming reminders proactively. Warn about deadlines. Think ahead.""".format(today=datetime.now().strftime("%B %d, %Y"))
+RESPONSE FORMAT — always reply with ONLY this JSON (no markdown, no extra text):
+{{"module":"agenda|finance|band|health|work|study|reading|holidays|journal|none","action":"added|logged|updated|scheduled|found|noted","summary":"one-line description of what was done","reply":"brief conversational reply (1-2 sentences max)"}}""".format(today=datetime.now().strftime("%B %d, %Y"))
 
 client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 

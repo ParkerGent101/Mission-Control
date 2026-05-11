@@ -841,15 +841,29 @@ const HealthCard = () => {
 // =========================================================
 // WORK
 // =========================================================
+const WORK_LINKS = [
+  { label: "SharePoint Home",  url: "https://groundlevel.sharepoint.com",              icon: "briefcase", group: "GLS" },
+  { label: "Azure Portal",     url: "https://portal.azure.com",                        icon: "external",  group: "GLS" },
+  { label: "Intune / MDM",     url: "https://intune.microsoft.com",                    icon: "phone",     group: "GLS" },
+  { label: "Rightworks",       url: "https://app.rightworks.com",                      icon: "briefcase", group: "GLS" },
+  { label: "GLS Portal",       url: "https://groundlevelservices.com",                 icon: "home",      group: "GLS" },
+  { label: "Mission Control",  url: "https://github.com/parkergent/mission-control",   icon: "external",  group: "Code" },
+  { label: "Coming Up Aces",   url: "https://github.com/parkergent/coming-up-aces",    icon: "external",  group: "Code" },
+  { label: "aGent Security",   url: "https://github.com/parkergent",                   icon: "external",  group: "Code" },
+];
+
+const GLS_PROJECTS = ["GLS Security","GLS IT","GLS Admin","GLS SharePoint","GLS Projects"];
+
 const WorkCard = () => {
-  const [tasks, setTasks] = useState([]);
+  const [allTasks, setAllTasks] = useState([]);
   const [newTask, setNewTask] = useState("");
+  const [tab, setTab] = useState("gls");
   const priMap = {high:"P0", normal:"P1", low:"P2"};
 
   useEffect(() => {
     fetch('/api/work').then(r=>r.json()).then(data => {
       if (data && data.length) {
-        setTasks(data.filter(t=>!t.done).map(t=>({
+        setAllTasks(data.filter(t=>!t.done).map(t=>({
           ...t,
           label: t.title || t.label || '',
           priority: priMap[t.priority] || t.priority || 'P2'
@@ -860,7 +874,8 @@ const WorkCard = () => {
 
   const toggle = async (id) => {
     await fetch(`/api/work/${id}/done`,{method:'POST'}).catch(()=>{});
-    setTasks(xs => xs.filter(x => x.id !== id));
+    setAllTasks(xs => xs.filter(x => x.id !== id));
+    if (window.__toast) window.__toast('Task done ✓');
   };
 
   const addTask = async (e) => {
@@ -868,45 +883,80 @@ const WorkCard = () => {
     const parts = newTask.match(/P[0-3]/);
     const priority = parts ? parts[0] : "P2";
     const label = newTask.replace(/P[0-3]/,'').trim();
+    const proj = tab === 'code' ? 'Code' : '';
     const res = await fetch('/api/work',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({title:label,priority:priority==='P0'?'high':priority==='P1'?'normal':'low',project:''})}).then(r=>r.json()).catch(()=>({id:Date.now()}));
-    setTasks(xs=>[...xs,{id:res.id||Date.now(),label,priority,project:'',done:false}]);
+      body:JSON.stringify({title:label,priority:priority==='P0'?'high':priority==='P1'?'normal':'low',project:proj})})
+      .then(r=>r.json()).catch(()=>({id:Date.now()}));
+    setAllTasks(xs=>[...xs,{id:res.id||Date.now(),label,priority,project:proj,done:false}]);
     setNewTask('');
+    if (window.__toast) window.__toast('Task added');
   };
 
   const pcolor = (p) => p==="P0"?"red":p==="P1"?"amber":p==="P2"?"info":"";
 
+  const glsTasks = allTasks.filter(t => !t.project || GLS_PROJECTS.includes(t.project) || (!['Code','band','personal'].includes(t.project)));
+  const codeTasks = allTasks.filter(t => t.project === 'Code' || t.project === 'band');
+  const tasks = tab === 'gls' ? glsTasks : codeTasks;
+
   const byProject = tasks.reduce((acc,t) => {
-    const p = t.project||'Other';
+    const p = t.project||'General';
     (acc[p] = acc[p]||[]).push(t);
     return acc;
   }, {});
 
+  const links = WORK_LINKS.filter(l => tab === 'gls' ? l.group === 'GLS' : l.group === 'Code');
+
   return (
     <Card num="05" title="Work" span={4}
-      right={<><span className="muted mono" style={{fontSize:11}}>{tasks.length} open</span></>}
+      right={<>
+        <span className="muted mono" style={{fontSize:11}}>{allTasks.length} open</span>
+        <button className="btn" onClick={()=>setTab('gls')} style={tab==='gls'?{background:'var(--surface-3)',borderColor:'var(--accent)'}:{}}>GLS</button>
+        <button className="btn" onClick={()=>setTab('code')} style={tab==='code'?{background:'var(--surface-3)',borderColor:'var(--accent)'}:{}}>Code</button>
+        <button className="btn" onClick={()=>setTab('links')} style={tab==='links'?{background:'var(--surface-3)',borderColor:'var(--accent)'}:{}}>Links</button>
+      </>}
     >
-      {Object.entries(byProject).map(([proj, ptasks]) => (
-        <div key={proj} style={{marginBottom:8}}>
-          <div className="muted-2 mono" style={{fontSize:10,letterSpacing:'.06em',padding:'4px 0 2px',textTransform:'uppercase'}}>{proj}</div>
-          {ptasks.map((t) => (
-            <div key={t.id} style={{display:"grid",gridTemplateColumns:"22px 1fr auto",gap:"6px 8px",alignItems:"start",padding:"5px 4px",borderRadius:"var(--r)"}}>
-              <Checkbox checked={false} onClick={()=>toggle(t.id)} style={{marginTop:2}}/>
-              <div>
-                <div style={{fontSize:12.5}}>{t.label||t.title}</div>
-                {t.notes && <div className="muted-2 mono" style={{fontSize:10,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.notes}</div>}
-              </div>
-              <span className={"tag "+pcolor(t.priority)} style={{fontSize:10,marginTop:1}}>{t.priority}</span>
-            </div>
+      {tab === 'links' ? (
+        <div style={{display:'flex',flexDirection:'column',gap:2}}>
+          <div className="muted-2 mono" style={{fontSize:10,letterSpacing:'.06em',padding:'2px 0 6px'}}>GLS TOOLS</div>
+          {WORK_LINKS.filter(l=>l.group==='GLS').map((l,i) => (
+            <a key={i} href={l.url} target="_blank" rel="noopener" style={{display:'flex',alignItems:'center',gap:10,padding:'8px 6px',borderRadius:'var(--r)',textDecoration:'none',color:'var(--ink-2)',borderBottom:'1px solid var(--line-soft)'}}>
+              <Icon name={l.icon} size={14} style={{color:'var(--accent)',flexShrink:0}}/>
+              <span style={{flex:1,fontSize:12.5}}>{l.label}</span>
+              <Icon name="external" size={12} style={{color:'var(--ink-4)'}}/>
+            </a>
+          ))}
+          <div className="muted-2 mono" style={{fontSize:10,letterSpacing:'.06em',padding:'10px 0 6px'}}>CODE / GITHUB</div>
+          {WORK_LINKS.filter(l=>l.group==='Code').map((l,i) => (
+            <a key={i} href={l.url} target="_blank" rel="noopener" style={{display:'flex',alignItems:'center',gap:10,padding:'8px 6px',borderRadius:'var(--r)',textDecoration:'none',color:'var(--ink-2)',borderBottom:'1px solid var(--line-soft)'}}>
+              <Icon name={l.icon} size={14} style={{color:'var(--violet)',flexShrink:0}}/>
+              <span style={{flex:1,fontSize:12.5}}>{l.label}</span>
+              <Icon name="external" size={12} style={{color:'var(--ink-4)'}}/>
+            </a>
           ))}
         </div>
-      ))}
-      {tasks.length===0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 0',textAlign:'center'}}>No open tasks 🎉</div>}
-      <div className="row" style={{marginTop:10,gap:6}}>
-        <input className="input" placeholder="Add task… (try 'Fix auth bug P1')" value={newTask}
-          onChange={e=>setNewTask(e.target.value)} onKeyDown={addTask} style={{fontSize:12}}/>
-        <button className="btn primary" onClick={()=>addTask({key:'Enter'})}><Icon name="plus" size={13}/></button>
-      </div>
+      ) : (<>
+        {Object.entries(byProject).map(([proj, ptasks]) => (
+          <div key={proj} style={{marginBottom:8}}>
+            <div className="muted-2 mono" style={{fontSize:10,letterSpacing:'.06em',padding:'4px 0 2px',textTransform:'uppercase'}}>{proj}</div>
+            {ptasks.map((t) => (
+              <div key={t.id} style={{display:"grid",gridTemplateColumns:"22px 1fr auto",gap:"4px 8px",alignItems:"start",padding:"5px 4px",borderRadius:"var(--r)"}}>
+                <Checkbox checked={false} onClick={()=>toggle(t.id)}/>
+                <div>
+                  <div style={{fontSize:12.5,lineHeight:1.35}}>{t.label||t.title}</div>
+                  {t.notes && <div className="muted-2 mono" style={{fontSize:10,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.notes}</div>}
+                </div>
+                <span className={"tag "+pcolor(t.priority)} style={{fontSize:10}}>{t.priority}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+        {tasks.length===0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 0',textAlign:'center'}}>No open tasks 🎉</div>}
+        <div className="row" style={{marginTop:10,gap:6}}>
+          <input className="input" placeholder={tab==='code'?"Add task… (e.g. 'Fix login P1')":"Add GLS task…"} value={newTask}
+            onChange={e=>setNewTask(e.target.value)} onKeyDown={addTask} style={{fontSize:12}}/>
+          <button className="btn primary" onClick={()=>addTask({key:'Enter'})}><Icon name="plus" size={13}/></button>
+        </div>
+      </>)}
     </Card>
   );
 };

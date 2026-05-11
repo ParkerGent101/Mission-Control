@@ -13,7 +13,7 @@
     "label": "Ian MFA on Rightworks",
     "tag": "IT",
     "done": false,
-    "date": "2026-05-10"
+    "date": "2026-05-11"
   },
   {
     "id": 3,
@@ -21,7 +21,7 @@
     "label": "Band practice — solo work",
     "tag": "band",
     "done": false,
-    "date": "2026-05-10"
+    "date": "2026-05-11"
   },
   {
     "id": 4,
@@ -29,6 +29,6 @@
     "label": "CISM study session — Risk Mgmt",
     "tag": "study",
     "done": false,
-    "date": "2026-05-10"
+    "date": "2026-05-11"
   }
 ]
