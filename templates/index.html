@@ -358,6 +358,7 @@
     .bar-row .pct { display: none; }
     .bar-row .amt { font-size: 11px; }
     .finance-detail { grid-template-columns: 1fr; gap: 0; }
+    .finance-body { grid-template-columns: 1fr; }
 
     /* Habit grid: smaller */
     .habit-week { grid-template-columns: 50px repeat(7, 1fr); gap: 3px; }
@@ -708,6 +709,32 @@
   .section-h .line { flex: 1; height: 1px; background: var(--line-soft); }
 
   .card[data-hidden="true"] { display: none; }
+
+  /* ─── Finance inner layout ──────────────────── */
+  .finance-body {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 14px;
+    align-items: start;
+  }
+
+  /* ─── Toast notifications ───────────────────── */
+  .toast {
+    padding: 8px 14px;
+    border-radius: var(--r);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: var(--surface-3);
+    border: 1px solid var(--line);
+    color: var(--ink);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.35);
+    animation: toastIn .15s ease;
+    pointer-events: auto;
+    white-space: nowrap;
+  }
+  .toast-success { border-color: color-mix(in oklch, var(--accent-2) 45%, var(--line)); color: var(--accent-2); }
+  .toast-error   { border-color: color-mix(in oklch, var(--danger) 45%, var(--line)); color: var(--danger); }
+  @keyframes toastIn { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
 </style>
 </head>
 <body>

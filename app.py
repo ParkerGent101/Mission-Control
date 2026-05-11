@@ -648,18 +648,61 @@ def delete_agenda(aid):
 
 @app.route("/api/health", methods=["GET"])
 def get_health():
-    return jsonify(_load(HEALTH_FILE))
+    data = _load(HEALTH_FILE)
+    if not isinstance(data, dict):
+        data = {"habits": {}, "weight": {}, "calories": {}}
+
+    # Build weight_log: sorted list of {date, weight} objects
+    weight_dict = data.get("weight", {})
+    weight_log = [{"date": d, "weight": w} for d, w in sorted(weight_dict.items())]
+
+    # Build habits_weekly for current Mon–Sun
+    today = datetime.now().date()
+    week_start = today - timedelta(days=today.weekday())  # Monday
+    week_days = [(week_start + timedelta(days=i)) for i in range(7)]
+    week_day_strs = [d.strftime("%Y-%m-%d") for d in week_days]
+    day_abbrevs = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+    habits_by_date = data.get("habits", {})
+    habit_list = data.get("habit_list", [
+        {"id": "Lift", "label": "Lift"}, {"id": "Walk 8k", "label": "Walk 8k"},
+        {"id": "Sleep 7h", "label": "Sleep 7h"}, {"id": "Water", "label": "Water"},
+    ])
+    all_names = [h.get("label", h.get("id", "")) for h in habit_list]
+    for day_str in week_day_strs:
+        for name in habits_by_date.get(day_str, {}):
+            if name not in all_names:
+                all_names.append(name)
+
+    habits_weekly = {}
+    for name in all_names:
+        if not name:
+            continue
+        day_map = {}
+        for day_str, day_abbrev in zip(week_day_strs, day_abbrevs):
+            day_map[day_abbrev] = bool(habits_by_date.get(day_str, {}).get(name))
+        habits_weekly[name] = day_map
+
+    # Most recent calories_target
+    cal_target = 2200
+    calories = data.get("calories", {})
+    if calories:
+        latest = max(calories.keys())
+        cal_target = calories[latest].get("goal", 2200)
+
+    return jsonify({**data, "weight_log": weight_log, "habits_weekly": habits_weekly, "calories_target": cal_target})
 
 @app.route("/api/health/habit", methods=["POST"])
 def post_health_habit():
     d = request.json
     health = _load(HEALTH_FILE)
-    date = d.get("date", datetime.now().strftime("%Y-%m-%d"))
-    if "habits" not in health:
+    if not isinstance(health, dict):
         health = {"habits": {}, "weight": {}, "calories": {}}
+    date = d.get("date", datetime.now().strftime("%Y-%m-%d"))
     habits = health.setdefault("habits", {})
     day = habits.setdefault(date, {})
-    day[d["habit"]] = d.get("done", True)
+    habit_name = d["habit"]
+    day[habit_name] = not day.get(habit_name, False)
     _save(HEALTH_FILE, health)
     return jsonify({"ok": True})
 

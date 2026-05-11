@@ -41,6 +41,15 @@ const App = () => {
   const [active, setActive] = useStateApp("dashboard");
   const [cmdOpen, setCmdOpen] = useStateApp(false);
   const [now, setNow] = useStateApp(new Date());
+  const [toasts, setToasts] = useStateApp([]);
+
+  useEffectApp(() => {
+    window.__toast = (msg, type = "success") => {
+      const id = Date.now() + Math.random();
+      setToasts(ts => [...ts, { id, msg, type }]);
+      setTimeout(() => setToasts(ts => ts.filter(t => t.id !== id)), 2800);
+    };
+  }, []);
 
   useEffectApp(() => {
     const id = setInterval(() => setNow(new Date()), 30_000);
@@ -211,6 +220,14 @@ const App = () => {
       </nav>
 
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onAction={onAction} />
+
+      {toasts.length > 0 && (
+        <div style={{ position:"fixed", bottom:72, right:16, display:"flex", flexDirection:"column", gap:6, zIndex:200, pointerEvents:"none" }}>
+          {toasts.map(t => (
+            <div key={t.id} className={`toast toast-${t.type}`}>{t.msg}</div>
+          ))}
+        </div>
+      )}
 
       <TweaksPanel>
         <TweakSection label="Look">

@@ -68,15 +68,12 @@ const Card = ({ id, num, title, right, children, span = 6, hidden, bodyClass = "
 // =========================================================
 // TODAY / AGENDA
 // =========================================================
+const TAG_COLOR = { Work:"info", IT:"info", Cal:"mint", Read:"amber", Journal:"mint", band:"violet", study:"info", Personal:"mint", default:"" };
+
 const AgendaCard = () => {
-  const defaultItems = [
-    { id: 1, time: "09:00", label: "Check ASR policies audit status", tag: "Work",    color: "info",  done: false },
-    { id: 2, time: "10:00", label: "Ian MFA on Rightworks — follow up", tag: "IT",   color: "info",  done: false },
-    { id: 3, time: "12:30", label: "Log lunch → target deficit -400",  tag: "Cal",   color: "mint",  done: false },
-    { id: 4, time: "19:30", label: "Read — Project Hail Mary",          tag: "Read",  color: "amber", done: false },
-    { id: 5, time: "21:30", label: "Journal — what worked today",       tag: "Journal",color:"mint",  done: false },
-  ];
-  const [items, setItems] = useState(defaultItems);
+  const [items, setItems] = useState([]);
+  const [reminders, setReminders] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [calories, setCalories] = useState({ target: 2200, consumed: 0, burned: 0 });
   const [macros, setMacros] = useState([
     { l: "Protein", v: 0, g: 165, c: "var(--accent-2)" },
@@ -85,13 +82,27 @@ const AgendaCard = () => {
   ]);
 
   useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10);
     fetch('/api/agenda').then(r => r.json()).then(data => {
-      if (data && data.length) setItems(data.filter(i => !i.done));
-    }).catch(() => {});
+      if (data && data.length) {
+        const sorted = data
+          .filter(i => !i.done)
+          .sort((a,b) => (a.date||'').localeCompare(b.date||'') || (a.time||'').localeCompare(b.time||''));
+        setItems(sorted.map(i => ({ ...i, color: i.color || TAG_COLOR[i.tag] || TAG_COLOR.default })));
+      }
+      setLoading(false);
+    }).catch(() => { setLoading(false); });
     fetch('/api/health').then(r => r.json()).then(data => {
-      const today = new Date().toISOString().slice(0, 10);
       if (data.calories && data.calories[today]) setCalories(c => ({ ...c, ...data.calories[today] }));
       if (data.calories_target) setCalories(c => ({ ...c, target: data.calories_target }));
+    }).catch(() => {});
+    fetch('/api/reminders').then(r => r.json()).then(data => {
+      const today2 = new Date().toISOString().slice(0, 10);
+      const upcoming = data
+        .filter(r => r.next_due)
+        .sort((a,b) => a.next_due.localeCompare(b.next_due))
+        .slice(0, 6);
+      setReminders(upcoming);
     }).catch(() => {});
   }, []);
 
@@ -100,8 +111,14 @@ const AgendaCard = () => {
     fetch(`/api/agenda/${id}/toggle`, { method: 'POST' }).catch(() => {});
   };
 
+  const snoozeReminder = async (rid) => {
+    await fetch(`/api/reminders/${rid}/snooze`, { method:'POST' }).catch(()=>{});
+    setReminders(rs => rs.filter(r => r.id !== rid));
+  };
+
   const calNet  = calories.consumed - calories.burned;
   const calLeft = calories.target - calNet;
+  const today = new Date().toISOString().slice(0, 10);
   const morning   = items.filter(i => parseInt(i.time) < 12);
   const afternoon = items.filter(i => parseInt(i.time) >= 12);
 
@@ -113,9 +130,9 @@ const AgendaCard = () => {
           const label = prompt("Add agenda item:");
           if (!label) return;
           const time = prompt("Time (HH:MM):", "09:00") || "09:00";
-          const res = await fetch('/api/agenda', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({label, time, tag:"Personal", color:"mint"}) });
+          const res = await fetch('/api/agenda', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({label, time, tag:"Personal", color:"mint", date:today}) });
           const d = await res.json();
-          setItems(xs => [...xs, { id: d.id, time, label, tag: "Personal", color: "mint", done: false }]);
+          setItems(xs => [...xs, { id: d.id, time, label, tag: "Personal", color: "mint", done: false, date: today }]);
         }}><Icon name="plus" size={13}/>Add</button>
       </>}
       bodyClass="flush"
@@ -123,27 +140,34 @@ const AgendaCard = () => {
       <div className="agenda-grid">
         <div style={{ padding: "10px 14px", borderRight: "1px solid var(--line-soft)" }}>
           <div className="muted-2 mono" style={{ fontSize: 10.5, letterSpacing: ".08em", padding: "0 4px 6px" }}>MORNING</div>
-          {morning.length === 0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 4px'}}>— all clear —</div>}
-          {morning.map((it) => (
-            <div key={it.id} className="agenda-row">
-              <span className="agenda-time">{it.time}</span>
-              <Checkbox checked={false} onClick={() => toggle(it.id)} />
-              <span className="agenda-label">{it.label}</span>
-              <span className={"tag " + it.color}>{it.tag}</span>
-            </div>
-          ))}
+          {loading && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 4px'}}>loading…</div>}
+          {!loading && morning.length === 0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 4px'}}>— all clear —</div>}
+          {morning.map((it) => {
+            const overdue = it.date && it.date < today;
+            return (
+              <div key={it.id} className="agenda-row">
+                <span className="agenda-time" style={{color:overdue?"var(--danger)":undefined}}>{it.time}</span>
+                <Checkbox checked={false} onClick={() => toggle(it.id)} />
+                <span className="agenda-label">{it.label}</span>
+                <span className={"tag " + it.color}>{it.tag}</span>
+              </div>
+            );
+          })}
         </div>
         <div style={{ padding: "10px 14px", borderRight: "1px solid var(--line-soft)" }}>
           <div className="muted-2 mono" style={{ fontSize: 10.5, letterSpacing: ".08em", padding: "0 4px 6px" }}>AFTERNOON · EVENING</div>
-          {afternoon.length === 0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 4px'}}>— all clear —</div>}
-          {afternoon.map((it) => (
-            <div key={it.id} className="agenda-row">
-              <span className="agenda-time">{it.time}</span>
-              <Checkbox checked={false} onClick={() => toggle(it.id)} />
-              <span className="agenda-label">{it.label}</span>
-              <span className={"tag " + it.color}>{it.tag}</span>
-            </div>
-          ))}
+          {!loading && afternoon.length === 0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 4px'}}>— all clear —</div>}
+          {afternoon.map((it) => {
+            const overdue = it.date && it.date < today;
+            return (
+              <div key={it.id} className="agenda-row">
+                <span className="agenda-time" style={{color:overdue?"var(--danger)":undefined}}>{it.time}</span>
+                <Checkbox checked={false} onClick={() => toggle(it.id)} />
+                <span className="agenda-label">{it.label}</span>
+                <span className={"tag " + it.color}>{it.tag}</span>
+              </div>
+            );
+          })}
         </div>
         <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
           <div>
@@ -172,6 +196,26 @@ const AgendaCard = () => {
               ))}
             </div>
           </div>
+          {reminders.length > 0 && <>
+            <div className="hairline"/>
+            <div>
+              <div className="muted-2 mono" style={{ fontSize: 10.5, letterSpacing: ".08em", marginBottom: 6 }}>REMINDERS</div>
+              {reminders.map(r => {
+                const daysOut = Math.round((new Date(r.next_due+'T12:00:00') - new Date()) / 86400000);
+                const overdue = daysOut < 0;
+                return (
+                  <div key={r.id} style={{ display:"grid", gridTemplateColumns:"auto 1fr auto", gap:8, alignItems:"center", padding:"4px 0", borderBottom:"1px solid var(--line-soft)" }}>
+                    <span className={"tag "+(overdue?"red":daysOut===0?"amber":daysOut<=7?"info":"")} style={{fontSize:9.5,padding:"1px 5px"}}>
+                      {overdue ? `${Math.abs(daysOut)}d late` : daysOut===0 ? "today" : `${daysOut}d`}
+                    </span>
+                    <span style={{fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.title}</span>
+                    <button className="btn ghost" style={{padding:"1px 5px",fontSize:10,color:"var(--ink-4)"}} title="Snooze/done"
+                      onClick={()=>snoozeReminder(r.id)}>✓</button>
+                  </div>
+                );
+              })}
+            </div>
+          </>}
           <div className="hairline"/>
           <div>
             <div className="muted-2 mono" style={{ fontSize: 10.5, letterSpacing: ".08em", marginBottom: 6 }}>REHAB · TENNIS ELBOW</div>
@@ -303,7 +347,7 @@ const FinanceCard = () => {
         </div>
       )}
 
-      <div style={{display:'grid', gridTemplateColumns:'1fr auto', gap:14, alignItems:'start'}}>
+      <div className="finance-body">
         <div>
           <div className="finance-stats">
             <div className="stat-block"><span className="l">Income</span><span className="v serif" style={{color:"var(--accent-2)"}}>{fmtMoney(totalIn,{cents:false})}</span></div>
@@ -689,6 +733,7 @@ const HealthCard = () => {
   ];
   const [habits, setHabits] = useState(defaultHabits);
   const [stats, setStats] = useState({ weight: 182.4, steps: 9420, sleep: "7h 12m", weightLog: [188,187,186.5,185.4,184.8,184,183.1,182.4] });
+  const [newWeight, setNewWeight] = useState("");
   const days = ["M","T","W","T","F","S","S"];
 
   useEffect(() => {
@@ -708,12 +753,30 @@ const HealthCard = () => {
   }, []);
 
   const toggleHabit = async (habitName, dayIdx) => {
-    const dayNames = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+    const today = new Date();
+    const dow = today.getDay(); // 0=Sun
+    const monOffset = dow === 0 ? -6 : 1 - dow;
+    const monday = new Date(today);
+    monday.setDate(today.getDate() + monOffset);
+    const target = new Date(monday);
+    target.setDate(monday.getDate() + dayIdx);
+    const dateStr = target.toISOString().slice(0, 10);
     await fetch('/api/health/habit', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ habit: habitName, day: dayNames[dayIdx] }) }).catch(()=>{});
+      body: JSON.stringify({ habit: habitName, date: dateStr }) }).catch(()=>{});
     setHabits(hs => hs.map(h => h.name === habitName
       ? { ...h, states: h.states.map((s,i) => i===dayIdx ? (s==="done"?"miss":"done") : s) }
       : h));
+  };
+
+  const logWeight = async () => {
+    const w = parseFloat(newWeight);
+    if (!w || w < 80 || w > 500) return;
+    const today = new Date().toISOString().slice(0, 10);
+    await fetch('/api/health/weight',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({weight:w,date:today})}).catch(()=>{});
+    setStats(s => ({ ...s, weight: w, weightLog: [...s.weightLog.slice(-7), w] }));
+    setNewWeight('');
+    if (window.__toast) window.__toast(`Weight ${w} lb logged`);
   };
 
   const workout = [
@@ -730,6 +793,12 @@ const HealthCard = () => {
           <span className="l">Weight</span>
           <span className="v">{stats.weight}<span className="muted-2" style={{fontSize:11,marginLeft:4}}>lb</span></span>
           <Sparkline data={stats.weightLog} color="var(--accent-2)" height={24}/>
+          <div style={{display:'flex',gap:4,marginTop:3}}>
+            <input className="input" type="number" placeholder="log lb" value={newWeight}
+              onChange={e=>setNewWeight(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')logWeight();}}
+              style={{fontSize:11,padding:'3px 6px'}}/>
+            <button className="btn ghost" style={{padding:'3px 7px',fontSize:11}} onClick={logWeight}>+</button>
+          </div>
         </div>
         <div className="stat-block">
           <span className="l">Steps avg</span>
@@ -821,10 +890,13 @@ const WorkCard = () => {
         <div key={proj} style={{marginBottom:8}}>
           <div className="muted-2 mono" style={{fontSize:10,letterSpacing:'.06em',padding:'4px 0 2px',textTransform:'uppercase'}}>{proj}</div>
           {ptasks.map((t) => (
-            <div key={t.id} className="agenda-row" style={{gridTemplateColumns:"22px 1fr auto auto",padding:"5px 4px"}}>
-              <Checkbox checked={false} onClick={()=>toggle(t.id)}/>
-              <span className="agenda-label" title={t.notes||''}>{t.label||t.title}</span>
-              <span className={"tag "+pcolor(t.priority)} style={{fontSize:10}}>{t.priority}</span>
+            <div key={t.id} style={{display:"grid",gridTemplateColumns:"22px 1fr auto",gap:"6px 8px",alignItems:"start",padding:"5px 4px",borderRadius:"var(--r)"}}>
+              <Checkbox checked={false} onClick={()=>toggle(t.id)} style={{marginTop:2}}/>
+              <div>
+                <div style={{fontSize:12.5}}>{t.label||t.title}</div>
+                {t.notes && <div className="muted-2 mono" style={{fontSize:10,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.notes}</div>}
+              </div>
+              <span className={"tag "+pcolor(t.priority)} style={{fontSize:10,marginTop:1}}>{t.priority}</span>
             </div>
           ))}
         </div>
@@ -845,6 +917,8 @@ const WorkCard = () => {
 const StudyCard = () => {
   const [study, setStudy] = useState(null);
   const [newScore, setNewScore] = useState("");
+  const [sessionTopic, setSessionTopic] = useState("");
+  const [sessionMins, setSessionMins] = useState("");
 
   useEffect(() => {
     fetch('/api/study').then(r=>r.json()).then(data => {
@@ -868,6 +942,17 @@ const StudyCard = () => {
     await fetch('/api/study/score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({score:s})}).catch(()=>{});
     setStudy(st=>({...st, practice_scores:[...st.practice_scores, s]}));
     setNewScore('');
+    if (window.__toast) window.__toast(`Practice score ${s}% logged`);
+  };
+
+  const logSession = async (mins) => {
+    const m = mins || parseInt(sessionMins);
+    if (!m || m < 1) return;
+    await fetch('/api/study/session',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({minutes:m, topic:sessionTopic, date:new Date().toISOString().slice(0,10)})}).catch(()=>{});
+    setStudy(st => ({...st, total_hours: Math.round((((st.total_hours||0)*60) + m) / 60 * 10) / 10}));
+    setSessionTopic(''); setSessionMins('');
+    if (window.__toast) window.__toast(`${m} min study session logged`);
   };
 
   return (
@@ -917,6 +1002,23 @@ const StudyCard = () => {
         </div>
       </div>
       <div className="muted-2 mono" style={{fontSize:10.5,marginTop:4}}>target: 80%+ on 3 consecutive</div>
+
+      <div className="section-h" style={{marginTop:12}}>
+        <span>Log session</span><span className="line"/>
+        <span className="mono muted-2" style={{fontSize:10.5}}>{study.total_hours || 0}h total</span>
+      </div>
+      <div style={{display:'flex',gap:5,alignItems:'center',flexWrap:'wrap'}}>
+        <input className="input" placeholder="Topic…" value={sessionTopic} onChange={e=>setSessionTopic(e.target.value)}
+          style={{flex:1,minWidth:90,fontSize:12}} onKeyDown={e=>{if(e.key==='Enter')logSession();}}/>
+        {[30,60,90].map(m=>(
+          <button key={m} className="btn ghost" style={{padding:'4px 8px',fontSize:11}} onClick={()=>logSession(m)}>{m}m</button>
+        ))}
+        <div style={{display:'flex',gap:4}}>
+          <input className="input" type="number" placeholder="min" value={sessionMins} onChange={e=>setSessionMins(e.target.value)}
+            style={{width:52,fontSize:11,padding:'4px 6px'}}/>
+          <button className="btn" style={{padding:'4px 8px',fontSize:11}} onClick={()=>logSession()}>+</button>
+        </div>
+      </div>
     </Card>
   );
 };
@@ -940,6 +1042,34 @@ const ReadingCard = () => {
     const page = parseInt(p);
     await fetch('/api/reading/progress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page})}).catch(()=>{});
     setReading(r=>({...r, current:{...r.current,page}}));
+    if (window.__toast) window.__toast(`Page updated to ${page}`);
+  };
+
+  const finishBook = async () => {
+    if (!reading || !reading.current) return;
+    if (!confirm(`Mark "${reading.current.title}" as finished?`)) return;
+    await fetch('/api/reading',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'complete'})}).catch(()=>{});
+    const finished = reading.current;
+    const nextCurrent = (reading.queue||[])[0] || null;
+    const newQueue = (reading.queue||[]).slice(1);
+    setReading(r => ({
+      ...r,
+      completed_2026: (r.completed_2026||0) + 1,
+      current: nextCurrent ? {...nextCurrent, page:0, total_pages: nextCurrent.total_pages||300, started: new Date().toISOString().slice(0,10)} : null,
+      queue: newQueue,
+    }));
+    if (window.__toast) window.__toast(`"${finished.title}" marked finished!`);
+  };
+
+  const addToQueue = async () => {
+    const title = prompt("Book title:");
+    if (!title) return;
+    const author = prompt("Author:") || "";
+    await fetch('/api/reading',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'add_queue',title,author})}).catch(()=>{});
+    setReading(r=>({...r, queue:[...(r.queue||[]),{title,author}]}));
+    if (window.__toast) window.__toast(`"${title}" added to queue`);
   };
 
   if (!reading) return (
@@ -952,9 +1082,12 @@ const ReadingCard = () => {
 
   return (
     <Card num="07" title="Reading" span={4}
-      right={<span className="muted mono" style={{fontSize:11}}>{reading.completed_2026} / {reading.goal_2026} books · 2026</span>}
+      right={<>
+        <span className="muted mono" style={{fontSize:11}}>{reading.completed_2026} / {reading.goal_2026} books · 2026</span>
+        <button className="btn ghost" style={{padding:'3px 8px',fontSize:11}} onClick={addToQueue}><Icon name="plus" size={12}/>Queue</button>
+      </>}
     >
-      {reading.current && (
+      {reading.current ? (
         <div style={{display:"grid",gridTemplateColumns:"72px 1fr",gap:12}}>
           <div className="media-cover" style={{background:"linear-gradient(160deg,oklch(0.5 0.12 60),oklch(0.3 0.05 60))",color:"#fff"}}>
             {reading.current.title}
@@ -966,12 +1099,19 @@ const ReadingCard = () => {
             <div className="progress" style={{marginTop:8}}><div className="bar amber" style={{width:pct+"%"}}/></div>
             <div className="row" style={{marginTop:6,justifyContent:"space-between"}}>
               <span className="muted mono" style={{fontSize:10.5}}>{pct}%</span>
-              <button className="btn" style={{padding:"3px 8px",fontSize:11}} onClick={updatePage}>Update page</button>
+              <div className="row" style={{gap:4}}>
+                {pct >= 85 && <button className="btn primary" style={{padding:"3px 8px",fontSize:11}} onClick={finishBook}>✓ Finish</button>}
+                <button className="btn" style={{padding:"3px 8px",fontSize:11}} onClick={updatePage}>pg {reading.current.page}</button>
+              </div>
             </div>
           </div>
         </div>
+      ) : (
+        <div className="muted-2 mono" style={{fontSize:11,padding:'16px 0',textAlign:'center'}}>No current book — start one from the queue.</div>
       )}
-      <div className="section-h"><span>Up next</span><span className="line"/></div>
+      <div className="section-h"><span>Up next</span><span className="line"/>
+        <span className="muted-2 mono" style={{fontSize:10.5}}>{(reading.queue||[]).length} queued</span>
+      </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
         {(reading.queue||[]).slice(0,3).map((b,i) => (
           <div key={i}>
@@ -979,7 +1119,7 @@ const ReadingCard = () => {
               "linear-gradient(160deg,oklch(0.4 0.10 30),oklch(0.25 0.05 30))",
               "linear-gradient(160deg,oklch(0.45 0.10 160),oklch(0.28 0.05 160))",
               "linear-gradient(160deg,oklch(0.42 0.10 290),oklch(0.26 0.05 290))"
-            ][i],color:"#fff"}}>{b.title}</div>
+            ][i%3],color:"#fff"}}>{b.title}</div>
             <div className="muted mono" style={{fontSize:10.5,marginTop:4}}>{b.author}</div>
           </div>
         ))}
