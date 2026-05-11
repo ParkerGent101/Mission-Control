@@ -1573,6 +1573,6 @@ const TodayHub = () => {
 };
 
 window.MissionModules = {
-  TalkCard, AgendaCard, FinanceCard, BandCard, HealthCard, WorkCard,
+  AgendaCard, FinanceCard, BandCard, HealthCard, WorkCard,
   StudyCard, ReadingCard, HolidayCard, JournalCard, TodayHub
 };

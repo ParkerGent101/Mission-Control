@@ -66,7 +66,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "density": "balanced",
   "sidebar": "full",
   "modules": {
-    "talk": true, "agenda": true, "finance": true, "band": true, "health": true,
+    "agenda": true, "finance": true, "band": true, "health": true,
     "work": true, "study": true, "reading": true,
     "holidays": true, "journal": true
   }
@@ -75,8 +75,8 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 const ACCENT_OPTIONS = ["#e0a857", "#6ed3b6", "#e07a5f", "#b69cf0", "#8fb3e0"];
 
 const SIDEBAR_NAV = [
-  { id: "dashboard",  icon: "home",       label: "Dashboard",   badge: "" },
-  { id: "agenda",     icon: "calendar",   label: "Agenda",      badge: "" },
+  { id: "dashboard", icon: "home",      label: "Dashboard", badge: "" },
+  { id: "agenda",    icon: "calendar",  label: "Agenda",    badge: "" },
   { id: "finance",    icon: "wallet",     label: "Finance",     badge: "" },
   { id: "band",       icon: "music",      label: "Band",        badge: "" },
   { id: "health",     icon: "heart",      label: "Health",      badge: "" },
@@ -97,7 +97,7 @@ const MOBILE_NAV = [
 ];
 
 const MODULE_LABELS = [
-  ["talk","Talk","sparkles"],["agenda","Today","calendar"],["finance","Finance","wallet"],
+  ["agenda","Today","calendar"],["finance","Finance","wallet"],
   ["band","Band","music"],["health","Health","heart"],["work","Work","briefcase"],
   ["study","Study","graduation"],["reading","Reading","book"],
   ["holidays","Travel","plane"],["journal","Journal","feather"],
@@ -175,7 +175,6 @@ const App = () => {
 
   const M = window.MissionModules;
   const cards = [
-    { id: "talk",     el: <M.TalkCard /> },
     { id: "agenda",   el: <M.AgendaCard /> },
     { id: "finance",  el: <M.FinanceCard /> },
     { id: "band",     el: <M.BandCard /> },
@@ -369,7 +368,7 @@ const App = () => {
             options={[{ value: "full", label: "Full" }, { value: "icons", label: "Icons" }, { value: "hidden", label: "Hidden" }]} />
         </TweakSection>
         <TweakSection label="Modules">
-          {[["talk","Talk to Mission Control"],["agenda","Today / Agenda"],["finance","Finance"],["band","Band"],
+          {[["agenda","Today / Agenda"],["finance","Finance"],["band","Band"],
             ["health","Health & Fitness"],["work","Work"],["study","Studying"],["reading","Reading"],
             ["holidays","Holidays"],["journal","Journal"],
           ].map(([k, label]) => (
