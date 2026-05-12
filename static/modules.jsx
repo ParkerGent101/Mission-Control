@@ -1535,6 +1535,114 @@ const TalkCard = () => {
   );
 };
 
+// ── Activity Log ─────────────────────────────────────────────────────────────
+const MODULE_META = {
+  agenda:  { icon:"calendar",   color:"var(--info)"     },
+  finance: { icon:"wallet",     color:"var(--accent-2)" },
+  work:    { icon:"briefcase",  color:"var(--accent)"   },
+  health:  { icon:"heart",      color:"var(--danger)"   },
+  study:   { icon:"graduation", color:"var(--violet)"   },
+  reading: { icon:"book",       color:"var(--accent)"   },
+  journal: { icon:"feather",    color:"var(--accent-2)" },
+  band:    { icon:"music",      color:"var(--accent)"   },
+  talk:    { icon:"sparkles",   color:"var(--ink-3)"    },
+};
+
+const ACTION_LABEL = {
+  add:"Added", done:"Completed", delete:"Removed",
+  habit:"Habit", weight:"Weight", income:"Income",
+  expense:"Expense", session:"Session", progress:"Reading",
+  entry:"Journal", snooze:"Snoozed",
+};
+
+const ActivityCard = () => {
+  const [entries, setEntries] = useState([]);
+  const [filter, setFilter] = useState("");
+
+  const load = (mod="") => {
+    const url = mod ? `/api/activity?limit=150&module=${mod}` : '/api/activity?limit=150';
+    fetch(url).then(r=>r.json()).then(setEntries).catch(()=>{});
+  };
+
+  useEffect(() => {
+    load(filter);
+    const onRefresh = () => load(filter);
+    window.addEventListener('mc:refresh', onRefresh);
+    return () => window.removeEventListener('mc:refresh', onRefresh);
+  }, [filter]);
+
+  const today = new Date().toISOString().slice(0,10);
+  const yesterday = new Date(Date.now()-86400000).toISOString().slice(0,10);
+
+  const byDate = entries.reduce((acc,e) => {
+    const d = e.ts.slice(0,10);
+    (acc[d] = acc[d]||[]).push(e);
+    return acc;
+  }, {});
+
+  const clearLog = async () => {
+    if (!confirm('Clear all activity history?')) return;
+    await fetch('/api/activity',{method:'DELETE'}).catch(()=>{});
+    setEntries([]);
+  };
+
+  const modules = Object.keys(MODULE_META);
+
+  return (
+    <Card num="11" title="Activity Log" span={4}
+      right={<>
+        <button className="btn" onClick={clearLog} style={{fontSize:10,color:'var(--ink-4)'}}>Clear</button>
+      </>}
+    >
+      {/* Module filter pills */}
+      <div style={{display:'flex',gap:4,flexWrap:'wrap',marginBottom:10}}>
+        <button onClick={()=>setFilter("")}
+          className={"btn"+(filter===""?" active":"")}
+          style={{fontSize:10,padding:'2px 8px',background:filter===""?'var(--surface-3)':'transparent'}}>All</button>
+        {modules.map(m => (
+          <button key={m} onClick={()=>setFilter(filter===m?"":m)}
+            className="btn" style={{fontSize:10,padding:'2px 8px',
+              background:filter===m?'var(--surface-3)':'transparent',
+              borderColor:filter===m?(MODULE_META[m]?.color||'var(--line)'):'var(--line)',
+              color:filter===m?(MODULE_META[m]?.color||'var(--ink)'):'var(--ink-3)'}}>
+            {m}
+          </button>
+        ))}
+      </div>
+
+      {entries.length === 0 && (
+        <div className="muted-2 mono" style={{fontSize:11,padding:'16px 0',textAlign:'center'}}>
+          No activity yet — start using modules to build history.
+        </div>
+      )}
+
+      {Object.entries(byDate).sort((a,b)=>b[0].localeCompare(a[0])).map(([date, items]) => (
+        <div key={date} style={{marginBottom:10}}>
+          <div className="section-h">
+            <span>{date===today?'Today':date===yesterday?'Yesterday':date}</span>
+            <span className="muted-2 mono" style={{fontSize:10}}>{items.length}</span>
+            <span className="line"/>
+          </div>
+          {items.map(e => {
+            const meta = MODULE_META[e.module] || {icon:'circle', color:'var(--ink-4)'};
+            return (
+              <div key={e.id} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0',borderBottom:'1px solid var(--line-soft)'}}>
+                <span className="mono muted-2" style={{fontSize:10,width:42,flexShrink:0}}>{e.ts.slice(11,16)}</span>
+                <Icon name={meta.icon} size={12} style={{color:meta.color,flexShrink:0}}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <span style={{fontSize:11,color:'var(--ink-3)'}}>{ACTION_LABEL[e.action]||e.action} · </span>
+                  <span style={{fontSize:11}}>{e.detail}</span>
+                  {e.meta && <span className="muted-2 mono" style={{fontSize:10,marginLeft:6}}>{e.meta}</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </Card>
+  );
+};
+
 // ── Today Hub ────────────────────────────────────────────────────────────────
 const TodayHub = () => {
   const [data, setData] = React.useState(null);
@@ -1654,5 +1762,5 @@ const TodayHub = () => {
 
 window.MissionModules = {
   AgendaCard, FinanceCard, BandCard, HealthCard, WorkCard,
-  StudyCard, ReadingCard, HolidayCard, JournalCard, TodayHub
+  StudyCard, ReadingCard, HolidayCard, JournalCard, TodayHub, ActivityCard
 };

@@ -4,9 +4,11 @@ if os.name == "nt":
     os.environ.setdefault("GIT_PYTHON_GIT_EXECUTABLE", r"C:\Program Files\Git\cmd\git.exe")
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 import json
+import sqlite3
 import sys
 
 from dotenv import load_dotenv
@@ -44,6 +46,7 @@ GAMING_FILE      = DATA_DIR / "gaming.json"
 HOLIDAYS_FILE    = DATA_DIR / "holidays.json"
 JOURNAL_FILE     = DATA_DIR / "journal.json"
 BRIEF_FILE       = DATA_DIR / "brief.json"
+DB_PATH          = DATA_DIR / "mission_control.db"
 
 GCAL_SCOPES    = ['https://www.googleapis.com/auth/calendar.readonly']
 GCAL_CREDS_FILE = Path(__file__).parent / "credentials.json"
@@ -61,6 +64,45 @@ def _load(path, default=None):
 
 def _save(path, data):
     Path(path).write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+@contextmanager
+def _db():
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=MEMORY")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS activity_log (
+            id     INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts     TEXT NOT NULL,
+            module TEXT NOT NULL,
+            action TEXT NOT NULL,
+            detail TEXT NOT NULL DEFAULT '',
+            meta   TEXT NOT NULL DEFAULT ''
+        )
+    """)
+    conn.commit()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+def _log(module, action, detail="", meta=""):
+    try:
+        with _db() as conn:
+            conn.execute(
+                "INSERT INTO activity_log (ts, module, action, detail, meta) VALUES (?,?,?,?,?)",
+                (datetime.now().isoformat(timespec="seconds"), module, action, str(detail), str(meta))
+            )
+            conn.execute(
+                "DELETE FROM activity_log WHERE id NOT IN (SELECT id FROM activity_log ORDER BY id DESC LIMIT 500)"
+            )
+    except Exception:
+        pass  # logging must never break the request
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
 
@@ -495,7 +537,9 @@ def get_finances():
 @app.route("/api/finances", methods=["POST"])
 def post_finance():
     d = request.json
-    return jsonify({"message": tool_add_transaction(d["description"], d["amount"], d["type"], d["category"], d.get("date",""))})
+    result = tool_add_transaction(d["description"], d["amount"], d["type"], d["category"], d.get("date",""))
+    _log("finance", d.get("type","expense"), f"${d['amount']} — {d['description']}", d.get("category",""))
+    return jsonify({"message": result})
 
 @app.route("/api/finances/<int:tid>", methods=["DELETE"])
 def delete_finance(tid):
@@ -807,6 +851,7 @@ def post_agenda():
         "date": d.get("date", datetime.now().strftime("%Y-%m-%d"))
     })
     _save(AGENDA_FILE, items)
+    _log("agenda", "add", d.get("label", ""))
     return jsonify({"id": aid})
 
 @app.route("/api/agenda/<int:aid>/toggle", methods=["POST"])
@@ -819,6 +864,7 @@ def toggle_agenda(aid):
     if not was_done:
         items = [i for i in items if i["id"] != aid]
         _save(AGENDA_FILE, items)
+        _log("agenda", "done", item.get("label", ""))
         return jsonify({"done": True, "removed": True})
     item["done"] = False
     _save(AGENDA_FILE, items)
@@ -889,8 +935,10 @@ def post_health_habit():
     habits = health.setdefault("habits", {})
     day = habits.setdefault(date, {})
     habit_name = d["habit"]
-    day[habit_name] = not day.get(habit_name, False)
+    new_val = not day.get(habit_name, False)
+    day[habit_name] = new_val
     _save(HEALTH_FILE, health)
+    _log("health", "habit", f"{habit_name} {'✓' if new_val else '✗'}")
     return jsonify({"ok": True})
 
 @app.route("/api/health/weight", methods=["POST"])
@@ -902,6 +950,7 @@ def post_health_weight():
     date = d.get("date", datetime.now().strftime("%Y-%m-%d"))
     health.setdefault("weight", {})[date] = float(d["weight"])
     _save(HEALTH_FILE, health)
+    _log("health", "weight", f"{d['weight']} lb")
     return jsonify({"ok": True})
 
 @app.route("/api/health/calories", methods=["POST"])
@@ -933,20 +982,27 @@ def post_work():
         "created": datetime.now().strftime("%Y-%m-%d")
     })
     _save(WORK_FILE, items)
+    _log("work", "add", d.get("title", ""), d.get("project", ""))
     return jsonify({"id": wid})
 
 @app.route("/api/work/<int:wid>/done", methods=["POST"])
 def done_work(wid):
     items = _load(WORK_FILE)
+    done = next((i for i in items if i["id"] == wid), None)
     items = [i for i in items if i["id"] != wid]
     _save(WORK_FILE, items)
+    if done:
+        _log("work", "done", done.get("title", ""), done.get("project", ""))
     return jsonify({"ok": True})
 
 @app.route("/api/work/<int:wid>", methods=["DELETE"])
 def delete_work(wid):
     items = _load(WORK_FILE)
+    deleted = next((i for i in items if i["id"] == wid), None)
     items = [i for i in items if i["id"] != wid]
     _save(WORK_FILE, items)
+    if deleted:
+        _log("work", "delete", deleted.get("title", ""), deleted.get("project", ""))
     return jsonify({"ok": True})
 
 # ── Study ──────────────────────────────────────────────────────────────────────
@@ -984,13 +1040,15 @@ def post_study_session():
     d = request.json
     study = _load(STUDY_FILE)
     sessions = study.setdefault("sessions", [])
+    mins = d.get("minutes", 0)
+    topic = d.get("topic", "")
     sessions.append({
         "date": d.get("date", datetime.now().strftime("%Y-%m-%d")),
-        "minutes": d.get("minutes", 0),
-        "topic": d.get("topic", "")
+        "minutes": mins, "topic": topic
     })
     study["total_hours"] = round(sum(s.get("minutes", 0) for s in sessions) / 60, 1)
     _save(STUDY_FILE, study)
+    _log("study", "session", f"{mins}min{f' — {topic}' if topic else ''}")
     return jsonify({"ok": True})
 
 # ── Reading ────────────────────────────────────────────────────────────────────
@@ -1012,6 +1070,8 @@ def post_reading_progress():
         reading["current"]["page"] = d.get("page", reading["current"].get("page", 0))
         reading["current"]["last_read"] = datetime.now().strftime("%Y-%m-%d")
         _save(READING_FILE, reading)
+        title = reading["current"].get("title", "book")
+        _log("reading", "progress", f"{title} → p.{d.get('page')}")
         return jsonify({"ok": True})
     return jsonify({"error": "no current book"}), 404
 
@@ -1114,6 +1174,32 @@ def post_journal():
             "mood": d.get("mood", ""), "created": datetime.now().isoformat()
         })
     _save(JOURNAL_FILE, entries)
+    words = len(d.get("body","").split())
+    _log("journal", "entry", f"{date} — {words} words")
+    return jsonify({"ok": True})
+
+# ── Activity Log ───────────────────────────────────────────────────────────────
+
+@app.route("/api/activity")
+def get_activity():
+    module = request.args.get("module", "")
+    limit = min(int(request.args.get("limit", 100)), 500)
+    with _db() as conn:
+        if module:
+            rows = conn.execute(
+                "SELECT * FROM activity_log WHERE module=? ORDER BY ts DESC LIMIT ?",
+                (module, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM activity_log ORDER BY ts DESC LIMIT ?", (limit,)
+            ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+@app.route("/api/activity", methods=["DELETE"])
+def clear_activity():
+    with _db() as conn:
+        conn.execute("DELETE FROM activity_log")
     return jsonify({"ok": True})
 
 if __name__ == "__main__":

@@ -68,7 +68,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "modules": {
     "agenda": true, "finance": true, "band": true, "health": true,
     "work": true, "study": true, "reading": true,
-    "holidays": true, "journal": true
+    "holidays": true, "journal": true, "activity": true
   }
 }/*EDITMODE-END*/;
 
@@ -85,6 +85,7 @@ const SIDEBAR_NAV = [
   { id: "reading",    icon: "book",       label: "Reading",     badge: "" },
   { id: "holidays",   icon: "plane",      label: "Holidays",    badge: "" },
   { id: "journal",    icon: "feather",    label: "Journal",     badge: "" },
+  { id: "activity",  icon: "clock",      label: "Activity",    badge: "" },
 ];
 
 // Bottom nav items for mobile (most important ones)
@@ -100,7 +101,7 @@ const MODULE_LABELS = [
   ["agenda","Today","calendar"],["finance","Finance","wallet"],
   ["band","Band","music"],["health","Health","heart"],["work","Work","briefcase"],
   ["study","Study","graduation"],["reading","Reading","book"],
-  ["holidays","Travel","plane"],["journal","Journal","feather"],
+  ["holidays","Travel","plane"],["journal","Journal","feather"],["activity","Activity","clock"],
 ];
 
 const App = () => {
@@ -184,6 +185,7 @@ const App = () => {
     { id: "reading",  el: <M.ReadingCard /> },
     { id: "holidays", el: <M.HolidayCard /> },
     { id: "journal",  el: <M.JournalCard /> },
+    { id: "activity", el: <M.ActivityCard /> },
   ];
 
   const pageTitle = active === "dashboard"
@@ -370,7 +372,7 @@ const App = () => {
         <TweakSection label="Modules">
           {[["agenda","Today / Agenda"],["finance","Finance"],["band","Band"],
             ["health","Health & Fitness"],["work","Work"],["study","Studying"],["reading","Reading"],
-            ["holidays","Holidays"],["journal","Journal"],
+            ["holidays","Holidays"],["journal","Journal"],["activity","Activity Log"],
           ].map(([k, label]) => (
             <TweakToggle key={k} label={label} value={t.modules[k] !== false}
               onChange={(v) => setTweak("modules", { ...t.modules, [k]: v })} />
