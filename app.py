@@ -69,7 +69,7 @@ DB_PATH          = DATA_DIR / "mission_control.db"
 FINANCE_SHEET_ID = os.environ.get("FINANCE_SHEET_ID", "")
 HEALTH_SHEET_ID  = os.environ.get("HEALTH_SHEET_ID", "")
 
-GCAL_SCOPES    = ['https://www.googleapis.com/auth/calendar.readonly']
+GCAL_SCOPES    = ['https://www.googleapis.com/auth/calendar.events']
 GCAL_CREDS_FILE = DATA_DIR / "credentials.json"
 GCAL_TOKEN_FILE = DATA_DIR / "token.json"
 GOOGLE_OAUTH_CLIENT_ID = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
@@ -236,6 +236,12 @@ def tool_add_show(date, event, venue, city, tickets="", notes=""):
     shows.append({"date": date, "event": event, "venue": venue, "city": city, "tickets": tickets, "notes": notes})
     _save(SHOWS_FILE, shows)
     push_result = tool_push_site(f"Add show: {event} at {venue}")
+    _gcal_create_event(
+        title=f"🎸 {event}",
+        date_str=date, time_str="",
+        description=f"Coming Up Aces show\nVenue: {venue}\n{notes}".strip(),
+        location=f"{venue}, {city}",
+    )
     return f"Show added: {event} — {venue}, {city} on {date}. {push_result}"
 
 def tool_remove_show(index: int):
@@ -326,6 +332,11 @@ def tool_add_reminder(title, due_date, category="personal", reminder_type="one-t
         r["interval_days"] = int(interval_days)
     reminders.append(r)
     _save(REMINDERS_FILE, reminders)
+    _gcal_create_event(
+        title=f"⏰ {title}",
+        date_str=due_date, time_str="",
+        description=f"Reminder — {category}\n{notes}".strip(),
+    )
     return f"Reminder set: {title} — due {due_date}"
 
 def tool_snooze_reminder(reminder_id: int):
@@ -403,9 +414,15 @@ def tool_financial_summary(category=None):
 def tool_add_agenda_item(label, time="09:00", tag="Personal", date=""):
     items = _load(AGENDA_FILE)
     aid = max((a["id"] for a in items), default=0) + 1
-    items.append({"id": aid, "time": time, "label": label, "tag": tag, "done": False,
-                  "date": date or datetime.now().strftime("%Y-%m-%d")})
+    date_str = date or datetime.now().strftime("%Y-%m-%d")
+    items.append({"id": aid, "time": time, "label": label, "tag": tag, "done": False, "date": date_str})
     _save(AGENDA_FILE, items)
+    _gcal_create_event(
+        title=label,
+        date_str=date_str, time_str=time,
+        duration_min=30,
+        description=f"Agenda — {tag}",
+    )
     return f"Agenda item added: {label} at {time}"
 
 # ── Work tasks (GLS/Code) ──────────────────────────────────────────────────────
@@ -1867,6 +1884,45 @@ def _gcal_service():
             return None, "auth_required"
     return build('calendar', 'v3', credentials=creds), None
 
+def _gcal_create_event(title, date_str, time_str="", duration_min=60, description="", location=""):
+    """Create a Google Calendar event. Silent on errors. Returns event link or None."""
+    try:
+        svc, err = _gcal_service()
+        if err:
+            return None
+        from datetime import datetime as dt, timedelta
+        if time_str:
+            try:
+                start = dt.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+            except ValueError:
+                start = dt.strptime(date_str, "%Y-%m-%d")
+                time_str = ""
+        else:
+            start = dt.strptime(date_str, "%Y-%m-%d")
+        if time_str:
+            end = start + timedelta(minutes=int(duration_min))
+            body = {
+                "summary": title,
+                "description": description,
+                "location": location,
+                "start": {"dateTime": start.isoformat(), "timeZone": "America/Chicago"},
+                "end":   {"dateTime": end.isoformat(),   "timeZone": "America/Chicago"},
+            }
+        else:
+            # All-day event
+            end_day = start + timedelta(days=1)
+            body = {
+                "summary": title,
+                "description": description,
+                "location": location,
+                "start": {"date": start.strftime("%Y-%m-%d")},
+                "end":   {"date": end_day.strftime("%Y-%m-%d")},
+            }
+        created = svc.events().insert(calendarId="primary", body=body).execute()
+        return created.get("htmlLink")
+    except Exception:
+        return None
+
 @app.route("/api/calendar/events")
 def get_calendar_events():
     if not _has_google_oauth_client():
@@ -2020,13 +2076,20 @@ def post_agenda():
     items = _load(AGENDA_FILE)
     aid = max((a["id"] for a in items), default=0) + 1
     label = d.get("label") or d.get("text", "")
+    date_str = d.get("date", datetime.now().strftime("%Y-%m-%d"))
+    time_str = d.get("time", "")
     items.append({
-        "id": aid, "time": d.get("time", ""), "label": label,
-        "tag": d.get("tag", ""), "done": False,
-        "date": d.get("date", datetime.now().strftime("%Y-%m-%d"))
+        "id": aid, "time": time_str, "label": label,
+        "tag": d.get("tag", ""), "done": False, "date": date_str,
     })
     _save(AGENDA_FILE, items)
     _log("agenda", "add", label)
+    _gcal_create_event(
+        title=label,
+        date_str=date_str, time_str=time_str,
+        duration_min=30,
+        description=f"Agenda — {d.get('tag','')}",
+    )
     return jsonify({"id": aid})
 
 @app.route("/api/agenda/<int:aid>/toggle", methods=["POST"])
