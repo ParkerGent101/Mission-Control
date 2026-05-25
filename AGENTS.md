@@ -8,7 +8,16 @@ Mission Control is a personal AI dashboard. It is a Python/Flask backend with Re
 
 - Local: `python app.py` or `start.bat`, then open `http://localhost:5000`.
 - Production: `powershell -ExecutionPolicy Bypass -File deploy.ps1`.
-- Cloud Run uses `DATA_DIR=/data`; local development usually uses the repo `data/` folder.
+- Cloud Run uses `DATA_DIR=/data`; local development usually uses the repo `data/` folder as cache/fallback storage.
+
+## Data Source Of Truth
+
+Google Sheets in the user's Google Drive is the intended source of truth for personal data. Local JSON files in `data/` should be treated as runtime cache, offline fallback, import/export scratch files, or migration helpers unless the user explicitly says a file is a seed/example file.
+
+- Prefer Drive -> Local sync for personal data.
+- Avoid hand-editing tracked `data/*.json` files as the long-term fix.
+- Do not commit personal local data, OAuth tokens, local sheet IDs, screenshots, logs, or SQLite files.
+- When adding new personal-data features, design around Google Sheets/Drive first, then use JSON only as a cache/fallback layer.
 
 ## Important Files
 
@@ -17,7 +26,7 @@ Mission Control is a personal AI dashboard. It is a Python/Flask backend with Re
 - `static/modules.jsx`: dashboard modules and most user-facing module UI.
 - `static/settings.jsx`: settings/onboarding-related UI.
 - `templates/index.html`: page shell and CSS variables/styles.
-- `data/*.json`: local persistent data. Treat this as personal runtime data unless a file is clearly a template or seed.
+- `data/*.json`: local cache/fallback data. Google Sheets/Drive is the real source of truth unless a file is clearly a template or seed.
 - `requirements.txt`: Python dependencies.
 - `deploy.ps1` and `deploy.sh`: deployment entry points.
 
@@ -25,7 +34,7 @@ Mission Control is a personal AI dashboard. It is a Python/Flask backend with Re
 
 - Keep the no-build frontend model unless the user explicitly asks to introduce a bundler.
 - Prefer small Flask route/helper changes over broad rewrites in `app.py`; it is a large central file.
-- Keep JSON persistence stable. When adding a new data file, use the existing `_load`/`_save` style and include a safe default.
+- Keep JSON persistence stable as a cache/fallback layer. When adding a new data file, use the existing `_load`/`_save` style and include a safe default, but prefer Sheets/Drive for canonical user data.
 - Never commit secrets, OAuth tokens, local databases, logs, screenshots, or personal runtime exports.
 - Be careful with tracked `data/*.json` files: many contain real user state. Ask before replacing or mass-normalizing them.
 - When touching deployed behavior, check local startup and the affected route/module before suggesting deployment.

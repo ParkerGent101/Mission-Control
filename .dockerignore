@@ -19,6 +19,9 @@ env/
 data/token.json
 data/drive_token.json
 data/credentials.json
+data/*.json
+!data/*.example.json
+!data/README.md
 data/*.log
 data/*.db
 data/*.sqlite
