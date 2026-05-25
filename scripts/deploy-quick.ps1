@@ -1,4 +1,4 @@
-# Mission Control — Quick Deploy
+# Mission Control - Quick Deploy
 #
 # Optionally commits staged/unstaged changes, then deploys to Cloud Run
 # and verifies the live URL responds.
@@ -22,7 +22,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 $LIVE_URL   = "https://mission-control-568559213462.us-central1.run.app"
 $PROJECT_DIR = $PSScriptRoot | Split-Path -Parent
 
-# Safe files — mirrors the $dataFiles list in deploy.ps1 and known source files
+# Safe files - mirrors the $dataFiles list in deploy.ps1 and known source files
 $SAFE_SOURCE = @("app.py", "requirements.txt", "Dockerfile", ".dockerignore", "deploy.ps1", "deploy.sh", "HANDOFF.md")
 $SAFE_DATA   = @(
     "shows.json","band_songs.json","band_contacts.json","band_content.json",
@@ -83,12 +83,12 @@ if (-not $SkipCommit) {
         Write-Host "  Working tree is clean." -ForegroundColor Gray
     }
 
-    # Push to GitHub (non-fatal — stderr is captured by PowerShell automatically)
+    # Push to GitHub (non-fatal - stderr is captured by PowerShell automatically)
     Write-Host ""
     Write-Host "==> Pushing to GitHub..." -ForegroundColor Cyan
     git push origin main
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "  WARNING: git push failed (exit $LASTEXITCODE) — continuing with Cloud Run deploy." -ForegroundColor Yellow
+        Write-Host "  WARNING: git push failed (exit $LASTEXITCODE) - continuing with Cloud Run deploy." -ForegroundColor Yellow
     } else {
         Write-Host "  Pushed." -ForegroundColor Green
     }
@@ -114,7 +114,7 @@ try {
     if ($resp.StatusCode -eq 200) {
         Write-Host ""
         Write-Host "============================================" -ForegroundColor Green
-        Write-Host " DEPLOYED and LIVE — HTTP $($resp.StatusCode)" -ForegroundColor Green
+        Write-Host " DEPLOYED and LIVE - HTTP $($resp.StatusCode)" -ForegroundColor Green
         Write-Host " $LIVE_URL" -ForegroundColor Green
         Write-Host "============================================" -ForegroundColor Green
     } else {
