@@ -1,7 +1,4 @@
 import os
-os.environ.setdefault("GIT_PYTHON_REFRESH", "quiet")
-if os.name == "nt":
-    os.environ.setdefault("GIT_PYTHON_GIT_EXECUTABLE", r"C:\Program Files\Git\cmd\git.exe")
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
 from contextlib import contextmanager
@@ -14,12 +11,18 @@ import sys
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request, session, redirect
 import anthropic
-import git
 
 load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "mc-change-this-secret-key-2026")
+
+@app.after_request
+def no_cache_static(response):
+    if request.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+    return response
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
 
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "aces2026")
@@ -27,6 +30,21 @@ DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "aces2026")
 BAND_DIR    = Path(os.environ.get("BAND_DIR", "C:/Users/Parker/projects/coming-up-aces"))
 DATA_DIR    = Path(os.environ.get("DATA_DIR", str(Path(__file__).parent / "data")))
 DATA_DIR.mkdir(exist_ok=True)
+
+GCS_BUCKET   = os.environ.get("GCS_BUCKET", "")
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+CUA_REPO     = "ParkerGent101/CUA-Website"
+_gcs_client_cache = None
+
+def _gcs():
+    global _gcs_client_cache
+    if _gcs_client_cache is None and GCS_BUCKET:
+        try:
+            from google.cloud import storage
+            _gcs_client_cache = storage.Client()
+        except Exception:
+            pass
+    return _gcs_client_cache
 
 SHOWS_FILE       = BAND_DIR / "shows.json" if BAND_DIR.exists() else DATA_DIR / "shows.json"
 VIDEOS_FILE      = BAND_DIR / "videos.json" if BAND_DIR.exists() else DATA_DIR / "videos.json"
@@ -36,6 +54,7 @@ TASKS_FILE       = DATA_DIR / "tasks.json"
 REMINDERS_FILE   = DATA_DIR / "reminders.json"
 SAVINGS_FILE     = DATA_DIR / "savings.json"
 CONTENT_FILE     = DATA_DIR / "band_content.json"
+SONGS_FILE       = DATA_DIR / "band_songs.json"
 BAND_CONTACTS_FILE = DATA_DIR / "band_contacts.json"
 AGENDA_FILE      = DATA_DIR / "agenda.json"
 HEALTH_FILE      = DATA_DIR / "health.json"
@@ -47,23 +66,89 @@ HOLIDAYS_FILE    = DATA_DIR / "holidays.json"
 JOURNAL_FILE     = DATA_DIR / "journal.json"
 BRIEF_FILE       = DATA_DIR / "brief.json"
 DB_PATH          = DATA_DIR / "mission_control.db"
+FINANCE_SHEET_ID = os.environ.get("FINANCE_SHEET_ID", "")
 
 GCAL_SCOPES    = ['https://www.googleapis.com/auth/calendar.readonly']
-GCAL_CREDS_FILE = Path(__file__).parent / "credentials.json"
-GCAL_TOKEN_FILE = Path(__file__).parent / "token.json"
+GCAL_CREDS_FILE = DATA_DIR / "credentials.json"
+GCAL_TOKEN_FILE = DATA_DIR / "token.json"
+GOOGLE_OAUTH_CLIENT_ID = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+GOOGLE_OAUTH_CLIENT_SECRET = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
+GOOGLE_OAUTH_PROJECT_ID = os.environ.get("GOOGLE_OAUTH_PROJECT_ID", "")
+
+GDRIVE_SCOPES      = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
+GDRIVE_TOKEN_FILE  = DATA_DIR / "drive_token.json"
+GDRIVE_CONFIG_FILE = DATA_DIR / "drive_config.json"
+
+
+ONBOARDING_FILE   = DATA_DIR / "onboarding.json"
+PLAID_CONFIG_FILE  = DATA_DIR / "plaid_config.json"
+USER_CONFIG_FILE   = DATA_DIR / "user_config.json"
+BIRTHDAYS_FILE     = DATA_DIR / "birthdays.json"
+TCPG_FILE          = DATA_DIR / "tcpg.json"
+PRACTICE_FILE      = DATA_DIR / "practice.json"
+
+NATIONAL_HOLIDAYS = [
+    {"date": "2026-01-01", "title": "New Year's Day"},
+    {"date": "2026-01-19", "title": "Martin Luther King Jr. Day"},
+    {"date": "2026-02-16", "title": "Presidents' Day"},
+    {"date": "2026-05-25", "title": "Memorial Day"},
+    {"date": "2026-06-19", "title": "Juneteenth"},
+    {"date": "2026-07-04", "title": "Independence Day"},
+    {"date": "2026-09-07", "title": "Labor Day"},
+    {"date": "2026-11-11", "title": "Veterans Day"},
+    {"date": "2026-11-26", "title": "Thanksgiving"},
+    {"date": "2026-12-25", "title": "Christmas Day"},
+    {"date": "2026-12-31", "title": "New Year's Eve"},
+]
+
+POP_CULTURE_EVENTS = [
+    {"date": "2026-02-08", "title": "Super Bowl LX"},
+    {"date": "2026-02-15", "title": "NBA All-Star Game"},
+    {"date": "2026-02-22", "title": "Grammy Awards 2026"},
+    {"date": "2026-03-02", "title": "Academy Awards (Oscars)"},
+    {"date": "2026-06-11", "title": "FIFA World Cup 2026 begins"},
+    {"date": "2026-07-19", "title": "FIFA World Cup 2026 Final"},
+    {"date": "2026-09-13", "title": "NFL Season Kickoff 2026"},
+]
+
+PLAID_CLIENT_ID = os.environ.get("PLAID_CLIENT_ID", "")
+PLAID_SECRET    = os.environ.get("PLAID_SECRET", "")
+PLAID_ENV       = os.environ.get("PLAID_ENV", "sandbox")
 
 def _load(path, default=None):
     p = Path(path)
+    fallback = default if default is not None else []
+    if GCS_BUCKET:
+        try:
+            client = _gcs()
+            if client:
+                blob = client.bucket(GCS_BUCKET).blob(p.name)
+                if blob.exists():
+                    return json.loads(blob.download_as_text())
+                return fallback
+        except Exception:
+            pass
     if not p.exists():
-        init = json.dumps(default) if default is not None else "[]"
-        p.write_text(init, encoding="utf-8")
+        p.write_text(json.dumps(default) if default is not None else "[]", encoding="utf-8")
     try:
         return json.loads(p.read_text(encoding="utf-8-sig"))
     except Exception:
-        return default if default is not None else []
+        return fallback
 
 def _save(path, data):
-    Path(path).write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    p = Path(path)
+    content = json.dumps(data, indent=2, ensure_ascii=False)
+    if GCS_BUCKET:
+        try:
+            client = _gcs()
+            if client:
+                client.bucket(GCS_BUCKET).blob(p.name).upload_from_string(
+                    content, content_type="application/json"
+                )
+                return
+        except Exception:
+            pass
+    p.write_text(content, encoding="utf-8")
 
 @contextmanager
 def _db():
@@ -104,26 +189,29 @@ def _log(module, action, detail="", meta=""):
     except Exception:
         pass  # logging must never break the request
 
+@app.errorhandler(500)
+def handle_500(e):
+    import traceback
+    return f"<h2>500 Error</h2><pre>{traceback.format_exc()}</pre>", 500
+
 # ── Auth ───────────────────────────────────────────────────────────────────────
 
 @app.before_request
 def require_auth():
-    public = ["/login", "/api/login", "/api/calendar/callback"]
-    if request.path in public:
-        return
-    if not session.get("authenticated"):
-        if request.path.startswith("/api/"):
-            return jsonify({"error": "Unauthorized"}), 401
-        return redirect("/login")
+    pass  # auth removed — personal app, no login needed
 
 @app.route("/login")
 def login_page():
     return render_template("login.html")
 
+def _effective_password():
+    override = _load(USER_CONFIG_FILE, {}).get("password")
+    return override if override else DASHBOARD_PASSWORD
+
 @app.route("/api/login", methods=["POST"])
 def do_login():
     pw = (request.json or {}).get("password", "")
-    if pw == DASHBOARD_PASSWORD:
+    if pw == _effective_password():
         session.permanent = True
         session["authenticated"] = True
         return jsonify({"ok": True})
@@ -146,14 +234,16 @@ def tool_add_show(date, event, venue, city, tickets="", notes=""):
     shows = _load(SHOWS_FILE)
     shows.append({"date": date, "event": event, "venue": venue, "city": city, "tickets": tickets, "notes": notes})
     _save(SHOWS_FILE, shows)
-    return f"Show added: {event} — {venue}, {city} on {date}"
+    push_result = tool_push_site(f"Add show: {event} at {venue}")
+    return f"Show added: {event} — {venue}, {city} on {date}. {push_result}"
 
 def tool_remove_show(index: int):
     shows = _load(SHOWS_FILE)
     if 0 <= index < len(shows):
         removed = shows.pop(index)
         _save(SHOWS_FILE, shows)
-        return f"Removed: {removed['event']} on {removed['date']}"
+        push_result = tool_push_site(f"Remove show: {removed['event']} on {removed['date']}")
+        return f"Removed: {removed['event']} on {removed['date']}. {push_result}"
     return f"No show at index {index}."
 
 def tool_add_video(title, url, date=""):
@@ -163,14 +253,42 @@ def tool_add_video(title, url, date=""):
     return f"Video added: {title}"
 
 def tool_push_site(message="Update site content"):
+    """Push shows.json to the CUA Website repo via GitHub API. Works locally and on Cloud Run."""
+    import base64
+    import urllib.request
+    import urllib.error
+    if not GITHUB_TOKEN:
+        return "Push failed: GITHUB_TOKEN not set. Add it to .env"
     try:
-        repo = git.Repo(BAND_DIR)
-        repo.git.add(all=True)
-        if not repo.is_dirty(untracked_files=True):
-            return "Nothing new to push — site is already up to date."
-        repo.index.commit(message)
-        repo.git.push("origin", "main")
-        return f"Pushed to GitHub: '{message}'. Site will update on comingupaces.net in ~2 min."
+        with open(SHOWS_FILE, encoding="utf-8") as f:
+            content = f.read()
+    except Exception as e:
+        return f"Push failed: could not read shows data: {e}"
+    api_url = f"https://api.github.com/repos/{CUA_REPO}/contents/shows.json"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json",
+        "User-Agent": "mission-control",
+    }
+    sha = ""
+    try:
+        req = urllib.request.Request(api_url, headers=headers)
+        with urllib.request.urlopen(req) as resp:
+            sha = json.loads(resp.read().decode())["sha"]
+    except Exception:
+        pass
+    payload = json.dumps({
+        "message": message,
+        "content": base64.b64encode(content.encode()).decode(),
+        "sha": sha,
+    }).encode()
+    put_headers = {**headers, "Content-Type": "application/json"}
+    req = urllib.request.Request(api_url, data=payload, headers=put_headers, method="PUT")
+    try:
+        with urllib.request.urlopen(req):
+            return f"Pushed to GitHub: '{message}'. comingupaces.net will update in ~1 min."
+    except urllib.error.HTTPError as e:
+        return f"Push failed: {e.code} {e.read().decode()}"
     except Exception as e:
         return f"Push failed: {e}"
 
@@ -446,13 +564,15 @@ RESPONSE FORMAT — always reply with ONLY this JSON (no markdown, no extra text
 
 client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
-def run_agent(messages):
+_CACHED_TOOLS = [*TOOLS[:-1], {**TOOLS[-1], "cache_control": {"type": "ephemeral"}}]
+
+def run_agent(messages, model="claude-sonnet-4-6"):
     while True:
         response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=2048,
-            system=SYSTEM_PROMPT,
-            tools=TOOLS,
+            model=model,
+            max_tokens=1024,
+            system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
+            tools=_CACHED_TOOLS,
             messages=messages
         )
         messages.append({"role": "assistant", "content": response.content})
@@ -493,7 +613,9 @@ def get_shows():
 
 @app.route("/api/shows", methods=["POST"])
 def post_show():
-    d = request.json
+    d = request.json or {}
+    if not d.get("event"):
+        return jsonify({"error": "event field is required"}), 400
     return jsonify({"message": tool_add_show(d["date"], d["event"], d["venue"], d["city"], d.get("tickets",""), d.get("notes",""))})
 
 @app.route("/api/shows/<int:idx>", methods=["DELETE"])
@@ -528,23 +650,91 @@ def done_task(task_id):
 
 @app.route("/api/finances", methods=["GET"])
 def get_finances():
-    data = _load(FINANCE_FILE)
     month = request.args.get("month")
+    if FINANCE_SHEET_ID:
+        try:
+            svc  = _sheets_svc()
+            tab  = _month_tab(month) if month else _first_sheet_name(svc, FINANCE_SHEET_ID)
+            rows = svc.spreadsheets().values().get(
+                spreadsheetId=FINANCE_SHEET_ID, range=tab
+            ).execute().get('values', [])
+            return jsonify(_parse_transaction_rows(rows))
+        except Exception:
+            pass
+    data = _load(FINANCE_FILE)
     if month:
         data = [t for t in data if t.get("date", "").startswith(month)]
     return jsonify(data)
 
+@app.route("/api/finances/budget", methods=["GET"])
+def get_finances_budget():
+    month = request.args.get("month")
+    if FINANCE_SHEET_ID:
+        try:
+            svc  = _sheets_svc()
+            tab  = _month_tab(month) if month else _first_sheet_name(svc, FINANCE_SHEET_ID)
+            rows = svc.spreadsheets().values().get(
+                spreadsheetId=FINANCE_SHEET_ID, range=tab
+            ).execute().get('values', [])
+            return jsonify(_parse_budget_rows(rows))
+        except Exception:
+            pass  # fall through to local calculation
+    fin_month = month or datetime.now().strftime("%Y-%m")
+    finances = _load(FINANCE_FILE)
+    txns = [t for t in finances if t.get("date", "").startswith(fin_month)]
+    income  = sum(float(t.get("amount", 0)) for t in txns if t.get("type") == "income")
+    expense = sum(float(t.get("amount", 0)) for t in txns if t.get("type") == "expense")
+    cats = {}
+    for t in txns:
+        if t.get("type") == "expense":
+            c = t.get("category", "Other")
+            cats[c] = cats.get(c, 0) + float(t.get("amount", 0))
+    return jsonify({
+        "income": income, "expense": expense,
+        "categories": [{"name": k, "actual": v, "budgeted": 0} for k, v in cats.items()]
+    })
+
 @app.route("/api/finances", methods=["POST"])
 def post_finance():
     d = request.json
-    result = tool_add_transaction(d["description"], d["amount"], d["type"], d["category"], d.get("date",""))
-    _log("finance", d.get("type","expense"), f"${d['amount']} — {d['description']}", d.get("category",""))
-    return jsonify({"message": result})
+    date     = d.get("date") or datetime.date.today().isoformat()
+    desc, amt = d.get("description", ""), float(d.get("amount", 0))
+    txn_type, cat = d.get("type", "expense"), d.get("category", "Fun")
+    if FINANCE_SHEET_ID:
+        try:
+            svc = _sheets_svc()
+            tab = _month_tab(date[:7])
+            svc.spreadsheets().values().append(
+                spreadsheetId=FINANCE_SHEET_ID, range=tab,
+                valueInputOption='USER_ENTERED', insertDataOption='INSERT_ROWS',
+                body={'values': [[date, desc, amt, cat, txn_type]]}
+            ).execute()
+            return jsonify({"ok": True})
+        except Exception:
+            pass  # fall through to local storage
+    tool_add_transaction(desc, amt, txn_type, cat, date)
+    return jsonify({"ok": True})
 
 @app.route("/api/finances/<int:tid>", methods=["DELETE"])
 def delete_finance(tid):
+    if FINANCE_SHEET_ID:
+        return jsonify({"error": "Edit the Google Sheet directly to remove transactions"}), 400
     finances = _load(FINANCE_FILE)
-    finances = [t for t in finances if t.get("id") != tid]
+    _save(FINANCE_FILE, [t for t in finances if t.get("id") != tid])
+    return jsonify({"ok": True})
+
+@app.route("/api/finances/<int:tid>", methods=["PATCH"])
+def patch_finance(tid):
+    d = request.json or {}
+    if FINANCE_SHEET_ID:
+        return jsonify({"error": "Edit the Google Sheet directly to update transactions"}), 400
+    finances = _load(FINANCE_FILE)
+    txn = next((t for t in finances if t.get("id") == tid), None)
+    if not txn:
+        return jsonify({"error": "Not found"}), 404
+    for key in ("category", "description", "amount", "type"):
+        if key in d:
+            txn[key] = d[key]
     _save(FINANCE_FILE, finances)
     return jsonify({"ok": True})
 
@@ -617,17 +807,23 @@ def delete_subscription(sid):
 
 # ── Band Content Queue ─────────────────────────────────────────────────────────
 
+@app.route("/api/band/songs", methods=["GET"])
+def get_songs():
+    return jsonify(_load(SONGS_FILE, {"setlists": [], "repertoire": [], "future_songs": [], "organized_by_key": []}))
+
 @app.route("/api/band/content", methods=["GET"])
 def get_content():
-    return jsonify(_load(CONTENT_FILE))
+    data = _load(CONTENT_FILE)
+    if isinstance(data, dict): data = []
+    return jsonify(data)
 
 @app.route("/api/band/content", methods=["POST"])
 def post_content():
     d = request.json
     content = _load(CONTENT_FILE)
     cid = max((c["id"] for c in content), default=0) + 1
-    content.append({"id": cid, "title": d["title"], "status": "queued",
-                    "created": datetime.now().strftime("%Y-%m-%d"), "notes": d.get("notes", "")})
+    content.append({"id": cid, "title": d["title"], "type": d.get("type", ""), "priority": d.get("priority", "normal"),
+                    "status": "queued", "created": datetime.now().strftime("%Y-%m-%d"), "notes": d.get("notes", "")})
     _save(CONTENT_FILE, content)
     return jsonify({"message": f"Queued: {d['title']}"})
 
@@ -658,6 +854,7 @@ def post_band_contact():
         "status": d.get("status","not contacted"), "notes": d.get("notes","")
     })
     _save(BAND_CONTACTS_FILE, contacts)
+    _sheets_push_contacts()
     return jsonify({"id": cid})
 
 @app.route("/api/band/contacts/<int:cid>", methods=["PUT"])
@@ -668,6 +865,7 @@ def update_band_contact(cid):
         if c["id"] == cid:
             c.update({k: v for k, v in d.items() if k != "id"})
             _save(BAND_CONTACTS_FILE, contacts)
+            _sheets_push_contacts()
             return jsonify({"ok": True})
     return jsonify({"error": "not found"}), 404
 
@@ -676,7 +874,835 @@ def delete_band_contact(cid):
     contacts = _load(BAND_CONTACTS_FILE)
     contacts = [c for c in contacts if c["id"] != cid]
     _save(BAND_CONTACTS_FILE, contacts)
+    _sheets_push_contacts()
     return jsonify({"ok": True})
+
+# ── User profile & settings ───────────────────────────────────────────────────
+
+@app.route("/api/user/profile", methods=["GET", "POST"])
+def user_profile():
+    ob = _load(ONBOARDING_FILE, {})
+    if request.method == "GET":
+        cfg = _load(USER_CONFIG_FILE, {})
+        return jsonify({
+            "name": cfg.get("name") or ob.get("name", ""),
+            "persona": ob.get("persona", ""),
+        })
+    d = request.json or {}
+    cfg = _load(USER_CONFIG_FILE, {})
+    if d.get("name"):
+        cfg["name"] = d["name"].strip()
+    _save(USER_CONFIG_FILE, cfg)
+    return jsonify({"ok": True})
+
+@app.route("/api/user/password", methods=["POST"])
+def user_change_password():
+    d = request.json or {}
+    if d.get("current") != _effective_password():
+        return jsonify({"error": "Current password incorrect"}), 401
+    new_pw = (d.get("new") or "").strip()
+    if len(new_pw) < 4:
+        return jsonify({"error": "New password must be at least 4 characters"}), 400
+    cfg = _load(USER_CONFIG_FILE, {})
+    cfg["password"] = new_pw
+    _save(USER_CONFIG_FILE, cfg)
+    return jsonify({"ok": True})
+
+@app.route("/api/user/reset-onboarding", methods=["POST"])
+def user_reset_onboarding():
+    ob = _load(ONBOARDING_FILE, {})
+    ob["completed"] = False
+    _save(ONBOARDING_FILE, ob)
+    return jsonify({"ok": True})
+
+# ── Data management ────────────────────────────────────────────────────────────
+
+@app.route("/api/data/export")
+def data_export():
+    import io, zipfile
+    from flask import send_file
+    buf = io.BytesIO()
+    skip = {"user_config.json", "plaid_config.json", "onboarding.json", "mission_control.db"}
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in DATA_DIR.glob("*.json"):
+            if f.name not in skip:
+                zf.write(f, f.name)
+    buf.seek(0)
+    return send_file(buf, mimetype="application/zip", as_attachment=True,
+                     download_name=f"mc-data-{datetime.now().strftime('%Y%m%d')}.zip")
+
+@app.route("/api/data/reset", methods=["POST"])
+def data_reset():
+    to_clear = [
+        FINANCE_FILE, SUBS_FILE, SAVINGS_FILE, TASKS_FILE, WORK_FILE,
+        REMINDERS_FILE, CONTENT_FILE, BAND_CONTACTS_FILE, AGENDA_FILE,
+        HEALTH_FILE, STUDY_FILE, READING_FILE, GAMING_FILE, HOLIDAYS_FILE,
+        JOURNAL_FILE, BRIEF_FILE,
+    ]
+    for f in to_clear:
+        p = Path(f)
+        if p.exists():
+            p.unlink()
+    try:
+        with _db() as conn:
+            conn.execute("DELETE FROM activity_log")
+    except Exception:
+        pass
+    _log("system", "reset", "All module data reset")
+    return jsonify({"ok": True})
+
+# ── Onboarding ────────────────────────────────────────────────────────────────
+
+@app.route("/api/onboarding", methods=["GET"])
+def onboarding_status():
+    if not ONBOARDING_FILE.exists():
+        # Brand new install — skip wizard if user already has data
+        has_data = any([
+            bool(_load(FINANCE_FILE, [])),
+            bool(_load(WORK_FILE, [])),
+            bool(_load(TASKS_FILE, [])),
+        ])
+        return jsonify({"needed": not has_data})
+    ob = _load(ONBOARDING_FILE, {})
+    # File exists: respect completed flag (completed=False lets you re-run the wizard)
+    return jsonify({"needed": not ob.get("completed", False)})
+
+@app.route("/api/onboarding", methods=["POST"])
+def complete_onboarding():
+    d = request.json or {}
+    _save(ONBOARDING_FILE, {
+        "completed": True,
+        "name": d.get("name", ""),
+        "persona": d.get("persona", ""),
+        "modules": d.get("modules", {}),
+        "theme": d.get("theme", ""),
+        "fitness": d.get("fitness", {}),
+        "completed_at": datetime.now().isoformat(),
+    })
+    # Persist fitness config into health.json so the Health card can use it
+    fitness = d.get("fitness", {})
+    if fitness.get("program") and fitness["program"] != "none":
+        health = _load(HEALTH_FILE)
+        if not isinstance(health, dict):
+            health = {"habits": {}, "weight": {}, "calories": {}}
+        health["workout_config"] = fitness
+        _save(HEALTH_FILE, health)
+    return jsonify({"ok": True})
+
+# ── Plaid ──────────────────────────────────────────────────────────────────────
+
+def _plaid_client():
+    try:
+        import plaid
+        from plaid.api import plaid_api
+        env_map = {
+            "sandbox":     plaid.Environment.Sandbox,
+            "development": plaid.Environment.Development,
+            "production":  plaid.Environment.Production,
+        }
+        cfg = plaid.Configuration(
+            host=env_map.get(PLAID_ENV, plaid.Environment.Sandbox),
+            api_key={"clientId": PLAID_CLIENT_ID, "secret": PLAID_SECRET},
+        )
+        return plaid_api.PlaidApi(plaid.ApiClient(cfg)), None
+    except ImportError:
+        return None, "plaid-python not installed — run: pip install plaid-python"
+    except Exception as e:
+        return None, str(e)
+
+@app.route("/api/plaid/link_token", methods=["POST"])
+def plaid_link_token():
+    if not PLAID_CLIENT_ID or not PLAID_SECRET:
+        return jsonify({"error": "Plaid not configured — add PLAID_CLIENT_ID and PLAID_SECRET to .env"}), 400
+    client, err = _plaid_client()
+    if err:
+        return jsonify({"error": err}), 500
+    try:
+        from plaid.model.link_token_create_request import LinkTokenCreateRequest
+        from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
+        from plaid.model.products import Products
+        from plaid.model.country_code import CountryCode
+        ob = _load(ONBOARDING_FILE, {})
+        user_name = ob.get("name", "user")
+        req = LinkTokenCreateRequest(
+            products=[Products("transactions")],
+            client_name="Mission Control",
+            country_codes=[CountryCode("US")],
+            language="en",
+            user=LinkTokenCreateRequestUser(client_user_id="mc-user", legal_name=user_name),
+        )
+        resp = client.link_token_create(req)
+        return jsonify({"link_token": resp["link_token"]})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/plaid/exchange", methods=["POST"])
+def plaid_exchange():
+    if not PLAID_CLIENT_ID or not PLAID_SECRET:
+        return jsonify({"error": "Plaid not configured"}), 400
+    public_token = (request.json or {}).get("public_token")
+    if not public_token:
+        return jsonify({"error": "Missing public_token"}), 400
+    client, err = _plaid_client()
+    if err:
+        return jsonify({"error": err}), 500
+    try:
+        from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
+        resp = client.item_public_token_exchange(ItemPublicTokenExchangeRequest(public_token=public_token))
+        config = _load(PLAID_CONFIG_FILE, {"items": []})
+        config["items"].append({
+            "access_token": resp["access_token"],
+            "item_id": resp["item_id"],
+            "added": datetime.now().isoformat(),
+        })
+        _save(PLAID_CONFIG_FILE, config)
+        return jsonify({"ok": True, "item_id": resp["item_id"]})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/plaid/status", methods=["GET"])
+def plaid_status():
+    config = _load(PLAID_CONFIG_FILE, {"items": []})
+    return jsonify({"connected": len(config.get("items", [])) > 0, "count": len(config.get("items", []))})
+
+@app.route("/api/plaid/transactions", methods=["GET"])
+def plaid_transactions():
+    config = _load(PLAID_CONFIG_FILE, {"items": []})
+    items = config.get("items", [])
+    if not items:
+        return jsonify({"error": "No Plaid accounts connected"}), 400
+    plaid_c, err = _plaid_client()
+    if err:
+        return jsonify({"error": err}), 500
+    try:
+        from plaid.model.transactions_get_request import TransactionsGetRequest
+        from plaid.model.transactions_get_request_options import TransactionsGetRequestOptions
+        import datetime as dt
+        end_date = dt.date.today()
+        start_date = end_date - dt.timedelta(days=30)
+        req = TransactionsGetRequest(
+            access_token=items[0]["access_token"],
+            start_date=start_date,
+            end_date=end_date,
+            options=TransactionsGetRequestOptions(count=50),
+        )
+        resp = plaid_c.transactions_get(req)
+        txns = []
+        for t in resp["transactions"]:
+            raw_cats = t.get("category") or []
+            cat = raw_cats[0].lower().replace(" ", "_") if raw_cats else "other"
+            txns.append({
+                "id": t["transaction_id"],
+                "name": t.get("merchant_name") or t["name"],
+                "amount": float(t["amount"]),
+                "date": t["date"].isoformat() if hasattr(t["date"], "isoformat") else str(t["date"]),
+                "category": cat,
+            })
+        return jsonify({"transactions": txns})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/plaid/categorize", methods=["POST"])
+def plaid_categorize():
+    d = request.json or {}
+    categories = d.get("categories", {})
+    config = _load(PLAID_CONFIG_FILE, {"items": []})
+    config["category_map"] = {**config.get("category_map", {}), **categories}
+    _save(PLAID_CONFIG_FILE, config)
+    return jsonify({"ok": True, "saved": len(categories)})
+
+# ── Birthdays ─────────────────────────────────────────────────────────────────
+
+@app.route("/api/birthdays", methods=["GET"])
+def get_birthdays():
+    return jsonify(_load(BIRTHDAYS_FILE))
+
+@app.route("/api/birthdays", methods=["POST"])
+def post_birthday():
+    d = request.json or {}
+    bdays = _load(BIRTHDAYS_FILE)
+    bid = max((b.get("id", 0) for b in bdays), default=0) + 1
+    bdays.append({
+        "id": bid, "name": d.get("name", ""),
+        "date": d.get("date", ""), "notes": d.get("notes", ""),
+        "gift_remind_days": int(d.get("gift_remind_days", 14)),
+    })
+    _save(BIRTHDAYS_FILE, bdays)
+    return jsonify({"id": bid})
+
+@app.route("/api/birthdays/<int:bid>", methods=["DELETE"])
+def delete_birthday(bid):
+    bdays = _load(BIRTHDAYS_FILE)
+    bdays = [b for b in bdays if b.get("id") != bid]
+    _save(BIRTHDAYS_FILE, bdays)
+    return jsonify({"ok": True})
+
+# ── Calendar overview ─────────────────────────────────────────────────────────
+
+@app.route("/api/calendar/overview")
+def calendar_overview():
+    today = datetime.now().date()
+    cutoff = today + timedelta(days=90)
+    events = []
+
+    # Band shows
+    for s in _load(SHOWS_FILE):
+        try:
+            d = datetime.strptime(s["date"], "%Y-%m-%d").date()
+            if today <= d <= cutoff:
+                events.append({"date": s["date"], "type": "show",
+                    "title": f"{s['event']} — {s['venue']}, {s['city']}", "meta": s.get("notes","")})
+        except Exception:
+            pass
+
+    # Birthdays + gift reminders
+    for b in _load(BIRTHDAYS_FILE):
+        raw = b.get("date", "")
+        remind = int(b.get("gift_remind_days", 14))
+        try:
+            if len(raw) == 5:  # MM-DD
+                bd = datetime.strptime(f"{today.year}-{raw}", "%Y-%m-%d").date()
+                if bd < today:
+                    bd = datetime.strptime(f"{today.year + 1}-{raw}", "%Y-%m-%d").date()
+            else:
+                bd = datetime.strptime(raw, "%Y-%m-%d").date().replace(year=today.year)
+                if bd < today:
+                    bd = bd.replace(year=today.year + 1)
+        except Exception:
+            continue
+        if bd <= cutoff:
+            age = ""
+            if len(raw) > 5:
+                try:
+                    age = f" (turns {bd.year - datetime.strptime(raw, '%Y-%m-%d').year})"
+                except Exception:
+                    pass
+            events.append({"date": bd.isoformat(), "type": "birthday",
+                "title": f"{b['name']}'s Birthday{age}", "meta": b.get("notes", "")})
+            gift_date = bd - timedelta(days=remind)
+            if today <= gift_date <= cutoff:
+                events.append({"date": gift_date.isoformat(), "type": "birthday",
+                    "title": f"Get gift for {b['name']} ({remind}d before birthday)", "meta": ""})
+
+    # National holidays
+    for h in NATIONAL_HOLIDAYS:
+        try:
+            d = datetime.strptime(h["date"], "%Y-%m-%d").date()
+            if today <= d <= cutoff:
+                events.append({"date": h["date"], "type": "holiday", "title": h["title"], "meta": ""})
+        except Exception:
+            pass
+
+    # Pop culture events
+    for c in POP_CULTURE_EVENTS:
+        try:
+            d = datetime.strptime(c["date"], "%Y-%m-%d").date()
+            if today <= d <= cutoff:
+                events.append({"date": c["date"], "type": "culture", "title": c["title"], "meta": ""})
+        except Exception:
+            pass
+
+    # Work items with due_date
+    for w in _load(WORK_FILE):
+        if not w.get("done") and w.get("due_date"):
+            try:
+                d = datetime.strptime(w["due_date"], "%Y-%m-%d").date()
+                if today <= d <= cutoff:
+                    events.append({"date": w["due_date"], "type": "work",
+                        "title": w["title"], "meta": w.get("project", "")})
+            except Exception:
+                pass
+
+    # Google Calendar (if connected)
+    try:
+        svc, err = _gcal_service()
+        if not err and svc:
+            now_iso = datetime.utcnow().isoformat() + 'Z'
+            end_iso = (datetime.utcnow() + timedelta(days=90)).isoformat() + 'Z'
+            items = svc.events().list(
+                calendarId='primary', timeMin=now_iso, timeMax=end_iso,
+                maxResults=60, singleEvents=True, orderBy='startTime'
+            ).execute().get('items', [])
+            for item in items:
+                start = item.get('start', {}).get('dateTime', item.get('start', {}).get('date', ''))
+                if start:
+                    events.append({"date": start[:10], "type": "gcal",
+                        "title": item.get('summary', '(no title)'),
+                        "meta": item.get('location', '')})
+    except Exception:
+        pass
+
+    events.sort(key=lambda e: e["date"])
+    return jsonify({"events": events})
+
+# ── Google Sheets auto-sync helpers ──────────────────────────────────────────
+
+def _sheets_push_finances():
+    """Push local finances to Google Sheets after any write. Silent on errors."""
+    try:
+        cfg = _load(GDRIVE_CONFIG_FILE, {})
+        sheet_id = cfg.get("sheet_finance")
+        if not sheet_id:
+            return
+        sheets, err = _gdrive_service()
+        if err:
+            return
+        tab = _first_sheet_name(sheets, sheet_id)
+        finances = _load(FINANCE_FILE)
+        values = [["Date", "Description", "Amount", "Type", "Category"]]
+        for t in sorted(finances, key=lambda x: x.get("date", ""), reverse=True):
+            values.append([t.get("date",""), t.get("description",""),
+                           t.get("amount",""), t.get("type",""), t.get("category","")])
+        sheets.spreadsheets().values().update(
+            spreadsheetId=sheet_id, range=tab,
+            valueInputOption='USER_ENTERED', body={'values': values}
+        ).execute()
+    except Exception:
+        pass
+
+def _sheets_push_contacts():
+    """Push local band contacts to Google Sheets after any write. Silent on errors."""
+    try:
+        cfg = _load(GDRIVE_CONFIG_FILE, {})
+        sheet_id = cfg.get("sheet_contacts")
+        if not sheet_id:
+            return
+        sheets, err = _gdrive_service()
+        if err:
+            return
+        tab = _first_sheet_name(sheets, sheet_id)
+        contacts = _load(BAND_CONTACTS_FILE)
+        values = [["Name", "Venue", "City", "Status", "Last", "Notes"]]
+        for c in contacts:
+            values.append([c.get("name",""), c.get("venue",""), c.get("city",""),
+                           c.get("status",""), c.get("last",""), c.get("notes","")])
+        sheets.spreadsheets().values().update(
+            spreadsheetId=sheet_id, range=tab,
+            valueInputOption='USER_ENTERED', body={'values': values}
+        ).execute()
+    except Exception:
+        pass
+
+# ── Google Drive / Sheets ─────────────────────────────────────────────────────
+
+def _extract_sheet_id(url_or_id):
+    import re
+    m = re.search(r'/spreadsheets/d/([a-zA-Z0-9_-]+)', url_or_id)
+    return m.group(1) if m else url_or_id.strip()
+
+def _first_sheet_name(sheets_svc, sheet_id):
+    meta = sheets_svc.spreadsheets().get(spreadsheetId=sheet_id, fields='sheets.properties.title').execute()
+    return meta['sheets'][0]['properties']['title']
+
+def _sheets_svc():
+    """Sheets API client using Application Default Credentials. Works on Cloud Run (service account) and locally (gcloud auth application-default login)."""
+    import google.auth
+    import google.auth.transport.requests
+    from googleapiclient.discovery import build
+    creds, _ = google.auth.default(scopes=['https://www.googleapis.com/auth/spreadsheets'])
+    if not creds.valid:
+        creds.refresh(google.auth.transport.requests.Request())
+    return build('sheets', 'v4', credentials=creds)
+
+def _month_tab(yyyy_mm):
+    """Convert YYYY-MM to full month name for sheet tab lookup."""
+    months = ['January','February','March','April','May','June',
+              'July','August','September','October','November','December']
+    try:
+        return months[int(str(yyyy_mm).split('-')[1]) - 1]
+    except Exception:
+        return months[0]
+
+def _parse_budget_rows(rows):
+    """Parse a budget-tracker sheet and return {income, expense, categories}.
+    Sheet layout: col A=category (merged), B=description, C=account, D=due date,
+    E=budgeted amount, F=actual amount, G=paid. Income section on the right side."""
+    if not rows:
+        return {'income': 0.0, 'expense': 0.0, 'categories': []}
+    max_cols = max((len(r) for r in rows), default=1)
+    rows = [r + [''] * (max_cols - len(r)) for r in rows]
+
+    # Find the header row (first 5 rows) by looking for "Budgeted Amount" or "Actual Amount"
+    hdr_row_idx = 0
+    for i, row in enumerate(rows[:5]):
+        row_lower = ' '.join(row).lower()
+        if 'budget' in row_lower or 'actual amount' in row_lower:
+            hdr_row_idx = i
+            break
+
+    hdr = [c.lower().strip() for c in rows[hdr_row_idx]]
+    budget_col  = next((i for i, h in enumerate(hdr) if 'budget' in h), 4)
+    actual_col  = next((i for i, h in enumerate(hdr) if 'actual' in h), 5)
+    income_col  = next((i for i, h in enumerate(hdr) if h == 'income'), None)
+
+    # Parse budget section (left side, rows after header)
+    cat_data = {}
+    current_cat = ''
+    for row in rows[hdr_row_idx + 1:]:
+        row_lower = ' '.join(row[:8]).lower()
+        if any(kw in row_lower for kw in ['anticipated', 'actual total', 'roommate', 'savings total']):
+            break
+        cat_val = row[0].strip()
+        if cat_val and not any(ch.isdigit() for ch in cat_val):
+            current_cat = cat_val
+        if not current_cat:
+            continue
+        budg_str   = row[budget_col].strip() if len(row) > budget_col else ''
+        actual_str = row[actual_col].strip() if len(row) > actual_col else ''
+        if not budg_str and not actual_str:
+            continue
+        try: budg = float(budg_str.replace('$','').replace(',','') or 0)
+        except: budg = 0.0
+        try: actual = float(actual_str.replace('$','').replace(',','') or 0)
+        except: actual = 0.0
+        if budg > 0 or actual > 0:
+            if current_cat not in cat_data:
+                cat_data[current_cat] = {'budgeted': 0.0, 'actual': 0.0}
+            cat_data[current_cat]['budgeted'] += budg
+            cat_data[current_cat]['actual']   += actual
+
+    # Parse income section (right side — scan for "Income" header column)
+    income_total = 0.0
+    if income_col is None:
+        # Scan all rows for a cell that says exactly "Income"
+        for ri, row in enumerate(rows[:5]):
+            for ci, cell in enumerate(row):
+                if cell.strip().lower() == 'income':
+                    income_col = ci
+                    break
+            if income_col is not None:
+                break
+
+    if income_col is not None:
+        amt_col = income_col + 2
+        for row in rows[hdr_row_idx + 1:]:
+            if len(row) <= income_col:
+                continue
+            desc = row[income_col].strip()
+            if not desc:
+                continue
+            if 'total' in desc.lower():
+                try:
+                    t = float(row[amt_col].strip().replace('$','').replace(',','') or 0)
+                    if t > 0:
+                        income_total = t
+                except Exception:
+                    pass
+                break
+            if len(row) > amt_col:
+                try:
+                    income_total += float(row[amt_col].strip().replace('$','').replace(',','') or 0)
+                except Exception:
+                    pass
+
+    categories = [{'name': k, 'budgeted': round(v['budgeted'], 2), 'actual': round(v['actual'], 2)}
+                  for k, v in cat_data.items() if v['budgeted'] > 0 or v['actual'] > 0]
+    expense_total = sum(v['actual'] for v in cat_data.values())
+    return {'income': round(income_total, 2), 'expense': round(expense_total, 2), 'categories': categories}
+
+def _parse_transaction_rows(rows):
+    """Parse individual transactions from detail tables (Gas, Fun, Grocery Trip Totals)."""
+    if not rows:
+        return []
+    max_cols = max((len(r) for r in rows), default=1)
+    rows = [r + [''] * (max_cols - len(r)) for r in rows]
+
+    table_configs = [
+        ('Gas',          ['gas total', 'gas totals']),
+        ('Fun',          ['fun total', 'fun totals']),
+        ('Food / Grocer', ['grocery trip', 'groceries total', 'grocery']),
+    ]
+    transactions = []
+
+    for cat, keywords in table_configs:
+        header_row = header_col = None
+        for ri, row in enumerate(rows):
+            for ci, cell in enumerate(row):
+                if any(kw in cell.lower() for kw in keywords):
+                    header_row, header_col = ri, ci
+                    break
+            if header_row is not None:
+                break
+        if header_row is None:
+            continue
+
+        for ri in range(header_row + 2, len(rows)):
+            row    = rows[ri]
+            cell1  = row[header_col].strip()     if len(row) > header_col     else ''
+            cell2  = row[header_col + 1].strip() if len(row) > header_col + 1 else ''
+            if not cell1 and not cell2:
+                break
+            if 'total' in (cell1 + cell2).lower():
+                break
+            try: amt = float(cell2.replace('$','').replace(',','') or 0)
+            except: amt = 0.0
+            if amt <= 0 and not cell1:
+                continue
+            desc, date_val = cell1, ''
+            import re
+            if cell1 and re.match(r'^\d{1,2}[-/]\w+$|^\w{3,}[-/]\d{1,2}$', cell1):
+                date_val, desc = cell1, cat
+            transactions.append({'description': desc, 'date': date_val,
+                                  'amount': abs(amt), 'category': cat, 'type': 'expense'})
+
+    return [{'id': i + 1, 'source': 'sheet', **t} for i, t in enumerate(transactions)]
+
+def _office_file_error(e):
+    msg = str(e)
+    if 'Office file' in msg:
+        return 'This file is an Excel/Office file — open it in Google Drive and go to File → Save as Google Sheets, then use the new sheet URL.'
+    return None
+
+def _request_base_url():
+    """Return the correct base URL, forcing https when behind Cloud Run's load balancer."""
+    base = request.host_url.rstrip('/')
+    if request.headers.get('X-Forwarded-Proto') == 'https':
+        base = 'https://' + base.split('://', 1)[-1]
+    return base
+
+def _google_oauth_client_config():
+    if not GOOGLE_OAUTH_CLIENT_ID or not GOOGLE_OAUTH_CLIENT_SECRET:
+        return None
+    installed = {
+        "client_id": GOOGLE_OAUTH_CLIENT_ID,
+        "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+        "redirect_uris": ["http://localhost"],
+    }
+    if GOOGLE_OAUTH_PROJECT_ID:
+        installed["project_id"] = GOOGLE_OAUTH_PROJECT_ID
+    return {"installed": installed}
+
+def _has_google_oauth_client():
+    return GCAL_CREDS_FILE.exists() or _google_oauth_client_config() is not None
+
+def _oauth_flow(scopes, redirect_uri):
+    from google_auth_oauthlib.flow import Flow
+    if GCAL_CREDS_FILE.exists():
+        return Flow.from_client_secrets_file(str(GCAL_CREDS_FILE), scopes=scopes, redirect_uri=redirect_uri)
+    config = _google_oauth_client_config()
+    if not config:
+        return None
+    return Flow.from_client_config(config, scopes=scopes, redirect_uri=redirect_uri)
+
+def _gdrive_service():
+    try:
+        from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request
+        from googleapiclient.discovery import build
+    except ImportError:
+        return None, "not_installed"
+    if not _has_google_oauth_client():
+        return None, "setup_required"
+    creds = None
+    if GDRIVE_TOKEN_FILE.exists():
+        creds = Credentials.from_authorized_user_file(str(GDRIVE_TOKEN_FILE), GDRIVE_SCOPES)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            GDRIVE_TOKEN_FILE.write_text(creds.to_json())
+        else:
+            return None, "auth_required"
+    return build('sheets', 'v4', credentials=creds), None
+
+@app.route("/api/credentials/upload", methods=["POST"])
+def upload_credentials():
+    d = request.json or {}
+    content = d.get("content", "")
+    try:
+        parsed = json.loads(content)
+    except Exception:
+        return jsonify({"error": "Invalid JSON"}), 400
+    if "installed" not in parsed and "web" not in parsed:
+        return jsonify({"error": "Not a valid Google OAuth credentials file"}), 400
+    GCAL_CREDS_FILE.write_text(content)
+    GDRIVE_TOKEN_FILE.unlink(missing_ok=True)
+    GCAL_TOKEN_FILE.unlink(missing_ok=True)
+    return jsonify({"ok": True})
+
+@app.route("/api/drive/status")
+def drive_status():
+    cfg = _load(GDRIVE_CONFIG_FILE, {})
+    base = {"sheet_finance": cfg.get("sheet_finance", ""), "sheet_contacts": cfg.get("sheet_contacts", "")}
+    if not _has_google_oauth_client():
+        return jsonify({**base, "connected": False, "setup_required": True})
+    _, err = _gdrive_service()
+    return jsonify({**base, "connected": err is None, "setup_required": False, "error": err})
+
+@app.route("/api/drive/auth")
+def drive_auth_route():
+    try:
+        from google_auth_oauthlib.flow import Flow
+    except ImportError:
+        return jsonify({"error": "Run: pip install google-auth-oauthlib google-api-python-client"})
+    if not _has_google_oauth_client():
+        return jsonify({"error": "setup_required"})
+    redirect_uri = _request_base_url() + '/api/drive/callback'
+    flow = _oauth_flow(GDRIVE_SCOPES, redirect_uri)
+    auth_url, state = flow.authorization_url(access_type='offline', prompt='consent')
+    session['gdrive_state'] = state
+    session['gdrive_code_verifier'] = getattr(flow, 'code_verifier', None)
+    return jsonify({"auth_url": auth_url})
+
+@app.route("/api/drive/callback")
+def drive_callback():
+    try:
+        from google_auth_oauthlib.flow import Flow
+    except ImportError:
+        return "google-auth-oauthlib not installed", 500
+    redirect_uri = _request_base_url() + '/api/drive/callback'
+    try:
+        flow = _oauth_flow(GDRIVE_SCOPES, redirect_uri)
+        if flow is None:
+            return "Google OAuth client not configured", 400
+        verifier = session.pop('gdrive_code_verifier', None)
+        if verifier:
+            flow.code_verifier = verifier
+        flow.fetch_token(authorization_response=request.url)
+        GDRIVE_TOKEN_FILE.write_text(flow.credentials.to_json())
+        return redirect('/?connected=drive')
+    except Exception as e:
+        return f"<h2>Drive auth error</h2><pre>{e}</pre><br><a href='/'>Back to app</a>", 400
+
+@app.route("/api/drive/config", methods=["GET", "POST"])
+def drive_config():
+    if request.method == "GET":
+        return jsonify(_load(GDRIVE_CONFIG_FILE, {}))
+    d = request.json or {}
+    cfg = _load(GDRIVE_CONFIG_FILE, {})
+    if "sheet_finance" in d and d["sheet_finance"]:
+        cfg["sheet_finance"] = _extract_sheet_id(d["sheet_finance"])
+    if "sheet_contacts" in d and d["sheet_contacts"]:
+        cfg["sheet_contacts"] = _extract_sheet_id(d["sheet_contacts"])
+    _save(GDRIVE_CONFIG_FILE, cfg)
+    return jsonify({"ok": True})
+
+@app.route("/api/drive/sync/finances", methods=["POST"])
+def drive_sync_finances():
+    cfg = _load(GDRIVE_CONFIG_FILE, {})
+    sheet_id = cfg.get("sheet_finance")
+    if not sheet_id:
+        return jsonify({"error": "No Finance sheet ID configured — save it in Settings → Integrations"}), 400
+    sheets, err = _gdrive_service()
+    if err:
+        return jsonify({"error": f"Drive not connected: {err}"}), 400
+    try:
+        tab = _first_sheet_name(sheets, sheet_id)
+        rows = sheets.spreadsheets().values().get(
+            spreadsheetId=sheet_id, range=tab
+        ).execute().get('values', [])
+        if len(rows) < 2:
+            return jsonify({"ok": True, "count": 0})
+        headers = [h.lower().strip().replace(" ", "_") for h in rows[0]]
+        rebuilt = []
+        for idx, row in enumerate(rows[1:], start=1):
+            d = dict(zip(headers, row + [""] * max(0, len(headers) - len(row))))
+            desc = d.get("description", d.get("name", "")).strip()
+            date = d.get("date", "").strip()
+            try:
+                amt = float(str(d.get("amount", 0)).replace("$","").replace(",","") or 0)
+            except ValueError:
+                amt = 0.0
+            txn_type = d.get("type", "expense").strip().lower()
+            if txn_type not in ("income", "expense"):
+                txn_type = "expense"
+            rebuilt.append({"id": idx, "date": date, "description": desc,
+                             "amount": amt, "type": txn_type,
+                             "category": d.get("category", "personal").strip() or "personal"})
+        _save(FINANCE_FILE, rebuilt)
+        return jsonify({"ok": True, "count": len(rebuilt)})
+    except Exception as e:
+        return jsonify({"error": _office_file_error(e) or str(e)}), 500
+
+@app.route("/api/drive/push/finances", methods=["POST"])
+def drive_push_finances():
+    cfg = _load(GDRIVE_CONFIG_FILE, {})
+    sheet_id = cfg.get("sheet_finance")
+    if not sheet_id:
+        return jsonify({"error": "No Finance sheet ID configured"}), 400
+    sheets, err = _gdrive_service()
+    if err:
+        return jsonify({"error": f"Drive not connected: {err}"}), 400
+    try:
+        tab = _first_sheet_name(sheets, sheet_id)
+        finances = _load(FINANCE_FILE)
+        values = [["Date", "Description", "Amount", "Type", "Category"]]
+        for t in sorted(finances, key=lambda x: x.get("date", ""), reverse=True):
+            values.append([t.get("date",""), t.get("description",""),
+                           t.get("amount",""), t.get("type",""), t.get("category","")])
+        sheets.spreadsheets().values().update(
+            spreadsheetId=sheet_id, range=tab,
+            valueInputOption='USER_ENTERED', body={'values': values}
+        ).execute()
+        return jsonify({"ok": True, "count": len(finances)})
+    except Exception as e:
+        return jsonify({"error": _office_file_error(e) or str(e)}), 500
+
+@app.route("/api/drive/sync/contacts", methods=["POST"])
+def drive_sync_contacts():
+    cfg = _load(GDRIVE_CONFIG_FILE, {})
+    sheet_id = cfg.get("sheet_contacts")
+    if not sheet_id:
+        return jsonify({"error": "No Contacts sheet ID configured — save it in Settings → Integrations"}), 400
+    sheets, err = _gdrive_service()
+    if err:
+        return jsonify({"error": f"Drive not connected: {err}"}), 400
+    try:
+        tab = _first_sheet_name(sheets, sheet_id)
+        rows = sheets.spreadsheets().values().get(
+            spreadsheetId=sheet_id, range=tab
+        ).execute().get('values', [])
+        if len(rows) < 2:
+            return jsonify({"ok": True, "count": 0})
+        headers = [h.lower().strip().replace(" ", "_") for h in rows[0]]
+        existing = _load(BAND_CONTACTS_FILE)
+        seen = {c.get("name","").lower() for c in existing}
+        max_id = max((c.get("id", 0) for c in existing), default=0)
+        new_count = 0
+        for row in rows[1:]:
+            d = dict(zip(headers, row + [""] * max(0, len(headers) - len(row))))
+            name = d.get("name","").strip()
+            if not name or name.lower() in seen:
+                continue
+            max_id += 1
+            existing.append({"id": max_id, "name": name,
+                              "venue": d.get("venue","").strip(),
+                              "city": d.get("city","").strip(),
+                              "last": d.get("last","—").strip() or "—",
+                              "status": d.get("status","not contacted").strip() or "not contacted",
+                              "notes": d.get("notes","").strip()})
+            seen.add(name.lower())
+            new_count += 1
+        _save(BAND_CONTACTS_FILE, existing)
+        return jsonify({"ok": True, "count": new_count})
+    except Exception as e:
+        return jsonify({"error": _office_file_error(e) or str(e)}), 500
+
+@app.route("/api/drive/push/contacts", methods=["POST"])
+def drive_push_contacts():
+    cfg = _load(GDRIVE_CONFIG_FILE, {})
+    sheet_id = cfg.get("sheet_contacts")
+    if not sheet_id:
+        return jsonify({"error": "No Contacts sheet ID configured"}), 400
+    sheets, err = _gdrive_service()
+    if err:
+        return jsonify({"error": f"Drive not connected: {err}"}), 400
+    try:
+        tab = _first_sheet_name(sheets, sheet_id)
+        contacts = _load(BAND_CONTACTS_FILE)
+        values = [["Name", "Venue", "City", "Status", "Last", "Notes"]]
+        for c in contacts:
+            values.append([c.get("name",""), c.get("venue",""), c.get("city",""),
+                           c.get("status",""), c.get("last",""), c.get("notes","")])
+        sheets.spreadsheets().values().update(
+            spreadsheetId=sheet_id, range=tab,
+            valueInputOption='USER_ENTERED', body={'values': values}
+        ).execute()
+        return jsonify({"ok": True, "count": len(contacts)})
+    except Exception as e:
+        return jsonify({"error": _office_file_error(e) or str(e)}), 500
 
 # ── Google Calendar ────────────────────────────────────────────────────────────
 
@@ -701,7 +1727,7 @@ def _gcal_service():
 
 @app.route("/api/calendar/events")
 def get_calendar_events():
-    if not GCAL_CREDS_FILE.exists():
+    if not _has_google_oauth_client():
         return jsonify({"error": "setup_required"})
     svc, err = _gcal_service()
     if err:
@@ -723,12 +1749,13 @@ def calendar_auth_route():
         from google_auth_oauthlib.flow import Flow
     except ImportError:
         return jsonify({"error": "Run: pip install google-auth-oauthlib google-api-python-client"})
-    if not GCAL_CREDS_FILE.exists():
+    if not _has_google_oauth_client():
         return jsonify({"error": "setup_required"})
-    redirect_uri = request.host_url.rstrip('/') + '/api/calendar/callback'
-    flow = Flow.from_client_secrets_file(str(GCAL_CREDS_FILE), scopes=GCAL_SCOPES, redirect_uri=redirect_uri)
+    redirect_uri = _request_base_url() + '/api/calendar/callback'
+    flow = _oauth_flow(GCAL_SCOPES, redirect_uri)
     auth_url, state = flow.authorization_url(access_type='offline', prompt='consent')
     session['gcal_state'] = state
+    session['gcal_code_verifier'] = getattr(flow, 'code_verifier', None)
     return jsonify({"auth_url": auth_url})
 
 @app.route("/api/calendar/callback")
@@ -737,14 +1764,19 @@ def calendar_callback():
         from google_auth_oauthlib.flow import Flow
     except ImportError:
         return "google-auth-oauthlib not installed", 500
-    redirect_uri = request.host_url.rstrip('/') + '/api/calendar/callback'
-    flow = Flow.from_client_secrets_file(
-        str(GCAL_CREDS_FILE), scopes=GCAL_SCOPES,
-        state=session.get('gcal_state'), redirect_uri=redirect_uri
-    )
-    flow.fetch_token(authorization_response=request.url)
-    GCAL_TOKEN_FILE.write_text(flow.credentials.to_json())
-    return redirect('/')
+    redirect_uri = _request_base_url() + '/api/calendar/callback'
+    try:
+        flow = _oauth_flow(GCAL_SCOPES, redirect_uri)
+        if flow is None:
+            return "Google OAuth client not configured", 400
+        verifier = session.pop('gcal_code_verifier', None)
+        if verifier:
+            flow.code_verifier = verifier
+        flow.fetch_token(authorization_response=request.url)
+        GCAL_TOKEN_FILE.write_text(flow.credentials.to_json())
+        return redirect('/?connected=calendar')
+    except Exception as e:
+        return f"<h2>Calendar auth error</h2><pre>{e}</pre><br><a href='/'>Back to app</a>", 400
 
 # ── Talk (new UI card) ─────────────────────────────────────────────────────────
 
@@ -754,7 +1786,7 @@ def talk():
     text = data.get("text", "")
     messages = [{"role": "user", "content": text}]
     try:
-        reply, _ = run_agent(messages)
+        reply, _ = run_agent(messages, model="claude-haiku-4-5-20251001")
         return jsonify({"reply": reply})
     except Exception as e:
         return jsonify({"reply": f"Error: {e}"}), 500
@@ -845,13 +1877,14 @@ def post_agenda():
     d = request.json
     items = _load(AGENDA_FILE)
     aid = max((a["id"] for a in items), default=0) + 1
+    label = d.get("label") or d.get("text", "")
     items.append({
-        "id": aid, "time": d.get("time", ""), "label": d.get("label", ""),
+        "id": aid, "time": d.get("time", ""), "label": label,
         "tag": d.get("tag", ""), "done": False,
         "date": d.get("date", datetime.now().strftime("%Y-%m-%d"))
     })
     _save(AGENDA_FILE, items)
-    _log("agenda", "add", d.get("label", ""))
+    _log("agenda", "add", label)
     return jsonify({"id": aid})
 
 @app.route("/api/agenda/<int:aid>/toggle", methods=["POST"])
@@ -889,8 +1922,8 @@ def get_health():
     weight_dict = data.get("weight", {})
     weight_log = [{"date": d, "weight": w} for d, w in sorted(weight_dict.items())]
 
-    # Build habits_weekly for current Mon–Sun
-    today = datetime.now().date()
+    # Build habits_weekly for current Mon–Sun (UTC matches browser's toISOString date)
+    today = datetime.utcnow().date()
     week_start = today - timedelta(days=today.weekday())  # Monday
     week_days = [(week_start + timedelta(days=i)) for i in range(7)]
     week_day_strs = [d.strftime("%Y-%m-%d") for d in week_days]
@@ -923,7 +1956,10 @@ def get_health():
         latest = max(calories.keys())
         cal_target = calories[latest].get("goal", 2200)
 
-    return jsonify({**data, "weight_log": weight_log, "habits_weekly": habits_weekly, "calories_target": cal_target})
+    today_str = today.strftime("%Y-%m-%d")
+    food_log_today = data.get("food_log", {}).get(today_str, [])
+
+    return jsonify({**data, "weight_log": weight_log, "habits_weekly": habits_weekly, "calories_target": cal_target, "food_log_today": food_log_today})
 
 @app.route("/api/health/habit", methods=["POST"])
 def post_health_habit():
@@ -953,6 +1989,18 @@ def post_health_weight():
     _log("health", "weight", f"{d['weight']} lb")
     return jsonify({"ok": True})
 
+@app.route("/api/health/config", methods=["POST"])
+def post_health_config():
+    d = request.json or {}
+    health = _load(HEALTH_FILE)
+    if not isinstance(health, dict):
+        health = {"habits": {}, "weight": {}, "calories": {}}
+    for key in ("height_in", "goal_weight"):
+        if key in d:
+            health[key] = d[key]
+    _save(HEALTH_FILE, health)
+    return jsonify({"ok": True})
+
 @app.route("/api/health/calories", methods=["POST"])
 def post_health_calories():
     d = request.json
@@ -963,6 +2011,46 @@ def post_health_calories():
     day = health.setdefault("calories", {}).setdefault(date, {})
     day.update({k: v for k, v in d.items() if k != "date"})
     _save(HEALTH_FILE, health)
+    return jsonify({"ok": True})
+
+@app.route("/api/health/food", methods=["POST"])
+def post_health_food():
+    d = request.json
+    health = _load(HEALTH_FILE)
+    if not isinstance(health, dict):
+        health = {"habits": {}, "weight": {}, "calories": {}, "food_log": {}}
+    date = d.get("date", datetime.now().strftime("%Y-%m-%d"))
+    items = health.setdefault("food_log", {}).setdefault(date, [])
+    item = {
+        "name": d.get("name", ""),
+        "calories": int(d.get("calories", 0)),
+        "protein": int(d.get("protein", 0)),
+        "carbs": int(d.get("carbs", 0)),
+        "fat": int(d.get("fat", 0)),
+    }
+    items.append(item)
+    _save(HEALTH_FILE, health)
+    _log("health", "food", f"{item['name']} {item['calories']} kcal P{item['protein']} C{item['carbs']} F{item['fat']}")
+    return jsonify({"ok": True})
+
+@app.route("/api/health/food", methods=["DELETE"])
+def delete_health_food():
+    d = request.json or {}
+    health = _load(HEALTH_FILE)
+    if not isinstance(health, dict):
+        return jsonify({"ok": False})
+    date = d.get("date", datetime.now().strftime("%Y-%m-%d"))
+    food_log = health.setdefault("food_log", {})
+    items = food_log.get(date, [])
+    idx = d.get("index")
+    name = d.get("name")
+    if idx is not None and 0 <= idx < len(items):
+        items.pop(idx)
+        food_log[date] = items
+        _save(HEALTH_FILE, health)
+    elif name:
+        food_log[date] = [f for f in items if f.get("name") != name]
+        _save(HEALTH_FILE, health)
     return jsonify({"ok": True})
 
 # ── Work ───────────────────────────────────────────────────────────────────────
@@ -976,11 +2064,16 @@ def post_work():
     d = request.json
     items = _load(WORK_FILE)
     wid = max((w["id"] for w in items), default=0) + 1
-    items.append({
+    item = {
         "id": wid, "title": d.get("title", ""), "project": d.get("project", ""),
         "priority": d.get("priority", "normal"), "done": False,
         "created": datetime.now().strftime("%Y-%m-%d")
-    })
+    }
+    if d.get("notes"):
+        item["notes"] = d["notes"]
+    if d.get("due_date"):
+        item["due_date"] = d["due_date"]
+    items.append(item)
     _save(WORK_FILE, items)
     _log("work", "add", d.get("title", ""), d.get("project", ""))
     return jsonify({"id": wid})
@@ -1202,10 +2295,257 @@ def clear_activity():
         conn.execute("DELETE FROM activity_log")
     return jsonify({"ok": True})
 
+# ── TCPG Monitor ───────────────────────────────────────────────────────────────
+
+def _tcpg_default():
+    return {
+        "config": {
+            "project_id": "",
+            "service_name": "",
+            "region": "us-central1",
+            "github_url": "",
+            "cloud_run_url": ""
+        }
+    }
+
+def _gcp_token():
+    try:
+        import google.auth
+        import google.auth.transport.requests
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        creds.refresh(google.auth.transport.requests.Request())
+        return creds.token
+    except Exception as e:
+        return None
+
+def _gcp_get(url, token):
+    import urllib.request
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read().decode())
+
+def _gcp_post(url, token, body):
+    import urllib.request
+    data = json.dumps(body).encode()
+    req = urllib.request.Request(url, data=data, headers={
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    })
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read().decode())
+
+@app.route("/api/tcpg/config", methods=["GET"])
+def get_tcpg_config():
+    d = _load(TCPG_FILE, _tcpg_default())
+    if not isinstance(d, dict):
+        d = _tcpg_default()
+    return jsonify(d.get("config", _tcpg_default()["config"]))
+
+@app.route("/api/tcpg/config", methods=["POST"])
+def post_tcpg_config():
+    d = _load(TCPG_FILE, _tcpg_default())
+    if not isinstance(d, dict):
+        d = _tcpg_default()
+    d["config"] = request.json
+    _save(TCPG_FILE, d)
+    _log("tcpg", "config", "Configuration updated")
+    return jsonify({"ok": True})
+
+@app.route("/api/tcpg/logs")
+def get_tcpg_logs():
+    d = _load(TCPG_FILE, _tcpg_default())
+    cfg = d.get("config", {}) if isinstance(d, dict) else {}
+    project_id = cfg.get("project_id", "")
+    service_name = cfg.get("service_name", "")
+    if not project_id or not service_name:
+        return jsonify({"error": "Not configured — set Project ID and service name in TCPG settings.", "entries": []})
+    token = _gcp_token()
+    if not token:
+        return jsonify({"error": "GCP credentials unavailable. Run: gcloud auth application-default login", "entries": []})
+    severity = request.args.get("severity", "DEFAULT")
+    filter_parts = [
+        f'resource.type="cloud_run_revision"',
+        f'resource.labels.service_name="{service_name}"',
+    ]
+    if severity and severity not in ("ALL", "DEFAULT"):
+        filter_parts.append(f"severity>={severity}")
+    try:
+        result = _gcp_post(
+            "https://logging.googleapis.com/v2/entries:list",
+            token,
+            {
+                "resourceNames": [f"projects/{project_id}"],
+                "filter": " AND ".join(filter_parts),
+                "orderBy": "timestamp desc",
+                "pageSize": 50
+            }
+        )
+        simplified = []
+        for e in result.get("entries", []):
+            msg = (
+                e.get("textPayload") or
+                e.get("jsonPayload", {}).get("message") or
+                e.get("jsonPayload", {}).get("msg") or
+                (str(e.get("jsonPayload", "")) if e.get("jsonPayload") else "") or
+                ""
+            )
+            simplified.append({
+                "timestamp": e.get("timestamp", ""),
+                "severity": e.get("severity", "DEFAULT"),
+                "message": msg[:400],
+                "revision": e.get("resource", {}).get("labels", {}).get("revision_name", "")
+            })
+        return jsonify({"entries": simplified})
+    except Exception as e:
+        return jsonify({"error": str(e), "entries": []})
+
+@app.route("/api/tcpg/health")
+def get_tcpg_health():
+    d = _load(TCPG_FILE, _tcpg_default())
+    cfg = d.get("config", {}) if isinstance(d, dict) else {}
+    project_id = cfg.get("project_id", "")
+    service_name = cfg.get("service_name", "")
+    region = cfg.get("region", "us-central1")
+    if not project_id or not service_name:
+        return jsonify({"status": "unconfigured"})
+    token = _gcp_token()
+    if not token:
+        return jsonify({"status": "no_credentials", "error": "GCP credentials unavailable. Run: gcloud auth application-default login"})
+    try:
+        url = f"https://run.googleapis.com/v2/projects/{project_id}/locations/{region}/services/{service_name}"
+        result = _gcp_get(url, token)
+        conditions = result.get("conditions", [])
+        terminal = result.get("terminalCondition", {})
+        all_conditions = ([terminal] if terminal else []) + conditions
+        ready = any(c.get("type", "").upper() == "READY" and c.get("state") == "CONDITION_SUCCEEDED" for c in all_conditions)
+        latest = result.get("latestReadyRevision", "").split("/")[-1]
+        return jsonify({
+            "status": "healthy" if ready else "degraded",
+            "service_name": result.get("name", "").split("/")[-1],
+            "url": result.get("uri", ""),
+            "latest_revision": latest,
+            "traffic": result.get("traffic", []),
+            "conditions": [{"type": c.get("type"), "state": c.get("state"), "message": c.get("message", "")} for c in conditions],
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)})
+
+
+# ── Practice ───────────────────────────────────────────────────────────────────
+
+PRACTICE_DEFAULT = {
+    "piano": {"this_week_focus": "", "last_lesson_notes": "", "scales": [], "reminders": [], "sessions": []},
+    "guitar": {"this_week_focus": "", "last_lesson_notes": "", "scales": [], "reminders": [], "sessions": []},
+}
+
+@app.route("/api/practice", methods=["GET"])
+def get_practice():
+    data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
+    for inst in ("piano", "guitar"):
+        if inst not in data:
+            data[inst] = PRACTICE_DEFAULT[inst]
+    return jsonify(data)
+
+@app.route("/api/practice/<instrument>", methods=["POST"])
+def update_practice(instrument):
+    if instrument not in ("piano", "guitar"):
+        return jsonify({"error": "invalid instrument"}), 400
+    data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
+    body = request.json or {}
+    for field in ("this_week_focus", "last_lesson_notes"):
+        if field in body:
+            data[instrument][field] = body[field]
+    _save(PRACTICE_FILE, data)
+    return jsonify(data[instrument])
+
+@app.route("/api/practice/<instrument>/scale", methods=["POST"])
+def add_practice_scale(instrument):
+    if instrument not in ("piano", "guitar"):
+        return jsonify({"error": "invalid instrument"}), 400
+    data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
+    scales = data[instrument].get("scales", [])
+    new_id = max((s["id"] for s in scales), default=0) + 1
+    scales.append({"id": new_id, "name": (request.json or {}).get("name", ""), "done": False})
+    data[instrument]["scales"] = scales
+    _save(PRACTICE_FILE, data)
+    return jsonify(scales)
+
+@app.route("/api/practice/<instrument>/scale/<int:scale_id>/toggle", methods=["POST"])
+def toggle_practice_scale(instrument, scale_id):
+    if instrument not in ("piano", "guitar"):
+        return jsonify({"error": "invalid instrument"}), 400
+    data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
+    for s in data[instrument].get("scales", []):
+        if s["id"] == scale_id:
+            s["done"] = not s["done"]
+    _save(PRACTICE_FILE, data)
+    return jsonify({"ok": True})
+
+@app.route("/api/practice/<instrument>/scale/<int:scale_id>", methods=["DELETE"])
+def delete_practice_scale(instrument, scale_id):
+    if instrument not in ("piano", "guitar"):
+        return jsonify({"error": "invalid instrument"}), 400
+    data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
+    data[instrument]["scales"] = [s for s in data[instrument].get("scales", []) if s["id"] != scale_id]
+    _save(PRACTICE_FILE, data)
+    return jsonify({"ok": True})
+
+@app.route("/api/practice/<instrument>/reminder", methods=["POST"])
+def add_practice_reminder(instrument):
+    if instrument not in ("piano", "guitar"):
+        return jsonify({"error": "invalid instrument"}), 400
+    data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
+    reminders = data[instrument].get("reminders", [])
+    new_id = max((r["id"] for r in reminders), default=0) + 1
+    reminders.append({"id": new_id, "text": (request.json or {}).get("text", ""), "done": False})
+    data[instrument]["reminders"] = reminders
+    _save(PRACTICE_FILE, data)
+    return jsonify(reminders)
+
+@app.route("/api/practice/<instrument>/reminder/<int:rid>/toggle", methods=["POST"])
+def toggle_practice_reminder(instrument, rid):
+    if instrument not in ("piano", "guitar"):
+        return jsonify({"error": "invalid instrument"}), 400
+    data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
+    for r in data[instrument].get("reminders", []):
+        if r["id"] == rid:
+            r["done"] = not r["done"]
+    _save(PRACTICE_FILE, data)
+    return jsonify({"ok": True})
+
+@app.route("/api/practice/<instrument>/reminder/<int:rid>", methods=["DELETE"])
+def delete_practice_reminder(instrument, rid):
+    if instrument not in ("piano", "guitar"):
+        return jsonify({"error": "invalid instrument"}), 400
+    data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
+    data[instrument]["reminders"] = [r for r in data[instrument].get("reminders", []) if r["id"] != rid]
+    _save(PRACTICE_FILE, data)
+    return jsonify({"ok": True})
+
+@app.route("/api/practice/<instrument>/session", methods=["POST"])
+def log_practice_session(instrument):
+    if instrument not in ("piano", "guitar"):
+        return jsonify({"error": "invalid instrument"}), 400
+    data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
+    body = request.json or {}
+    sessions = data[instrument].get("sessions", [])
+    sessions.insert(0, {
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "minutes": body.get("minutes", 0),
+        "note": body.get("note", "")
+    })
+    data[instrument]["sessions"] = sessions[:60]
+    _save(PRACTICE_FILE, data)
+    return jsonify({"ok": True})
+
+
+# startup_sync removed — the contacts Google Sheet had corrupted data (songs as contacts)
+# and was overwriting correct local data on every container start.
+
 if __name__ == "__main__":
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("ERROR: Set ANTHROPIC_API_KEY in .env")
         sys.exit(1)
     port = int(os.environ.get("PORT", 5000))
-    print(f"Mission Control → http://localhost:{port}")
+    print(f"Mission Control -> http://localhost:{port}")
     app.run(debug=False, port=port, host="0.0.0.0")

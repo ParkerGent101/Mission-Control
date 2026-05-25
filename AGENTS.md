@@ -19,6 +19,17 @@ Google Sheets in the user's Google Drive is the intended source of truth for per
 - Do not commit personal local data, OAuth tokens, local sheet IDs, screenshots, logs, or SQLite files.
 - When adding new personal-data features, design around Google Sheets/Drive first, then use JSON only as a cache/fallback layer.
 
+## Google Drive Connection
+
+The persistent Drive connection is OAuth-based, not a mounted folder or always-open socket.
+
+- `data/credentials.json`: local Google OAuth client file. If the JSON cannot be downloaded, `.env` can provide `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and optional `GOOGLE_OAUTH_PROJECT_ID`.
+- `data/drive_token.json`: local refresh/access token created after the user signs in once.
+- `data/drive_config.json`: local Sheet IDs/URLs for configured integrations.
+- `_gdrive_service()` refreshes expired tokens automatically when a refresh token exists.
+- If Sheets access breaks with a scope/token error, re-authorize with `powershell -ExecutionPolicy Bypass -File scripts/sheets-reauth.ps1`.
+- Google Drive for Desktop is not required for Sheets sync; the app uses the Google Sheets API.
+
 ## Important Files
 
 - `app.py`: Flask app, API routes, persistence helpers, AI tool loop, and server-side integration logic.
