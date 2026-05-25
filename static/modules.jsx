@@ -241,17 +241,29 @@ const FIN_CAT_NAMES = FIN_CATS.map(c => c.name);
 const FIN_CAT_COLOR = Object.fromEntries(FIN_CATS.map(c => [c.name, c.color]));
 const normFinCat = (raw) => {
   if (!raw) return "Other";
+  const key = String(raw).trim();
   const map = {
     Housing: "Housing", Utilities: "Utilities", Subscriptions: "Subscriptions",
     "Food / Grocer": "Food / Grocer", Fun: "Fun", Gas: "Gas",
     Shopping: "Shopping", Band: "Band", Loans: "Loans", Other: "Other",
+    // Sheet typos / variants → canonical
+    Utilites: "Utilities", Utilties: "Utilities",
+    "Water, Sewer, Trash": "Utilities", Electricity: "Utilities", Internet: "Utilities",
+    Water: "Utilities", Sewer: "Utilities", Trash: "Utilities",
+    Food: "Food / Grocer", Groceries: "Food / Grocer", Grocer: "Food / Grocer",
+    Restaurants: "Fun", Dining: "Fun",
+    Streaming: "Subscriptions", Subscription: "Subscriptions",
+    Transportation: "Gas", Auto: "Gas", Fuel: "Gas",
+    Rent: "Housing", Mortgage: "Housing",
+    Loan: "Loans",
+    // lowercase fallbacks
     housing: "Housing", utilities: "Utilities", subscriptions: "Subscriptions",
     food: "Food / Grocer", dining: "Fun", transport: "Gas",
     shopping: "Shopping", band: "Band", loans: "Loans",
     gaming: "Fun", entertainment: "Fun", health: "Other", personal: "Other",
     IT: "Other", coding: "Other", gift: "Other", tax_refund: "Other", freelance: "Other",
   };
-  return map[raw] || "Other";
+  return map[key] || map[key.toLowerCase()] || "Other";
 };
 
 const FinanceCard = () => {
