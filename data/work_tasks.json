@@ -1,20 +1,164 @@
 [
-  {"id": 1, "title": "Turn ASR policies from audit to block", "project": "GLS Security", "priority": "high", "done": false, "created": "2026-05-07", "notes": "Due 2026-05-22"},
-  {"id": 2, "title": "Ian MFA setup on Rightworks accounts", "project": "GLS IT", "priority": "high", "done": false, "created": "2026-05-07", "notes": ""},
-  {"id": 3, "title": "Nancy: Remove images from per diem for crew guys", "project": "GLS Admin", "priority": "normal", "done": false, "created": "2026-05-11", "notes": "Also: Scott Woodall help — how is per diem in RAMP"},
-  {"id": 4, "title": "Nancy: East ADA connection", "project": "GLS Admin", "priority": "normal", "done": false, "created": "2026-05-11", "notes": ""},
-  {"id": 5, "title": "Nancy: GLS portal documents", "project": "GLS Admin", "priority": "normal", "done": false, "created": "2026-05-11", "notes": ""},
-  {"id": 6, "title": "Research Claude token usage — Friday meetings and spend rate", "project": "GLS IT", "priority": "normal", "done": false, "created": "2026-05-11", "notes": ""},
-  {"id": 7, "title": "Create standard use policy — block unallowed sites on computers", "project": "GLS Security", "priority": "normal", "done": false, "created": "2026-05-11", "notes": ""},
-  {"id": 8, "title": "Standardize emails for crew leaders", "project": "GLS IT", "priority": "normal", "done": false, "created": "2026-05-11", "notes": ""},
-  {"id": 9, "title": "Create SharePoint site for WIP reports (Executive)", "project": "GLS SharePoint", "priority": "normal", "done": false, "created": "2026-05-11", "notes": ""},
-  {"id": 10, "title": "Azure runbook to harden VmGLSServer1", "project": "GLS Security", "priority": "normal", "done": false, "created": "2026-05-11", "notes": ""},
-  {"id": 11, "title": "Separate home Wi-Fi network + SOP for WFH users", "project": "GLS Security", "priority": "normal", "done": false, "created": "2026-05-11", "notes": ""},
-  {"id": 12, "title": "Nancy and Parker change QuickBooks passwords", "project": "GLS Security", "priority": "normal", "done": false, "created": "2026-05-11", "notes": ""},
-  {"id": 13, "title": "PM Tracker / Crew Route Optimization — understand tracker files", "project": "GLS Projects", "priority": "normal", "done": false, "created": "2026-05-11", "notes": "Filter to: job num, FA code, site name, planned start, lat/lon. Build Power App."},
-  {"id": 14, "title": "WIP report — remove digits 5, 6, 9 from pull", "project": "GLS Projects", "priority": "normal", "done": false, "created": "2026-05-11", "notes": "Dashboard after WIP SOP, data pull, and template are done"},
-  {"id": 15, "title": "Master File Storage SOP — finalize and ship", "project": "GLS SharePoint", "priority": "normal", "done": false, "created": "2026-05-11", "notes": "Fix 5.1, add TOC, change 'persistent'→'constant', edit rule #4, add 5 sensitive categories"},
-  {"id": 16, "title": "Working meeting with PPM to move files to Master Storage", "project": "GLS SharePoint", "priority": "normal", "done": false, "created": "2026-05-11", "notes": ""},
-  {"id": 17, "title": "1-Year review prep — cross-training and succession planning", "project": "GLS Admin", "priority": "low", "done": false, "created": "2026-05-11", "notes": "What if Nancy died / what if Parker died scenarios"},
-  {"id": 18, "title": "Purchase Ian computer (give his to next user)", "project": "GLS IT", "priority": "low", "done": false, "created": "2026-05-11", "notes": "Do after condition — only when a new user needs one"}
+  {
+    "id": 1,
+    "title": "Turn ASR policies from audit to block",
+    "project": "GLS Security",
+    "priority": "high",
+    "done": false,
+    "created": "2026-05-07",
+    "notes": "Due 2026-05-22"
+  },
+  {
+    "id": 2,
+    "title": "Ian MFA setup on Rightworks accounts",
+    "project": "GLS IT",
+    "priority": "high",
+    "done": false,
+    "created": "2026-05-07",
+    "notes": ""
+  },
+  {
+    "id": 3,
+    "title": "Nancy: Remove images from per diem for crew guys",
+    "project": "GLS Admin",
+    "priority": "normal",
+    "done": false,
+    "created": "2026-05-11",
+    "notes": "Also: Scott Woodall help — how is per diem in RAMP"
+  },
+  {
+    "id": 4,
+    "title": "Nancy: East ADA connection",
+    "project": "GLS Admin",
+    "priority": "normal",
+    "done": false,
+    "created": "2026-05-11",
+    "notes": ""
+  },
+  {
+    "id": 5,
+    "title": "Nancy: GLS portal documents",
+    "project": "GLS Admin",
+    "priority": "normal",
+    "done": false,
+    "created": "2026-05-11",
+    "notes": ""
+  },
+  {
+    "id": 6,
+    "title": "Research Claude token usage — Friday meetings and spend rate",
+    "project": "GLS IT",
+    "priority": "normal",
+    "done": false,
+    "created": "2026-05-11",
+    "notes": ""
+  },
+  {
+    "id": 7,
+    "title": "Create standard use policy — block unallowed sites on computers",
+    "project": "GLS Security",
+    "priority": "normal",
+    "done": false,
+    "created": "2026-05-11",
+    "notes": ""
+  },
+  {
+    "id": 8,
+    "title": "Standardize emails for crew leaders",
+    "project": "GLS IT",
+    "priority": "normal",
+    "done": false,
+    "created": "2026-05-11",
+    "notes": ""
+  },
+  {
+    "id": 9,
+    "title": "Create SharePoint site for WIP reports (Executive)",
+    "project": "GLS SharePoint",
+    "priority": "normal",
+    "done": false,
+    "created": "2026-05-11",
+    "notes": ""
+  },
+  {
+    "id": 10,
+    "title": "Azure runbook to harden VmGLSServer1",
+    "project": "GLS Security",
+    "priority": "normal",
+    "done": false,
+    "created": "2026-05-11",
+    "notes": ""
+  },
+  {
+    "id": 11,
+    "title": "Separate home Wi-Fi network + SOP for WFH users",
+    "project": "GLS Security",
+    "priority": "normal",
+    "done": false,
+    "created": "2026-05-11",
+    "notes": ""
+  },
+  {
+    "id": 12,
+    "title": "Nancy and Parker change QuickBooks passwords",
+    "project": "GLS Security",
+    "priority": "normal",
+    "done": false,
+    "created": "2026-05-11",
+    "notes": ""
+  },
+  {
+    "id": 13,
+    "title": "PM Tracker / Crew Route Optimization — understand tracker files",
+    "project": "GLS Projects",
+    "priority": "normal",
+    "done": false,
+    "created": "2026-05-11",
+    "notes": "Filter to: job num, FA code, site name, planned start, lat/lon. Build Power App."
+  },
+  {
+    "id": 14,
+    "title": "WIP report — remove digits 5, 6, 9 from pull",
+    "project": "GLS Projects",
+    "priority": "normal",
+    "done": false,
+    "created": "2026-05-11",
+    "notes": "Dashboard after WIP SOP, data pull, and template are done"
+  },
+  {
+    "id": 15,
+    "title": "Master File Storage SOP — finalize and ship",
+    "project": "GLS SharePoint",
+    "priority": "normal",
+    "done": false,
+    "created": "2026-05-11",
+    "notes": "Fix 5.1, add TOC, change 'persistent'→'constant', edit rule #4, add 5 sensitive categories"
+  },
+  {
+    "id": 16,
+    "title": "Working meeting with PPM to move files to Master Storage",
+    "project": "GLS SharePoint",
+    "priority": "normal",
+    "done": false,
+    "created": "2026-05-11",
+    "notes": ""
+  },
+  {
+    "id": 17,
+    "title": "1-Year review prep — cross-training and succession planning",
+    "project": "GLS Admin",
+    "priority": "low",
+    "done": false,
+    "created": "2026-05-11",
+    "notes": "What if Nancy died / what if Parker died scenarios"
+  },
+  {
+    "id": 18,
+    "title": "Purchase Ian computer (give his to next user)",
+    "project": "GLS IT",
+    "priority": "low",
+    "done": false,
+    "created": "2026-05-11",
+    "notes": "Do after condition — only when a new user needs one"
+  }
 ]

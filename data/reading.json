@@ -1,16 +1,6 @@
 {
-  "current": {
-    "title": "Moby Dick",
-    "author": "Herman Melville",
-    "page": 1,
-    "total_pages": 720,
-    "started": "2026-05-11"
-  },
-  "queue": [
-    {"title": "The Creative Act",          "author": "Rick Rubin"},
-    {"title": "How to Take Smart Notes",   "author": "S. Ahrens"},
-    {"title": "Slow Productivity",         "author": "Cal Newport"}
-  ],
-  "completed_2026": 18,
+  "current": null,
+  "queue": [],
+  "completed_2026": 0,
   "goal_2026": 30
 }

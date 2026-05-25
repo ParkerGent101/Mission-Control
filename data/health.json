@@ -1,26 +1,424 @@
 {
   "habits": {
     "2026-05-11": {
-      "lift": false,
+      "lift": true,
       "cardio": false,
       "elbow_rehab": false,
-      "morning_stretch": false,
       "water": false,
-      "guitar_practice": false,
-      "flea_medicine": false
+      "guitar_practice": true,
+      "flea_medicine": false,
+      "stretching": true
+    },
+    "2026-05-12": {
+      "stretching": true
+    },
+    "2026-05-14": {
+      "lift": false,
+      "cardio": false,
+      "flea_medicine": false,
+      "elbow_rehab": false,
+      "piano": false
+    },
+    "2026-05-25": {
+      "workout": true,
+      "lift": true,
+      "cardio": false,
+      "elbow_rehab": false,
+      "stretching": false,
+      "water": false
     }
   },
   "weight": {
-    "2026-05-11": 230.0
+    "2026-05-11": 230.0,
+    "2026-05-25": 232.0
   },
-  "calories": {},
+  "calories": {
+    "2026-05-25": {
+      "calories": 2100
+    }
+  },
   "habit_list": [
-    {"id": "lift",            "label": "Lift (PPL)"},
-    {"id": "cardio",          "label": "Cardio 30min"},
-    {"id": "elbow_rehab",     "label": "Elbow rehab"},
-    {"id": "morning_stretch", "label": "Morning stretch"},
-    {"id": "water",           "label": "Water (64oz)"},
-    {"id": "guitar_practice", "label": "Guitar practice"},
-    {"id": "flea_medicine",   "label": "Dog flea meds"}
-  ]
+    {
+      "id": "lift",
+      "label": "Lift"
+    },
+    {
+      "id": "cardio",
+      "label": "Cardio"
+    },
+    {
+      "id": "elbow_rehab",
+      "label": "Elbow Rehab"
+    },
+    {
+      "id": "stretching",
+      "label": "Stretching"
+    },
+    {
+      "id": "water",
+      "label": "Water"
+    },
+    {
+      "id": "guitar_practice",
+      "label": "Guitar"
+    },
+    {
+      "id": "piano",
+      "label": "Piano"
+    }
+  ],
+  "workout_config": {
+    "program": "hybrid",
+    "days": [
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu",
+      "Fri",
+      "Sat"
+    ],
+    "split": "ppl"
+  },
+  "workout_program": {
+    "name": "6-Day Workout Program",
+    "start_date": "2026-05-18",
+    "weeks": 4,
+    "elbow_note": "Stay in 0-3/10 pain range. If worse next morning, reduce volume 30-50%.",
+    "schedule": [
+      {
+        "day": 1,
+        "label": "Day 1",
+        "focus": "Lower Body Strength + Core",
+        "cardio": false,
+        "intensity": "RPE 6-8",
+        "note": "Keep grip demand low; use straps if needed.",
+        "exercises": [
+          {
+            "name": "Back Squat or Goblet Squat",
+            "sets": 4,
+            "reps": "6-10",
+            "rest": "90-150 sec",
+            "note": "Leave 2-4 reps in reserve."
+          },
+          {
+            "name": "Romanian Deadlift",
+            "sets": 3,
+            "reps": "8-10",
+            "rest": "90 sec",
+            "note": "Use straps if gripping irritates elbow."
+          },
+          {
+            "name": "Walking Lunge or Split Squat",
+            "sets": 3,
+            "reps": "8 each leg",
+            "rest": "60-90 sec"
+          },
+          {
+            "name": "Leg Curl",
+            "sets": 3,
+            "reps": "10-15",
+            "rest": "60 sec"
+          },
+          {
+            "name": "Standing Calf Raise",
+            "sets": 3,
+            "reps": "12-20",
+            "rest": "45-60 sec"
+          },
+          {
+            "name": "Plank",
+            "sets": 3,
+            "reps": "30-60 sec",
+            "rest": "45 sec"
+          },
+          {
+            "name": "Side Plank",
+            "sets": 2,
+            "reps": "30-45 sec each side",
+            "rest": "45 sec"
+          }
+        ]
+      },
+      {
+        "day": 2,
+        "label": "Day 2",
+        "focus": "Upper Body Push/Pull (Elbow-Friendly)",
+        "cardio": "30-45 min Zone 2",
+        "intensity": "RPE 6-7",
+        "note": "Avoid heavy curls, pull-ups, and hard gripping.",
+        "exercises": [
+          {
+            "name": "Machine Chest Press or Push-Up on Handles",
+            "sets": 3,
+            "reps": "8-12",
+            "rest": "75-90 sec",
+            "note": "Neutral wrist position."
+          },
+          {
+            "name": "Neutral-Grip Lat Pulldown",
+            "sets": 3,
+            "reps": "8-12",
+            "rest": "75-90 sec"
+          },
+          {
+            "name": "Chest-Supported Row",
+            "sets": 3,
+            "reps": "8-12",
+            "rest": "75-90 sec",
+            "note": "Neutral grip preferred."
+          },
+          {
+            "name": "Landmine Press or Neutral Dumbbell Press",
+            "sets": 3,
+            "reps": "8-10",
+            "rest": "75-90 sec",
+            "note": "Stop if elbow pain increases."
+          },
+          {
+            "name": "Face Pull",
+            "sets": 3,
+            "reps": "12-15",
+            "rest": "45-60 sec"
+          },
+          {
+            "name": "Band External Rotation",
+            "sets": 2,
+            "reps": "12-15 each side",
+            "rest": "45 sec"
+          }
+        ]
+      },
+      {
+        "day": 3,
+        "label": "Day 3",
+        "focus": "Lower Body + Posterior Chain",
+        "cardio": false,
+        "intensity": "RPE 6-8",
+        "note": "Skip farmer carries until elbow is pain-free.",
+        "exercises": [
+          {
+            "name": "Trap-Bar Deadlift or Hip Thrust",
+            "sets": 4,
+            "reps": "5-8",
+            "rest": "120 sec",
+            "note": "Moderate load; straps allowed."
+          },
+          {
+            "name": "Front Squat or Leg Press",
+            "sets": 3,
+            "reps": "8-12",
+            "rest": "90 sec"
+          },
+          {
+            "name": "Step-Up",
+            "sets": 3,
+            "reps": "8 each leg",
+            "rest": "60-90 sec"
+          },
+          {
+            "name": "Glute Bridge or Hip Thrust",
+            "sets": 3,
+            "reps": "10-12",
+            "rest": "75-90 sec"
+          },
+          {
+            "name": "Pallof Press or Cable Chop",
+            "sets": 3,
+            "reps": "10-12 each side",
+            "rest": "45-60 sec",
+            "note": "Anti-rotation focus."
+          }
+        ]
+      },
+      {
+        "day": 4,
+        "label": "Day 4",
+        "focus": "Cardio + Mobility",
+        "cardio": "30-60 min Zone 2",
+        "intensity": "Easy-moderate",
+        "note": "Best options: incline walk, bike, elliptical, easy run.",
+        "exercises": []
+      },
+      {
+        "day": 5,
+        "label": "Day 5",
+        "focus": "Full Body Strength",
+        "cardio": false,
+        "intensity": "RPE 6-7",
+        "note": "No grinding reps; protect elbow.",
+        "exercises": [
+          {
+            "name": "Goblet Squat or Leg Press",
+            "sets": 3,
+            "reps": "8-12",
+            "rest": "75-90 sec"
+          },
+          {
+            "name": "Dumbbell RDL",
+            "sets": 3,
+            "reps": "8-10",
+            "rest": "75-90 sec"
+          },
+          {
+            "name": "Machine Chest Press",
+            "sets": 3,
+            "reps": "8-12",
+            "rest": "75-90 sec"
+          },
+          {
+            "name": "Seated Cable Row, Neutral Handle",
+            "sets": 3,
+            "reps": "8-12",
+            "rest": "75-90 sec"
+          },
+          {
+            "name": "Reverse Lunge",
+            "sets": 3,
+            "reps": "8 each leg",
+            "rest": "60-90 sec"
+          },
+          {
+            "name": "Lateral Raise",
+            "sets": 3,
+            "reps": "12-15",
+            "rest": "45-60 sec",
+            "note": "Light and controlled."
+          },
+          {
+            "name": "Dead Bug",
+            "sets": 3,
+            "reps": "8-12 each side",
+            "rest": "45 sec"
+          }
+        ]
+      },
+      {
+        "day": 6,
+        "label": "Day 6",
+        "focus": "Conditioning + Light Strength",
+        "cardio": "30-45 min steady or intervals",
+        "intensity": "Moderate",
+        "note": "Use steady Zone 2 if recovery is poor.",
+        "exercises": [
+          {
+            "name": "Light Circuit (2-3 rounds)",
+            "sets": "2-3",
+            "reps": "See note",
+            "note": "Squat x15, incline push-up x8-12, band row x12-15, glute bridge x15, bird dog x10/side, pull-aparts x15."
+          }
+        ]
+      },
+      {
+        "day": 7,
+        "label": "Day 7",
+        "focus": "Rest / Recovery",
+        "cardio": "Optional easy walk",
+        "intensity": "Easy",
+        "note": "Do not skip elbow rehab unless symptoms are irritated.",
+        "exercises": []
+      }
+    ],
+    "elbow_rehab": [
+      {
+        "order": 1,
+        "name": "Wrist Extensor Stretch",
+        "sets": 3,
+        "reps": "20-30 sec",
+        "load": "None",
+        "note": "Arm straight, palm down. Bend wrist downward. Stretch, not sharp pain."
+      },
+      {
+        "order": 2,
+        "name": "Wrist Flexor Stretch",
+        "sets": 3,
+        "reps": "20-30 sec",
+        "load": "None",
+        "note": "Arm straight, palm up. Gently pull fingers back. Keep shoulder relaxed."
+      },
+      {
+        "order": 3,
+        "name": "Eccentric Wrist Extension",
+        "sets": 3,
+        "reps": "10-15",
+        "load": "1-5 lb start",
+        "note": "Use opposite hand to lift wrist, slowly lower for 3-5 sec. Progress reps first, then weight."
+      },
+      {
+        "order": 4,
+        "name": "Wrist Pronation / Supination",
+        "sets": 2,
+        "reps": "10 each direction",
+        "load": "Light hammer or none",
+        "note": "Rotate palm up and down slowly, elbow at side."
+      },
+      {
+        "order": 5,
+        "name": "Isometric Wrist Extension",
+        "sets": 3,
+        "reps": "20-30 sec",
+        "load": "Gentle pressure",
+        "note": "Push back of hand into opposite hand or wall without moving wrist. 30-50% effort."
+      }
+    ],
+    "stretching": [
+      {
+        "order": 1,
+        "name": "Hip Flexor Stretch",
+        "duration": "60 sec each side",
+        "note": "Squeeze glute on back leg."
+      },
+      {
+        "order": 2,
+        "name": "Hamstring Stretch",
+        "duration": "60 sec each side",
+        "note": "Keep back neutral."
+      },
+      {
+        "order": 3,
+        "name": "Calf Stretch",
+        "duration": "45-60 sec each side"
+      },
+      {
+        "order": 4,
+        "name": "Figure-4 Glute Stretch",
+        "duration": "60 sec each side"
+      },
+      {
+        "order": 5,
+        "name": "Thoracic Open Books",
+        "duration": "8-10 reps each side",
+        "note": "Move slowly, breathe through rotation."
+      },
+      {
+        "order": 6,
+        "name": "Doorway Pec Stretch",
+        "duration": "45-60 sec",
+        "note": "Avoid aggressive elbow position if symptomatic."
+      },
+      {
+        "order": 7,
+        "name": "Lat Stretch",
+        "duration": "45-60 sec each side"
+      }
+    ]
+  },
+  "height_in": 76,
+  "food_log": {
+    "2026-05-25": [
+      {
+        "name": "Protein Shake",
+        "calories": 160,
+        "protein": 30,
+        "carbs": 10,
+        "fat": 0
+      },
+      {
+        "name": "Greek Yogurt",
+        "calories": 150,
+        "protein": 20,
+        "carbs": 8,
+        "fat": 4
+      }
+    ]
+  }
 }

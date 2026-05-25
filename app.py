@@ -67,6 +67,7 @@ JOURNAL_FILE     = DATA_DIR / "journal.json"
 BRIEF_FILE       = DATA_DIR / "brief.json"
 DB_PATH          = DATA_DIR / "mission_control.db"
 FINANCE_SHEET_ID = os.environ.get("FINANCE_SHEET_ID", "")
+HEALTH_SHEET_ID  = os.environ.get("HEALTH_SHEET_ID", "")
 
 GCAL_SCOPES    = ['https://www.googleapis.com/auth/calendar.readonly']
 GCAL_CREDS_FILE = DATA_DIR / "credentials.json"
@@ -1283,6 +1284,115 @@ def _sheets_push_contacts():
     except Exception:
         pass
 
+# ── Health sheet auto-sync helpers ───────────────────────────────────────────
+
+def _health_sheet_daily_columns():
+    """Read header row of Daily tab → (svc, {column_label_lower: (letter, index)}). None if unavailable."""
+    if not HEALTH_SHEET_ID:
+        return None
+    svc, err = _gdrive_service()
+    if err:
+        return None
+    try:
+        result = svc.spreadsheets().values().get(
+            spreadsheetId=HEALTH_SHEET_ID, range="Daily!1:1"
+        ).execute()
+        headers = result.get("values", [[]])
+        if not headers:
+            return None
+        headers = headers[0]
+        cols = {}
+        for i, label in enumerate(headers):
+            letter = chr(ord('A') + i) if i < 26 else 'A' + chr(ord('A') + i - 26)
+            cols[str(label).strip().lower()] = (letter, i)
+        return svc, cols
+    except Exception:
+        return None
+
+def _health_sheet_find_or_create_row(svc, date_str):
+    """Return 1-based row index in Daily tab for the given date. Creates row if missing."""
+    try:
+        result = svc.spreadsheets().values().get(
+            spreadsheetId=HEALTH_SHEET_ID, range="Daily!A:A"
+        ).execute()
+        col_a = result.get("values", [])
+        for i, row in enumerate(col_a):
+            if row and str(row[0]).strip() == date_str:
+                return i + 1
+        next_row = len(col_a) + 1
+        svc.spreadsheets().values().update(
+            spreadsheetId=HEALTH_SHEET_ID,
+            range=f"Daily!A{next_row}",
+            valueInputOption="RAW",
+            body={"values": [[date_str]]},
+        ).execute()
+        return next_row
+    except Exception:
+        return None
+
+def _health_sheet_update_daily(date_str, updates):
+    """Upsert one or more fields in the Daily tab for `date_str`. updates = {column_label: value}. Silent on errors."""
+    try:
+        res = _health_sheet_daily_columns()
+        if not res:
+            return
+        svc, cols = res
+        row = _health_sheet_find_or_create_row(svc, date_str)
+        if not row:
+            return
+        data = []
+        for label, value in updates.items():
+            col_info = cols.get(str(label).strip().lower())
+            if not col_info:
+                continue
+            letter, _ = col_info
+            if isinstance(value, bool):
+                value = "TRUE" if value else "FALSE"
+            data.append({"range": f"Daily!{letter}{row}", "values": [[str(value)]]})
+        if data:
+            svc.spreadsheets().values().batchUpdate(
+                spreadsheetId=HEALTH_SHEET_ID,
+                body={"valueInputOption": "RAW", "data": data},
+            ).execute()
+    except Exception:
+        pass
+
+def _health_sheet_append_food(date_str, item):
+    """Append a food row to the Food tab. Silent on errors."""
+    if not HEALTH_SHEET_ID:
+        return
+    try:
+        svc, err = _gdrive_service()
+        if err:
+            return
+        svc.spreadsheets().values().append(
+            spreadsheetId=HEALTH_SHEET_ID,
+            range="Food!A:F",
+            valueInputOption="RAW",
+            insertDataOption="INSERT_ROWS",
+            body={"values": [[
+                date_str,
+                item.get("name", ""),
+                str(item.get("calories", "")),
+                str(item.get("protein", "")),
+                str(item.get("carbs", "")),
+                str(item.get("fat", "")),
+            ]]},
+        ).execute()
+    except Exception:
+        pass
+
+def _health_habit_label(habit_id):
+    """Look up the display label for a habit_id from health.json habit_list."""
+    try:
+        h = _load(HEALTH_FILE)
+        for hbt in (h.get("habit_list", []) if isinstance(h, dict) else []):
+            if hbt.get("id") == habit_id:
+                return hbt.get("label", habit_id)
+    except Exception:
+        pass
+    return habit_id
+
 # ── Google Drive / Sheets ─────────────────────────────────────────────────────
 
 def _extract_sheet_id(url_or_id):
@@ -1463,17 +1573,22 @@ def _request_base_url():
 def _google_oauth_client_config():
     if not GOOGLE_OAUTH_CLIENT_ID or not GOOGLE_OAUTH_CLIENT_SECRET:
         return None
-    installed = {
+    web = {
         "client_id": GOOGLE_OAUTH_CLIENT_ID,
         "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
         "token_uri": "https://oauth2.googleapis.com/token",
         "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-        "redirect_uris": ["http://localhost"],
+        "redirect_uris": [
+            "http://localhost:5000/api/drive/callback",
+            "http://localhost:5000/api/calendar/callback",
+            "https://mission-control-568559213462.us-central1.run.app/api/drive/callback",
+            "https://mission-control-568559213462.us-central1.run.app/api/calendar/callback",
+        ],
     }
     if GOOGLE_OAUTH_PROJECT_ID:
-        installed["project_id"] = GOOGLE_OAUTH_PROJECT_ID
-    return {"installed": installed}
+        web["project_id"] = GOOGLE_OAUTH_PROJECT_ID
+    return {"web": web}
 
 def _has_google_oauth_client():
     return GCAL_CREDS_FILE.exists() or _google_oauth_client_config() is not None
@@ -1498,11 +1613,17 @@ def _gdrive_service():
         return None, "setup_required"
     creds = None
     if GDRIVE_TOKEN_FILE.exists():
-        creds = Credentials.from_authorized_user_file(str(GDRIVE_TOKEN_FILE), GDRIVE_SCOPES)
+        try:
+            creds = Credentials.from_authorized_user_file(str(GDRIVE_TOKEN_FILE), GDRIVE_SCOPES)
+        except Exception:
+            return None, "auth_required"
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            GDRIVE_TOKEN_FILE.write_text(creds.to_json())
+            try:
+                creds.refresh(Request())
+                GDRIVE_TOKEN_FILE.write_text(creds.to_json())
+            except Exception:
+                return None, "auth_required"
         else:
             return None, "auth_required"
     return build('sheets', 'v4', credentials=creds), None
@@ -1545,6 +1666,21 @@ def drive_auth_route():
     session['gdrive_state'] = state
     session['gdrive_code_verifier'] = getattr(flow, 'code_verifier', None)
     return jsonify({"auth_url": auth_url})
+
+@app.route("/api/drive/auth/start")
+def drive_auth_start():
+    try:
+        from google_auth_oauthlib.flow import Flow
+    except ImportError:
+        return "Run: pip install google-auth-oauthlib google-api-python-client", 500
+    if not _has_google_oauth_client():
+        return "Google OAuth client not configured", 400
+    redirect_uri = _request_base_url() + '/api/drive/callback'
+    flow = _oauth_flow(GDRIVE_SCOPES, redirect_uri)
+    auth_url, state = flow.authorization_url(access_type='offline', prompt='consent')
+    session['gdrive_state'] = state
+    session['gdrive_code_verifier'] = getattr(flow, 'code_verifier', None)
+    return redirect(auth_url)
 
 @app.route("/api/drive/callback")
 def drive_callback():
@@ -1715,12 +1851,18 @@ def _gcal_service():
         return None, "not_installed"
     creds = None
     if GCAL_TOKEN_FILE.exists():
-        creds = Credentials.from_authorized_user_file(str(GCAL_TOKEN_FILE), GCAL_SCOPES)
+        try:
+            creds = Credentials.from_authorized_user_file(str(GCAL_TOKEN_FILE), GCAL_SCOPES)
+        except Exception:
+            return None, "auth_required"
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            from google.auth.transport.requests import Request as Req
-            creds.refresh(Req())
-            GCAL_TOKEN_FILE.write_text(creds.to_json())
+            try:
+                from google.auth.transport.requests import Request as Req
+                creds.refresh(Req())
+                GCAL_TOKEN_FILE.write_text(creds.to_json())
+            except Exception:
+                return None, "auth_required"
         else:
             return None, "auth_required"
     return build('calendar', 'v3', credentials=creds), None
@@ -1961,6 +2103,59 @@ def get_health():
 
     return jsonify({**data, "weight_log": weight_log, "habits_weekly": habits_weekly, "calories_target": cal_target, "food_log_today": food_log_today})
 
+@app.route("/api/health/workout")
+def get_health_workout():
+    """Return today's workout from the Health sheet. Mon=Day 1, ..., Sat=Day 6, Sun=rest."""
+    if not HEALTH_SHEET_ID:
+        return jsonify({"connected": False, "error": "HEALTH_SHEET_ID not set"})
+    sheets, err = _gdrive_service()
+    if err:
+        return jsonify({"connected": False, "error": err})
+
+    # Map weekday to workout day (Python's weekday(): Mon=0..Sun=6 → app's Day 1..6, Sun=rest)
+    today = datetime.now()
+    wd = today.weekday()  # 0=Mon, 6=Sun
+    if wd == 6:
+        return jsonify({"connected": True, "rest_day": True, "weekday": "Sunday",
+                        "date": today.strftime("%Y-%m-%d"), "day": None, "focus": "Rest", "exercises": []})
+    day_num = wd + 1  # Mon=1, Tue=2, ..., Sat=6
+
+    try:
+        result = sheets.spreadsheets().values().get(
+            spreadsheetId=HEALTH_SHEET_ID, range="Workouts!A2:G500"
+        ).execute()
+        rows = result.get("values", [])
+    except Exception as e:
+        return jsonify({"connected": True, "error": f"read failed: {e}"})
+
+    focus = ""
+    exercises = []
+    for r in rows:
+        if not r or not r[0]:
+            continue
+        try:
+            row_day = int(r[0])
+        except (ValueError, TypeError):
+            continue
+        if row_day != day_num:
+            continue
+        if not focus and len(r) > 1:
+            focus = r[1]
+        exercises.append({
+            "name":  r[2] if len(r) > 2 else "",
+            "sets":  r[3] if len(r) > 3 else "",
+            "reps":  r[4] if len(r) > 4 else "",
+            "rest":  r[5] if len(r) > 5 else "",
+            "note":  r[6] if len(r) > 6 else "",
+        })
+
+    return jsonify({
+        "connected": True, "rest_day": False,
+        "weekday": today.strftime("%A"),
+        "date": today.strftime("%Y-%m-%d"),
+        "day": day_num, "focus": focus, "exercises": exercises
+    })
+
 @app.route("/api/health/habit", methods=["POST"])
 def post_health_habit():
     d = request.json
@@ -1975,6 +2170,7 @@ def post_health_habit():
     day[habit_name] = new_val
     _save(HEALTH_FILE, health)
     _log("health", "habit", f"{habit_name} {'✓' if new_val else '✗'}")
+    _health_sheet_update_daily(date, {_health_habit_label(habit_name): new_val})
     return jsonify({"ok": True})
 
 @app.route("/api/health/weight", methods=["POST"])
@@ -1987,6 +2183,7 @@ def post_health_weight():
     health.setdefault("weight", {})[date] = float(d["weight"])
     _save(HEALTH_FILE, health)
     _log("health", "weight", f"{d['weight']} lb")
+    _health_sheet_update_daily(date, {"Weight (lb)": d["weight"]})
     return jsonify({"ok": True})
 
 @app.route("/api/health/config", methods=["POST"])
@@ -2011,6 +2208,14 @@ def post_health_calories():
     day = health.setdefault("calories", {}).setdefault(date, {})
     day.update({k: v for k, v in d.items() if k != "date"})
     _save(HEALTH_FILE, health)
+    # Mirror to Sheet (Daily tab): map known fields to column labels
+    sheet_updates = {}
+    if "calories" in d:    sheet_updates["Cal Eaten"]  = d["calories"]
+    if "consumed" in d:    sheet_updates["Cal Eaten"]  = d["consumed"]
+    if "burned" in d:      sheet_updates["Cal Burned"] = d["burned"]
+    if "goal" in d:        sheet_updates["Cal Goal"]   = d["goal"]
+    if sheet_updates:
+        _health_sheet_update_daily(date, sheet_updates)
     return jsonify({"ok": True})
 
 @app.route("/api/health/food", methods=["POST"])
@@ -2031,6 +2236,10 @@ def post_health_food():
     items.append(item)
     _save(HEALTH_FILE, health)
     _log("health", "food", f"{item['name']} {item['calories']} kcal P{item['protein']} C{item['carbs']} F{item['fat']}")
+    _health_sheet_append_food(date, item)
+    # Recompute today's total kcal and mirror to Daily tab
+    total_today = sum(int(f.get("calories", 0) or 0) for f in items)
+    _health_sheet_update_daily(date, {"Cal Eaten": total_today})
     return jsonify({"ok": True})
 
 @app.route("/api/health/food", methods=["DELETE"])

@@ -9,6 +9,9 @@
 
 set -e
 
+export MSYS_NO_PATHCONV=1
+export PATH="$PATH:C:/Users/Parker/AppData/Local/Google/Cloud SDK/google-cloud-sdk/bin"
+
 PROJECT_ID="mission-control-496004"
 REGION="us-central1"
 SERVICE="mission-control"

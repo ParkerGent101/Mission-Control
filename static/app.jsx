@@ -1,19 +1,276 @@
 /* Mission Control — App shell */
 const { useState: useStateApp, useEffect: useEffectApp } = React;
 
+/* ── Command parser ─────────────────────────────────────────── */
+const _tok = (text) => {
+  const out = [];
+  const re = /"([^"]+)"|'([^']+)'|(\S+)/g;
+  let m;
+  while ((m = re.exec(text))) out.push(m[1] || m[2] || m[3]);
+  return out;
+};
+
+const _FIN_CATS = ['band','it','coding','personal','food','transport','health','entertainment'];
+const _PRIS     = ['high','normal','low'];
+
+const parseCommand = (text) => {
+  const toks = _tok(text.trim());
+  if (!toks.length) return null;
+  const [c, ...rest] = toks;
+  const cmd = c.toLowerCase();
+
+  /* ── shortcuts ── */
+  if (cmd === 'weight' && rest[0] && !isNaN(+rest[0]))
+    return { endpoint: '/api/health/weight', method: 'POST', body: { weight: +rest[0] },
+             module: 'health', summary: `Weight: ${rest[0]} lb` };
+
+  if (cmd === 'calories' && rest[0] && !isNaN(+rest[0])) {
+    const body = { consumed: +rest[0] };
+    const bi = rest.indexOf('burned');
+    if (bi !== -1 && rest[bi+1]) body.burned = +rest[bi+1];
+    return { endpoint: '/api/health/calories', method: 'POST', body,
+             module: 'health', summary: `Calories: ${rest[0]}${body.burned ? `, burned ${body.burned}` : ''}` };
+  }
+
+  if ((cmd === 'page' || cmd === 'read') && !isNaN(+(rest[0] === 'page' ? rest[1] : rest[0]))) {
+    const pg = +(rest[0].toLowerCase() === 'page' ? rest[1] : rest[0]);
+    return { endpoint: '/api/reading/progress', method: 'POST', body: { page: pg },
+             module: 'reading', summary: `Reading → p.${pg}` };
+  }
+
+  if (cmd === 'score' && rest[0] && !isNaN(+rest[0]))
+    return { endpoint: '/api/study/score', method: 'POST', body: { score: +rest[0] },
+             module: 'study', summary: `Practice score: ${rest[0]}%` };
+
+  if (cmd === 'journal' && rest.length)
+    return { endpoint: '/api/journal', method: 'POST', body: { body: rest.join(' ') },
+             module: 'journal', summary: 'Journal entry saved' };
+
+  /* ── finance ── */
+  if (cmd === 'finance' && rest.length >= 2) {
+    const [act, amtRaw, ...descParts] = rest;
+    const type = act.toLowerCase() === 'income' ? 'income' : 'expense';
+    const amt = +(amtRaw?.replace(/[$,]/g, '') || 'x');
+    if (isNaN(amt)) return null;
+    const lastLow = descParts[descParts.length-1]?.toLowerCase();
+    const category = _FIN_CATS.includes(lastLow) ? descParts.pop().toLowerCase() : 'personal';
+    const description = descParts.join(' ') || 'Untitled';
+    return { endpoint: '/api/finances', method: 'POST',
+             body: { description, amount: amt, type, category },
+             module: 'finance', summary: `${type} logged: $${amt} — ${description}` };
+  }
+
+  /* ── health ── */
+  if (cmd === 'health' && rest.length >= 2) {
+    const [act, ...args] = rest;
+    const a = act.toLowerCase();
+    if (a === 'weight' && !isNaN(+args[0]))
+      return { endpoint: '/api/health/weight', method: 'POST', body: { weight: +args[0] },
+               module: 'health', summary: `Weight: ${args[0]} lb` };
+    if (a === 'calories' && !isNaN(+args[0])) {
+      const body = { consumed: +args[0] };
+      const bi = args.indexOf('burned');
+      if (bi !== -1 && args[bi+1]) body.burned = +args[bi+1];
+      return { endpoint: '/api/health/calories', method: 'POST', body,
+               module: 'health', summary: `Calories: ${args[0]}` };
+    }
+    if (a === 'habit' && args.length)
+      return { endpoint: '/api/health/habit', method: 'POST', body: { habit: args.join(' ') },
+               module: 'health', summary: `Habit toggled: ${args.join(' ')}` };
+  }
+
+  /* ── work ── */
+  if (cmd === 'work' && rest.length) {
+    const [act, ...args] = rest;
+    const a = act.toLowerCase();
+    if (a === 'add' && args.length) {
+      const title    = args[0];
+      const priority = args.find(v => _PRIS.includes(v.toLowerCase()))?.toLowerCase() || 'normal';
+      const project  = args.find((v, i) => i > 0 && !_PRIS.includes(v.toLowerCase())) || '';
+      return { endpoint: '/api/work', method: 'POST', body: { title, project, priority },
+               module: 'work', summary: `Work task: ${title}` };
+    }
+    if (a === 'done' && args[0] && !isNaN(+args[0]))
+      return { endpoint: `/api/work/${args[0]}/done`, method: 'POST', body: {},
+               module: 'work', summary: `Work task #${args[0]} done` };
+  }
+
+  /* ── study ── */
+  if (cmd === 'study' && rest.length) {
+    const [first, ...args] = rest;
+    if (first.toLowerCase() === 'score' && args[0] && !isNaN(+args[0]))
+      return { endpoint: '/api/study/score', method: 'POST', body: { score: +args[0] },
+               module: 'study', summary: `Practice score: ${args[0]}%` };
+    if (!isNaN(+first)) {
+      const topic = args.join(' ');
+      return { endpoint: '/api/study/session', method: 'POST', body: { minutes: +first, topic },
+               module: 'study', summary: `Study: ${first}min${topic ? ' — ' + topic : ''}` };
+    }
+  }
+
+  /* ── agenda ── */
+  if (cmd === 'agenda' && rest.length) {
+    const atIdx = rest.findIndex(t => t.toLowerCase() === 'at');
+    let label = rest.join(' '), time = '', tag = 'Personal';
+    if (atIdx > 0 && rest[atIdx+1]) {
+      label = rest.slice(0, atIdx).join(' ');
+      time = rest[atIdx+1];
+      tag = rest.slice(atIdx+2).join(' ') || 'Personal';
+    }
+    return { endpoint: '/api/agenda', method: 'POST', body: { label, time, tag },
+             module: 'agenda', summary: `Agenda: ${label}${time ? ' at ' + time : ''}` };
+  }
+
+  /* ── remind ── */
+  if (cmd === 'remind' && rest.length >= 2) {
+    const onIdx = rest.findIndex(t => t.toLowerCase() === 'on');
+    let title, due_date;
+    if (onIdx > 0 && rest[onIdx+1]) {
+      title    = rest.slice(0, onIdx).join(' ');
+      due_date = rest[onIdx+1];
+    } else {
+      due_date = rest[rest.length-1];
+      title    = rest.slice(0, -1).join(' ');
+    }
+    return { endpoint: '/api/reminders', method: 'POST', body: { title, due_date },
+             module: 'agenda', summary: `Reminder: ${title} — ${due_date}` };
+  }
+
+  /* ── band ── */
+  if (cmd === 'band' && rest.length >= 2) {
+    const [act, ...args] = rest;
+    const a = act.toLowerCase();
+    if (a === 'show') {
+      const [date, event, venue, ...cityParts] = args;
+      if (!date || !event || !venue) return null;
+      return { endpoint: '/api/shows', method: 'POST',
+               body: { date, event, venue, city: cityParts.join(' ') },
+               module: 'band', summary: `Show: ${event} @ ${venue}` };
+    }
+    if (a === 'contact') {
+      const [name, venue, ...cityParts] = args;
+      if (!name) return null;
+      return { endpoint: '/api/band/contacts', method: 'POST',
+               body: { name, venue: venue || '', city: cityParts.join(' ') },
+               module: 'band', summary: `Contact added: ${name}` };
+    }
+  }
+
+  return null;
+};
+
+/* ── Help panel ─────────────────────────────────────────────── */
+const HELP_CMDS = [
+  { group: 'Shortcuts', items: [
+    { cmd: 'weight 185',                  desc: 'log weight (lb)' },
+    { cmd: 'calories 2200',               desc: 'log daily intake' },
+    { cmd: 'calories 2000 burned 350',    desc: 'with burned kcal' },
+    { cmd: 'page 142  · read 142',        desc: 'update book page' },
+    { cmd: 'score 74',                    desc: 'log practice test %' },
+  ]},
+  { group: 'Finance', items: [
+    { cmd: 'finance expense 45 "Guitar strings" band' },
+    { cmd: 'finance income 200 "Gig pay" band' },
+    { cmd: 'categories: band it coding personal food', desc: '(last word)' },
+  ]},
+  { group: 'Health', items: [
+    { cmd: 'health weight 184' },
+    { cmd: 'health calories 1800' },
+    { cmd: 'health habit Lift',           desc: 'toggle habit done' },
+  ]},
+  { group: 'Work', items: [
+    { cmd: 'work add "Fix SharePoint" GLS high' },
+    { cmd: 'work done 12',                desc: 'complete task #12' },
+    { cmd: 'priorities: high normal low', desc: '(last word)' },
+  ]},
+  { group: 'Band', items: [
+    { cmd: 'band show 2026-07-04 "Show Name" "Venue" "Rogers"' },
+    { cmd: 'band contact "John Smith" "The Venue" Fayetteville' },
+  ]},
+  { group: 'More', items: [
+    { cmd: 'study 60 Domain 1',           desc: 'log study session' },
+    { cmd: 'study score 78',              desc: 'log practice %' },
+    { cmd: 'agenda "Team standup" at 09:00 Work' },
+    { cmd: 'remind "Oil change" on 2026-06-15' },
+    { cmd: 'journal Had a great rehearsal tonight' },
+  ]},
+];
+
+const HelpPanel = ({ onClose }) => (
+  <div className="help-panel">
+    <div className="help-panel-head">
+      <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--ink-1)' }}>Command Reference</span>
+      <span style={{ fontSize: 11, color: 'var(--ink-4)', marginLeft: 10 }}>
+        Direct commands skip AI — instant &amp; zero token cost
+      </span>
+      <button className="icon-btn" onClick={onClose} style={{ marginLeft: 'auto', flexShrink: 0, width: 24, height: 24 }}>
+        <Icon name="x" size={11} />
+      </button>
+    </div>
+    <div className="help-panel-grid">
+      {HELP_CMDS.map(({ group, items }) => (
+        <div key={group} className="help-group">
+          <div className="help-group-title">{group}</div>
+          {items.map(({ cmd, desc }) => (
+            <div key={cmd} className="help-row">
+              <span className="help-cmd">{cmd}</span>
+              {desc && <span className="help-desc">{desc}</span>}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
+/* ── Talk bar ────────────────────────────────────────────────── */
 const TalkBar = ({ onNavigate }) => {
   const [val, setVal] = useStateApp('');
   const [busy, setBusy] = useStateApp(false);
   const [listening, setListening] = useStateApp(false);
+  const [showHelp, setShowHelp] = useStateApp(false);
 
   const submit = async (text) => {
     const t = (text || '').trim();
     if (!t || busy) return;
+
+    if (t === '?' || t.toLowerCase() === 'help') {
+      setShowHelp(h => !h);
+      setVal('');
+      return;
+    }
+
+    const cmd = parseCommand(t);
+    if (cmd) {
+      setBusy(true);
+      try {
+        const r = await fetch(cmd.endpoint, {
+          method: cmd.method || 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cmd.body),
+        });
+        const d = await r.json();
+        if (!d.error) {
+          window.__toast?.(cmd.summary, 'success');
+          if (cmd.module && onNavigate) onNavigate(cmd.module);
+          window.dispatchEvent(new CustomEvent('mc:refresh', { detail: { module: cmd.module } }));
+        } else {
+          window.__toast?.(d.error, 'error');
+        }
+      } catch {
+        window.__toast?.('Could not reach Mission Control', 'error');
+      }
+      setVal('');
+      setBusy(false);
+      return;
+    }
+
+    // Fall back to Claude
     setBusy(true);
     try {
       const r = await fetch('/api/talk', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({text: t})
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: t }),
       });
       const d = await r.json();
       const raw = d.reply || '';
@@ -22,7 +279,7 @@ const TalkBar = ({ onNavigate }) => {
       const msg = parsed?.summary || parsed?.reply || raw;
       if (window.__toast) window.__toast(msg.slice(0, 90), 'success');
       if (parsed?.module && onNavigate) onNavigate(parsed.module);
-      window.dispatchEvent(new CustomEvent('mc:refresh', {detail: {module: parsed?.module}}));
+      window.dispatchEvent(new CustomEvent('mc:refresh', { detail: { module: parsed?.module } }));
     } catch {
       if (window.__toast) window.__toast('Could not reach Mission Control', 'error');
     }
@@ -43,85 +300,89 @@ const TalkBar = ({ onNavigate }) => {
   };
 
   return (
-    <div className="talk-bar">
-      <Icon name="sparkles" size={13} style={{color: 'var(--accent)', flexShrink: 0}}/>
-      <input className="talk-bar-input" placeholder="Tell Mission Control anything…"
-        value={val} onChange={e => setVal(e.target.value)}
-        onKeyDown={e => e.key === 'Enter' && !e.shiftKey && submit(val)}
-        disabled={busy}/>
-      <button className={"talk-bar-btn" + (listening ? " listening" : "")}
-        onClick={startVoice} disabled={busy} title="Voice input">
-        <Icon name={listening ? "x" : "mic"} size={13}/>
-      </button>
-      <button className="talk-bar-btn accent" onClick={() => submit(val)}
-        disabled={busy || !val.trim()} title="Send">
-        <Icon name={busy ? "loader" : "send"} size={13}/>
-      </button>
-    </div>
+    <>
+      {showHelp && <HelpPanel onClose={() => setShowHelp(false)} />}
+      <div className="talk-bar">
+        <Icon name="sparkles" size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+        <input className="talk-bar-input"
+          placeholder="Talk to Mission Control… (? for commands)"
+          value={val} onChange={e => setVal(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && !e.shiftKey && submit(val)}
+          disabled={busy} />
+        <button className={"talk-bar-btn" + (showHelp ? " active" : "")}
+          onClick={() => setShowHelp(h => !h)}
+          title="Command reference (?)"
+          style={{ fontWeight: 700, fontSize: 13, fontFamily: 'var(--font-mono)' }}>
+          ?
+        </button>
+        <button className={"talk-bar-btn" + (listening ? " listening" : "")}
+          onClick={startVoice} disabled={busy} title="Voice input">
+          <Icon name={listening ? "x" : "mic"} size={13} />
+        </button>
+        <button className="talk-bar-btn accent" onClick={() => submit(val)}
+          disabled={busy || !val.trim()} title="Send">
+          <Icon name={busy ? "loader" : "send"} size={13} />
+        </button>
+      </div>
+    </>
   );
 };
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "accent": "#e0a857",
+  "accent2": "#6ed3b6",
   "density": "balanced",
   "sidebar": "full",
   "modules": {
-    "agenda": true, "finance": true, "band": true, "health": true,
-    "work": true, "study": true, "reading": true,
-    "holidays": true, "journal": true, "activity": true
+    "finance": true, "band": true, "health": true, "tcpg": true, "practice": true
   }
 }/*EDITMODE-END*/;
 
 const ACCENT_OPTIONS = ["#e0a857", "#6ed3b6", "#e07a5f", "#b69cf0", "#8fb3e0"];
 
 const SIDEBAR_NAV = [
-  { id: "dashboard", icon: "home",      label: "Dashboard", badge: "" },
-  { id: "agenda",    icon: "calendar",  label: "Agenda",    badge: "" },
-  { id: "finance",    icon: "wallet",     label: "Finance",     badge: "" },
-  { id: "band",       icon: "music",      label: "Band",        badge: "" },
-  { id: "health",     icon: "heart",      label: "Health",      badge: "" },
-  { id: "work",       icon: "briefcase",  label: "Work",        badge: "" },
-  { id: "study",      icon: "graduation", label: "Studying",    badge: "" },
-  { id: "reading",    icon: "book",       label: "Reading",     badge: "" },
-  { id: "holidays",   icon: "plane",      label: "Holidays",    badge: "" },
-  { id: "journal",    icon: "feather",    label: "Journal",     badge: "" },
-  { id: "activity",  icon: "clock",      label: "Activity",    badge: "" },
+  { id: "dashboard", icon: "home",       label: "Dashboard" },
+  { id: "finance",   icon: "wallet",     label: "Finance"   },
+  { id: "band",      icon: "music",      label: "Band"      },
+  { id: "health",    icon: "heart",      label: "Health"    },
+  { id: "practice",  icon: "target",     label: "Practice"  },
+  { id: "study",     icon: "graduation", label: "Study"     },
 ];
 
-// Bottom nav items for mobile (most important ones)
 const MOBILE_NAV = [
-  { id: "dashboard", icon: "home",      label: "Home" },
-  { id: "agenda",    icon: "calendar",  label: "Today" },
-  { id: "work",      icon: "briefcase", label: "Work" },
-  { id: "band",      icon: "music",     label: "Band" },
-  { id: "finance",   icon: "wallet",    label: "Finance" },
+  { id: "dashboard", icon: "home",   label: "Home"    },
+  { id: "finance",   icon: "wallet", label: "Finance" },
+  { id: "band",      icon: "music",  label: "Band"    },
+  { id: "health",    icon: "heart",  label: "Health"  },
 ];
 
 const MODULE_LABELS = [
-  ["agenda","Today","calendar"],["finance","Finance","wallet"],
-  ["band","Band","music"],["health","Health","heart"],["work","Work","briefcase"],
-  ["study","Study","graduation"],["reading","Reading","book"],
-  ["holidays","Travel","plane"],["journal","Journal","feather"],["activity","Activity","clock"],
+  ["finance","Finance","wallet"],
+  ["band","Band","music"],
+  ["health","Health","heart"],
+  ["practice","Practice","target"],
+  ["study","Study","graduation"],
 ];
 
 const App = () => {
-  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const [t, setTweak] = useTweaks(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('mc_tweaks') || 'null');
+      return saved ? { ...TWEAK_DEFAULTS, ...saved } : TWEAK_DEFAULTS;
+    } catch { return TWEAK_DEFAULTS; }
+  });
   const [active, setActive] = useStateApp("dashboard");
   const [cmdOpen, setCmdOpen] = useStateApp(false);
   const [now, setNow] = useStateApp(new Date());
   const [toasts, setToasts] = useStateApp([]);
   const [showSheet, setShowSheet] = useStateApp(false);
-  const [brief, setBrief] = useStateApp(null);
-  const [briefDismissed, setBriefDismissed] = useStateApp(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    return localStorage.getItem('brief_dismissed') === today;
-  });
+  const [needsOnboarding, setNeedsOnboarding] = useStateApp(null);
+  const [showSettings, setShowSettings] = useStateApp(false);
+  const [userName, setUserName] = useStateApp(() => localStorage.getItem('mc_name') || 'Parker');
 
   useEffectApp(() => {
-    if (!briefDismissed) {
-      fetch('/api/brief').then(r => r.json()).then(setBrief).catch(() => {});
-    }
-  }, [briefDismissed]);
+    fetch('/api/onboarding').then(r => r.json()).then(d => setNeedsOnboarding(d.needed)).catch(() => setNeedsOnboarding(false));
+  }, []);
 
   useEffectApp(() => {
     window.__toast = (msg, type = "success") => {
@@ -142,6 +403,10 @@ const App = () => {
         e.preventDefault();
         setCmdOpen(o => !o);
       }
+      if (e.key === "Escape") {
+        setCmdOpen(false);
+        setShowSettings(false);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -149,20 +414,41 @@ const App = () => {
 
   useEffectApp(() => {
     document.documentElement.style.setProperty("--accent", t.accent);
-  }, [t.accent]);
+    document.documentElement.style.setProperty("--accent-2", t.accent2 || "#6ed3b6");
+  }, [t.accent, t.accent2]);
+
+  useEffectApp(() => {
+    localStorage.setItem('mc_tweaks', JSON.stringify(t));
+  }, [t]);
 
   const onAction = (c) => {
     if (!c?.action) return;
     if (c.action === "open:tweaks") {
-      window.postMessage({ type: "__activate_edit_mode" }, "*");
+      setShowSettings(true);
     } else if (c.action.startsWith("go:")) {
       setActive(c.action.split(":")[1]);
     }
   };
 
-  const dismissBrief = () => {
-    localStorage.setItem('brief_dismissed', new Date().toISOString().slice(0, 10));
-    setBriefDismissed(true);
+  const handleOnboardingComplete = ({ name, modules: newModules, theme }) => {
+    if (name && name.trim()) {
+      const first = name.trim().split(' ')[0];
+      setUserName(first);
+      localStorage.setItem('mc_name', first);
+    }
+    if (newModules && Object.keys(newModules).length) {
+      setTweak('modules', newModules);
+    }
+    if (theme) {
+      setTweak('accent', theme.accent);
+      setTweak('accent2', theme.accent2);
+    }
+    setNeedsOnboarding(false);
+  };
+
+  const handleReEnroll = async () => {
+    await fetch('/api/user/reset-onboarding', { method: 'POST' });
+    setNeedsOnboarding(true);
   };
 
   const logout = async () => {
@@ -176,20 +462,15 @@ const App = () => {
 
   const M = window.MissionModules;
   const cards = [
-    { id: "agenda",   el: <M.AgendaCard /> },
-    { id: "finance",  el: <M.FinanceCard /> },
-    { id: "band",     el: <M.BandCard /> },
-    { id: "health",   el: <M.HealthCard /> },
-    { id: "work",     el: <M.WorkCard /> },
-    { id: "study",    el: <M.StudyCard /> },
-    { id: "reading",  el: <M.ReadingCard /> },
-    { id: "holidays", el: <M.HolidayCard /> },
-    { id: "journal",  el: <M.JournalCard /> },
-    { id: "activity", el: <M.ActivityCard /> },
+    { id: "finance",  el: <M.FinanceCard />  },
+    { id: "band",     el: <M.BandCard />     },
+    { id: "health",   el: <M.HealthCard />   },
+    { id: "practice", el: <M.PracticeCard /> },
+    { id: "study",    el: <M.StudyCard />    },
   ];
 
   const pageTitle = active === "dashboard"
-    ? `Good ${now.getHours() < 12 ? "morning" : now.getHours() < 17 ? "afternoon" : "evening"}, Parker.`
+    ? `Good ${now.getHours() < 12 ? "morning" : now.getHours() < 17 ? "afternoon" : "evening"}, ${userName}.`
     : SIDEBAR_NAV.find(n => n.id === active)?.label || "Mission Control";
 
   return (
@@ -199,6 +480,9 @@ const App = () => {
         <div className="brand">
           <span className="brand-mark"/>
           <span className="brand-name">MISSION CONTROL</span>
+          <span className="mobile-section-label">
+            {active === 'dashboard' ? `${now.getHours() < 12 ? 'Morning' : now.getHours() < 17 ? 'Afternoon' : 'Evening'}, ${userName}` : (SIDEBAR_NAV.find(n => n.id === active)?.label || 'Mission Control')}
+          </span>
         </div>
         <div className="topbar-center">
           <div className="cmdk" onClick={() => setCmdOpen(true)}>
@@ -210,7 +494,7 @@ const App = () => {
         </div>
         <div className="topbar-right">
           <span className="mono topbar-date" style={{ padding: "0 10px", color: "var(--ink-2)" }}>{date}</span>
-          <button className="icon-btn" title="Settings" onClick={() => window.postMessage({ type: "__activate_edit_mode" }, "*")}>
+          <button className="icon-btn" title="Settings" onClick={() => setShowSettings(true)}>
             <Icon name="settings" size={15}/>
           </button>
           <div title="Logout" onClick={logout} style={{
@@ -226,15 +510,14 @@ const App = () => {
       {/* Sidebar */}
       <nav className="sidebar">
         <div className="sb-section">Workspace</div>
-        {SIDEBAR_NAV.slice(0, 2).map((n) => (
+        {SIDEBAR_NAV.slice(0, 1).map((n) => (
           <div key={n.id} className={"sb-item" + (active === n.id ? " active" : "")} onClick={() => setActive(n.id)}>
             <Icon name={n.icon} size={16} className="sb-icon" />
             <span className="sb-label">{n.label}</span>
-            {n.badge && <span className="sb-badge">{n.badge}</span>}
           </div>
         ))}
         <div className="sb-section">Modules</div>
-        {SIDEBAR_NAV.slice(2).map((n) => (
+        {SIDEBAR_NAV.slice(1).map((n) => (
           <div key={n.id} className={"sb-item" + (active === n.id ? " active" : "")} onClick={() => setActive(n.id)}>
             <Icon name={n.icon} size={16} className="sb-icon" />
             <span className="sb-label">{n.label}</span>
@@ -247,7 +530,7 @@ const App = () => {
           <span className="sb-label">Command palette</span>
           <span className="sb-badge">⌘K</span>
         </div>
-        <div className="sb-item" onClick={() => window.postMessage({ type: "__activate_edit_mode" }, "*")}>
+        <div className="sb-item" onClick={() => setShowSettings(true)}>
           <Icon name="settings" size={16} className="sb-icon" />
           <span className="sb-label">Tweaks</span>
         </div>
@@ -262,14 +545,6 @@ const App = () => {
         </div>
         {active === "dashboard" ? (
           <div className="grid">
-            {brief && !briefDismissed && (
-              <div className="brief-banner span-12">
-                <Icon name="sparkles" size={13} style={{color:'var(--accent)',flexShrink:0,marginTop:1}}/>
-                <span className="brief-text">{brief.text}</span>
-                <button className="brief-x" onClick={dismissBrief}><Icon name="x" size={11}/></button>
-              </div>
-            )}
-            <M.TodayHub />
             {cards.map((c) => (
               <React.Fragment key={c.id}>
                 {t.modules[c.id] !== false && c.el}
@@ -361,24 +636,22 @@ const App = () => {
         </div>
       )}
 
-      <TweaksPanel>
-        <TweakSection label="Look">
-          <TweakColor label="Accent" value={t.accent} onChange={(v) => setTweak("accent", v)} options={ACCENT_OPTIONS} />
-          <TweakRadio label="Density" value={t.density} onChange={(v) => setTweak("density", v)}
-            options={[{ value: "compact", label: "Compact" }, { value: "balanced", label: "Balanced" }, { value: "airy", label: "Airy" }]} />
-          <TweakRadio label="Sidebar" value={t.sidebar} onChange={(v) => setTweak("sidebar", v)}
-            options={[{ value: "full", label: "Full" }, { value: "icons", label: "Icons" }, { value: "hidden", label: "Hidden" }]} />
-        </TweakSection>
-        <TweakSection label="Modules">
-          {[["agenda","Today / Agenda"],["finance","Finance"],["band","Band"],
-            ["health","Health & Fitness"],["work","Work"],["study","Studying"],["reading","Reading"],
-            ["holidays","Holidays"],["journal","Journal"],["activity","Activity Log"],
-          ].map(([k, label]) => (
-            <TweakToggle key={k} label={label} value={t.modules[k] !== false}
-              onChange={(v) => setTweak("modules", { ...t.modules, [k]: v })} />
-          ))}
-        </TweakSection>
-      </TweaksPanel>
+      {needsOnboarding === true && window.OnboardingWizard && (
+        <window.OnboardingWizard onComplete={handleOnboardingComplete} />
+      )}
+
+      {window.SettingsPanel && (
+        <window.SettingsPanel
+          open={showSettings}
+          onClose={() => setShowSettings(false)}
+          tweaks={t}
+          setTweak={setTweak}
+          userName={userName}
+          setUserName={setUserName}
+          onReEnroll={handleReEnroll}
+          onLogout={logout}
+        />
+      )}
     </div>
   );
 };

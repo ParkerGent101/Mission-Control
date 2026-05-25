@@ -1,11 +1,58 @@
 [
-  {"id": 1, "name": "Realms Minecraft", "acct": "Capitol One",   "amt": 3.99,  "due": "2nd"},
-  {"id": 2, "name": "Hatch",            "acct": "Sofi Checking", "amt": 8.77,  "due": "3rd"},
-  {"id": 3, "name": "Rocket Money",     "acct": "Sofi Checking", "amt": 6.00,  "due": "5th"},
-  {"id": 4, "name": "Google Cloud",     "acct": "Sofi Savings",  "amt": 2.43,  "due": "5th"},
-  {"id": 5, "name": "Hulu",             "acct": "Sofi Checking", "amt": 20.84, "due": "8th"},
-  {"id": 6, "name": "MSI Renters Ins.", "acct": "Sofi Checking", "amt": 24.59, "due": "10th"},
-  {"id": 7, "name": "Planet Fitness",   "acct": "Sofi Savings",  "amt": 27.49, "due": "17th"},
-  {"id": 8, "name": "Apple Music",      "acct": "Sofi Checking", "amt": 12.06, "due": "23rd"},
-  {"id": 9, "name": "Audible",          "acct": "Sofi Checking", "amt": 17.55, "due": "26th"}
+  {
+    "id": 1,
+    "name": "Realms Minecraft",
+    "acct": "Capitol One",
+    "amt": 3.99,
+    "due": "2nd"
+  },
+  {
+    "id": 3,
+    "name": "Rocket Money",
+    "acct": "Sofi Checking",
+    "amt": 6.0,
+    "due": "5th"
+  },
+  {
+    "id": 4,
+    "name": "Google Cloud",
+    "acct": "Sofi Savings",
+    "amt": 2.43,
+    "due": "5th"
+  },
+  {
+    "id": 5,
+    "name": "Hulu",
+    "acct": "Sofi Checking",
+    "amt": 20.84,
+    "due": "8th"
+  },
+  {
+    "id": 6,
+    "name": "MSI Renters Ins.",
+    "acct": "Sofi Checking",
+    "amt": 24.59,
+    "due": "10th"
+  },
+  {
+    "id": 7,
+    "name": "Planet Fitness",
+    "acct": "Sofi Savings",
+    "amt": 27.49,
+    "due": "17th"
+  },
+  {
+    "id": 8,
+    "name": "Apple Music",
+    "acct": "Sofi Checking",
+    "amt": 12.06,
+    "due": "23rd"
+  },
+  {
+    "id": 9,
+    "name": "Audible",
+    "acct": "Sofi Checking",
+    "amt": 17.55,
+    "due": "26th"
+  }
 ]

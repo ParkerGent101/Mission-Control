@@ -1,16 +1,1 @@
-[
-  {
-    "id": 1,
-    "name": "Alaska",
-    "location": "Alaska",
-    "start": "2026-05-15",
-    "end": "2026-05-23",
-    "budget": 0,
-    "checklist": [
-      {"text": "Pack bags", "done": false},
-      {"text": "Confirm travel arrangements", "done": false},
-      {"text": "Download offline maps", "done": false}
-    ],
-    "notes": ""
-  }
-]
+[]

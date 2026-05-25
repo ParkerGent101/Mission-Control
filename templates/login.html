@@ -26,7 +26,8 @@ input[type=password]:focus{border-color:#00FF41;box-shadow:0 0 8px rgba(0,255,65
   <div class="logo">Mission Control</div>
   <div class="sub">Authorization Required</div>
   <label class="prompt-line">Access Code</label>
-  <input type="password" id="pw" placeholder="_ _ _ _ _ _ _ _" autofocus onkeydown="if(event.key==='Enter')login()">
+  <input type="text" name="username" autocomplete="username" value="parker" style="display:none">
+  <input type="password" id="pw" name="password" autocomplete="current-password" placeholder="_ _ _ _ _ _ _ _" autofocus onkeydown="if(event.key==='Enter')login()">
   <button class="btn" onclick="login()">Authenticate</button>
   <div class="err" id="err">⚠ ACCESS DENIED</div>
 </div>
