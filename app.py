@@ -60,10 +60,6 @@ AGENDA_FILE      = DATA_DIR / "agenda.json"
 HEALTH_FILE      = DATA_DIR / "health.json"
 WORK_FILE        = DATA_DIR / "work_tasks.json"
 STUDY_FILE       = DATA_DIR / "study.json"
-READING_FILE     = DATA_DIR / "reading.json"
-GAMING_FILE      = DATA_DIR / "gaming.json"
-HOLIDAYS_FILE    = DATA_DIR / "holidays.json"
-JOURNAL_FILE     = DATA_DIR / "journal.json"
 BRIEF_FILE       = DATA_DIR / "brief.json"
 DB_PATH          = DATA_DIR / "mission_control.db"
 FINANCE_SHEET_ID = os.environ.get("FINANCE_SHEET_ID", "")
@@ -84,7 +80,6 @@ GDRIVE_CONFIG_FILE = DATA_DIR / "drive_config.json"
 ONBOARDING_FILE   = DATA_DIR / "onboarding.json"
 PLAID_CONFIG_FILE  = DATA_DIR / "plaid_config.json"
 USER_CONFIG_FILE   = DATA_DIR / "user_config.json"
-BIRTHDAYS_FILE     = DATA_DIR / "birthdays.json"
 TCPG_FILE          = DATA_DIR / "tcpg.json"
 PRACTICE_FILE      = DATA_DIR / "practice.json"
 
@@ -445,20 +440,6 @@ def tool_add_work_task(title, project="", priority="normal", notes=""):
     _save(WORK_FILE, items)
     return f"Work task #{wid} added: {title} [{project or 'GLS'}]"
 
-# ── Reading tools ──────────────────────────────────────────────────────────────
-
-def tool_log_reading_page(page):
-    reading = _load(READING_FILE)
-    if not isinstance(reading, dict) or not reading.get("current"):
-        return "No current book to update."
-    reading["current"]["page"] = int(page)
-    reading["current"]["last_read"] = datetime.now().strftime("%Y-%m-%d")
-    _save(READING_FILE, reading)
-    title = reading["current"].get("title", "current book")
-    total = reading["current"].get("total_pages", 0)
-    pct = round((int(page) / total) * 100) if total else 0
-    return f"Reading updated: {title} → p.{page}/{total} ({pct}%)"
-
 # ── Study tools ────────────────────────────────────────────────────────────────
 
 def tool_log_study_session(minutes, topic="", date=""):
@@ -502,15 +483,6 @@ def tool_log_calories(consumed, burned=0, date=""):
     _save(HEALTH_FILE, health)
     return f"Calories: {consumed} in{f', {burned} burned' if burned else ''}"
 
-# ── Journal tools ──────────────────────────────────────────────────────────────
-
-def tool_add_journal_entry(body, date=""):
-    entries = _load(JOURNAL_FILE)
-    eid = max((e.get("id", 0) for e in entries), default=0) + 1
-    entries.append({"id": eid, "date": date or datetime.now().strftime("%Y-%m-%d"), "body": body})
-    _save(JOURNAL_FILE, entries)
-    return f"Journal entry saved ({len(body.split())} words)"
-
 # ── Tool dispatch ──────────────────────────────────────────────────────────────
 
 TOOL_MAP = {
@@ -529,12 +501,10 @@ TOOL_MAP = {
     "financial_summary":    lambda i: tool_financial_summary(i.get("category")),
     "add_agenda_item":      lambda i: tool_add_agenda_item(**i),
     "add_work_task":        lambda i: tool_add_work_task(**i),
-    "log_reading_page":     lambda i: tool_log_reading_page(i["page"]),
     "log_study_session":    lambda i: tool_log_study_session(i["minutes"], i.get("topic",""), i.get("date","")),
     "log_practice_score":   lambda i: tool_log_practice_score(i["score"]),
     "log_weight":           lambda i: tool_log_weight(i["weight"], i.get("date","")),
     "log_calories":         lambda i: tool_log_calories(i["consumed"], i.get("burned",0), i.get("date","")),
-    "add_journal_entry":    lambda i: tool_add_journal_entry(i["body"], i.get("date","")),
 }
 
 TOOLS = [
@@ -553,12 +523,10 @@ TOOLS = [
     {"name":"financial_summary","description":"Get finance summary","input_schema":{"type":"object","properties":{"category":{"type":"string"}}}},
     {"name":"add_agenda_item","description":"Add an item to today's agenda","input_schema":{"type":"object","properties":{"label":{"type":"string"},"time":{"type":"string","description":"HH:MM"},"tag":{"type":"string"},"date":{"type":"string"}},"required":["label"]}},
     {"name":"add_work_task","description":"Add a GLS or coding work task (work_tasks.json)","input_schema":{"type":"object","properties":{"title":{"type":"string"},"project":{"type":"string","description":"e.g. GLS Security, GLS IT, GLS SharePoint, Code"},"priority":{"type":"string","enum":["high","normal","low"]},"notes":{"type":"string"}},"required":["title"]}},
-    {"name":"log_reading_page","description":"Update current book page number","input_schema":{"type":"object","properties":{"page":{"type":"integer"}},"required":["page"]}},
     {"name":"log_study_session","description":"Log a CISM study session","input_schema":{"type":"object","properties":{"minutes":{"type":"integer"},"topic":{"type":"string"},"date":{"type":"string"}},"required":["minutes"]}},
     {"name":"log_practice_score","description":"Log a CISM practice test score (0-100)","input_schema":{"type":"object","properties":{"score":{"type":"integer"}},"required":["score"]}},
     {"name":"log_weight","description":"Log today's weight in lbs","input_schema":{"type":"object","properties":{"weight":{"type":"number"},"date":{"type":"string"}},"required":["weight"]}},
     {"name":"log_calories","description":"Log calories consumed and/or burned","input_schema":{"type":"object","properties":{"consumed":{"type":"integer"},"burned":{"type":"integer"},"date":{"type":"string"}},"required":["consumed"]}},
-    {"name":"add_journal_entry","description":"Save a journal entry","input_schema":{"type":"object","properties":{"body":{"type":"string"},"date":{"type":"string"}},"required":["body"]}},
 ]
 
 SYSTEM_PROMPT = """You are Mission Control — Parker Gent's personal AI command center.
@@ -1043,8 +1011,7 @@ def data_reset():
     to_clear = [
         FINANCE_FILE, SUBS_FILE, SAVINGS_FILE, TASKS_FILE, WORK_FILE,
         REMINDERS_FILE, CONTENT_FILE, BAND_CONTACTS_FILE, AGENDA_FILE,
-        HEALTH_FILE, STUDY_FILE, READING_FILE, GAMING_FILE, HOLIDAYS_FILE,
-        JOURNAL_FILE, BRIEF_FILE,
+        HEALTH_FILE, STUDY_FILE, BRIEF_FILE,
     ]
     for f in to_clear:
         p = Path(f)
@@ -1218,32 +1185,6 @@ def plaid_categorize():
     _save(PLAID_CONFIG_FILE, config)
     return jsonify({"ok": True, "saved": len(categories)})
 
-# ── Birthdays ─────────────────────────────────────────────────────────────────
-
-@app.route("/api/birthdays", methods=["GET"])
-def get_birthdays():
-    return jsonify(_load(BIRTHDAYS_FILE))
-
-@app.route("/api/birthdays", methods=["POST"])
-def post_birthday():
-    d = request.json or {}
-    bdays = _load(BIRTHDAYS_FILE)
-    bid = max((b.get("id", 0) for b in bdays), default=0) + 1
-    bdays.append({
-        "id": bid, "name": d.get("name", ""),
-        "date": d.get("date", ""), "notes": d.get("notes", ""),
-        "gift_remind_days": int(d.get("gift_remind_days", 14)),
-    })
-    _save(BIRTHDAYS_FILE, bdays)
-    return jsonify({"id": bid})
-
-@app.route("/api/birthdays/<int:bid>", methods=["DELETE"])
-def delete_birthday(bid):
-    bdays = _load(BIRTHDAYS_FILE)
-    bdays = [b for b in bdays if b.get("id") != bid]
-    _save(BIRTHDAYS_FILE, bdays)
-    return jsonify({"ok": True})
-
 # ── Calendar overview ─────────────────────────────────────────────────────────
 
 @app.route("/api/calendar/overview")
@@ -1261,35 +1202,6 @@ def calendar_overview():
                     "title": f"{s['event']} — {s['venue']}, {s['city']}", "meta": s.get("notes","")})
         except Exception:
             pass
-
-    # Birthdays + gift reminders
-    for b in _load(BIRTHDAYS_FILE):
-        raw = b.get("date", "")
-        remind = int(b.get("gift_remind_days", 14))
-        try:
-            if len(raw) == 5:  # MM-DD
-                bd = datetime.strptime(f"{today.year}-{raw}", "%Y-%m-%d").date()
-                if bd < today:
-                    bd = datetime.strptime(f"{today.year + 1}-{raw}", "%Y-%m-%d").date()
-            else:
-                bd = datetime.strptime(raw, "%Y-%m-%d").date().replace(year=today.year)
-                if bd < today:
-                    bd = bd.replace(year=today.year + 1)
-        except Exception:
-            continue
-        if bd <= cutoff:
-            age = ""
-            if len(raw) > 5:
-                try:
-                    age = f" (turns {bd.year - datetime.strptime(raw, '%Y-%m-%d').year})"
-                except Exception:
-                    pass
-            events.append({"date": bd.isoformat(), "type": "birthday",
-                "title": f"{b['name']}'s Birthday{age}", "meta": b.get("notes", "")})
-            gift_date = bd - timedelta(days=remind)
-            if today <= gift_date <= cutoff:
-                events.append({"date": gift_date.isoformat(), "type": "birthday",
-                    "title": f"Get gift for {b['name']} ({remind}d before birthday)", "meta": ""})
 
     # National holidays
     for h in NATIONAL_HOLIDAYS:
@@ -2420,16 +2332,6 @@ def get_brief():
     agenda_today = [i for i in _load(AGENDA_FILE) if i.get("date") == today and not i.get("done")]
     work_high = [t for t in _load(WORK_FILE) if not t.get("done") and t.get("priority") == "high"][:3]
 
-    trip_lines = []
-    for h in _load(HOLIDAYS_FILE):
-        try:
-            days_out = (datetime.strptime(h["start"], "%Y-%m-%d").date() - today_dt).days
-            if -7 <= days_out <= 60:
-                label = f"{h['name']}: in progress" if days_out < 0 else f"{h['name']}: today" if days_out == 0 else f"{h['name']} in {days_out}d"
-                trip_lines.append(label)
-        except Exception:
-            pass
-
     health = _load(HEALTH_FILE)
     habits = [h.get("label", h.get("id", "")) for h in health.get("habit_list", [])][:4]
 
@@ -2437,7 +2339,6 @@ def get_brief():
         f"Today is {today} ({datetime.now().strftime('%A')}).\n"
         f"Agenda: {', '.join(i['label'] for i in agenda_today) or 'nothing scheduled'}\n"
         f"High priority work: {', '.join(t['title'] for t in work_high) or 'none'}\n"
-        f"Trips: {', '.join(trip_lines) or 'none upcoming'}\n"
         f"Daily habits: {', '.join(habits)}"
     )
 
@@ -2470,16 +2371,7 @@ def get_today():
     habit_list = health.get("habit_list", [])
     work = [t for t in _load(WORK_FILE) if not t.get("done") and t.get("priority") == "high"][:5]
 
-    trips = []
-    for h in _load(HOLIDAYS_FILE):
-        try:
-            days_out = (datetime.strptime(h["start"], "%Y-%m-%d").date() - today_dt).days
-            if -7 <= days_out <= 30:
-                trips.append({**h, "days_out": days_out})
-        except Exception:
-            pass
-
-    return jsonify({"agenda": agenda, "habits": {"today": habits_today, "list": habit_list}, "work_priority": work, "trips": trips})
+    return jsonify({"agenda": agenda, "habits": {"today": habits_today, "list": habit_list}, "work_priority": work})
 
 # ── Agenda ─────────────────────────────────────────────────────────────────────
 
@@ -2876,133 +2768,6 @@ def post_study_session():
     study["total_hours"] = round(sum(s.get("minutes", 0) for s in sessions) / 60, 1)
     _save(STUDY_FILE, study)
     _log("study", "session", f"{mins}min{f' — {topic}' if topic else ''}")
-    return jsonify({"ok": True})
-
-# ── Reading ────────────────────────────────────────────────────────────────────
-
-@app.route("/api/reading", methods=["GET"])
-def get_reading():
-    data = _load(READING_FILE)
-    if isinstance(data, list):
-        return jsonify({})
-    return jsonify(data)
-
-@app.route("/api/reading/progress", methods=["POST"])
-def post_reading_progress():
-    d = request.json
-    reading = _load(READING_FILE)
-    if not isinstance(reading, dict):
-        reading = {}
-    if reading.get("current"):
-        reading["current"]["page"] = d.get("page", reading["current"].get("page", 0))
-        reading["current"]["last_read"] = datetime.now().strftime("%Y-%m-%d")
-        _save(READING_FILE, reading)
-        title = reading["current"].get("title", "book")
-        _log("reading", "progress", f"{title} → p.{d.get('page')}")
-        return jsonify({"ok": True})
-    return jsonify({"error": "no current book"}), 404
-
-@app.route("/api/reading", methods=["POST"])
-def post_reading():
-    d = request.json
-    reading = _load(READING_FILE)
-    if not isinstance(reading, dict):
-        reading = {"queue": [], "completed_2026": 0, "goal_2026": 30}
-    action = d.get("action", "update_page")
-    if action == "set_current":
-        reading["current"] = {"title": d["title"], "author": d.get("author",""), "page": d.get("page",0), "total_pages": d.get("total_pages",0), "started": datetime.now().strftime("%Y-%m-%d")}
-    elif action == "add_queue":
-        reading.setdefault("queue", []).append({"title": d["title"], "author": d.get("author","")})
-    elif action == "complete":
-        reading["completed_2026"] = reading.get("completed_2026", 0) + 1
-        reading["current"] = None
-    _save(READING_FILE, reading)
-    return jsonify({"ok": True})
-
-# ── Gaming ─────────────────────────────────────────────────────────────────────
-
-@app.route("/api/gaming", methods=["GET"])
-def get_gaming():
-    return jsonify(_load(GAMING_FILE))
-
-@app.route("/api/gaming/backlog", methods=["POST"])
-def post_gaming_backlog():
-    d = request.json
-    gaming = _load(GAMING_FILE)
-    if not isinstance(gaming, dict):
-        gaming = {"current": [], "backlog": [], "completed": []}
-    backlog = gaming.setdefault("backlog", [])
-    bid = max((b.get("id", 0) for b in backlog), default=0) + 1
-    backlog.append({"id": bid, "title": d.get("title", ""), "platform": d.get("platform", ""), "added": datetime.now().strftime("%Y-%m-%d")})
-    _save(GAMING_FILE, gaming)
-    return jsonify({"id": bid})
-
-# ── Holidays ───────────────────────────────────────────────────────────────────
-
-@app.route("/api/holidays", methods=["GET"])
-def get_holidays():
-    data = _load(HOLIDAYS_FILE)
-    # Support both old dict format and new array format
-    if isinstance(data, dict):
-        return jsonify(data.get("trips", []))
-    return jsonify(data)
-
-@app.route("/api/holidays", methods=["POST"])
-def post_holiday():
-    d = request.json
-    trips = _load(HOLIDAYS_FILE)
-    if isinstance(trips, dict):
-        trips = trips.get("trips", [])
-    tid = max((t.get("id", 0) for t in trips), default=0) + 1
-    trips.append({
-        "id": tid, "name": d.get("name", d.get("destination", "")),
-        "location": d.get("location", ""), "start": d.get("start", ""),
-        "end": d.get("end", ""), "budget": d.get("budget", 0),
-        "checklist": d.get("checklist", []), "notes": d.get("notes", "")
-    })
-    _save(HOLIDAYS_FILE, trips)
-    return jsonify({"id": tid})
-
-@app.route("/api/holidays/<int:tid>/checklist/<int:idx>", methods=["POST"])
-def toggle_holiday_checklist(tid, idx):
-    trips = _load(HOLIDAYS_FILE)
-    if isinstance(trips, dict):
-        trips = trips.get("trips", [])
-    for trip in trips:
-        if trip["id"] == tid:
-            cl = trip.get("checklist", [])
-            if 0 <= idx < len(cl):
-                if isinstance(cl[idx], dict):
-                    cl[idx]["done"] = not cl[idx].get("done", False)
-                else:
-                    cl[idx] = {"text": cl[idx], "done": True}
-            _save(HOLIDAYS_FILE, trips)
-            return jsonify({"ok": True})
-    return jsonify({"error": "not found"}), 404
-
-# ── Journal ────────────────────────────────────────────────────────────────────
-
-@app.route("/api/journal", methods=["GET"])
-def get_journal():
-    return jsonify(_load(JOURNAL_FILE))
-
-@app.route("/api/journal", methods=["POST"])
-def post_journal():
-    d = request.json
-    entries = _load(JOURNAL_FILE)
-    date = d.get("date", datetime.now().strftime("%Y-%m-%d"))
-    existing = next((e for e in entries if e["date"] == date), None)
-    if existing:
-        existing["body"] = d.get("body", "")
-        existing["updated"] = datetime.now().isoformat()
-    else:
-        entries.append({
-            "date": date, "body": d.get("body", ""),
-            "mood": d.get("mood", ""), "created": datetime.now().isoformat()
-        })
-    _save(JOURNAL_FILE, entries)
-    words = len(d.get("body","").split())
-    _log("journal", "entry", f"{date} — {words} words")
     return jsonify({"ok": True})
 
 # ── Activity Log ───────────────────────────────────────────────────────────────

@@ -546,7 +546,7 @@ const FinanceCard = () => {
 // =========================================================
 // BAND
 // =========================================================
-const MiniCal = ({ gigs, trips, practiceMap, busyDates, onDayClick, selectedDay }) => {
+const MiniCal = ({ gigs, practiceMap, busyDates, onDayClick, selectedDay }) => {
   const today = new Date();
   const [cal, setCal] = useState({ y: today.getFullYear(), m: today.getMonth() });
 
@@ -557,14 +557,6 @@ const MiniCal = ({ gigs, trips, practiceMap, busyDates, onDayClick, selectedDay 
 
   const pad = (n) => String(n).padStart(2,'0');
   const showDates = new Set((gigs||[]).map(g=>g.rawDate).filter(Boolean));
-  const tripDates = new Set();
-  (trips||[]).forEach(t => {
-    if (t.start && t.end) {
-      let d = new Date(t.start+'T12:00:00');
-      const end = new Date(t.end+'T12:00:00');
-      while (d <= end) { tripDates.add(d.toISOString().slice(0,10)); d.setDate(d.getDate()+1); }
-    }
-  });
 
   const cells = [];
   for (let i=0; i<firstDay; i++) cells.push(null);
@@ -589,25 +581,22 @@ const MiniCal = ({ gigs, trips, practiceMap, busyDates, onDayClick, selectedDay 
           if (!d) return <div key={i}/>;
           const ds = `${cal.y}-${pad(cal.m+1)}-${pad(d)}`;
           const isShow     = showDates.has(ds);
-          const isTrip     = tripDates.has(ds);
           const isToday    = d===today.getDate() && cal.m===today.getMonth() && cal.y===today.getFullYear();
           const isSelected = ds === selectedDay;
           const dow        = new Date(cal.y,cal.m,d).getDay();
           const isPractice = dow===1 || dow===4;
           const isPracticeOn = practiceMap && practiceMap[ds];
           const isPot      = (dow===5||dow===6) && !isShow;
-          const isBusy     = busyDates && busyDates.has(ds) && !isShow && !isTrip;
+          const isBusy     = busyDates && busyDates.has(ds) && !isShow;
           return (
             <div key={i} onClick={() => onDayClick && onDayClick(ds)} style={{
               textAlign:'center', padding:'4px 2px', borderRadius:4, fontSize:11,
               fontFamily:'var(--font-mono)', cursor: onDayClick ? 'pointer' : 'default',
               background: isSelected ? 'color-mix(in oklch,var(--info) 25%,var(--surface-2))'
                         : isShow    ? 'color-mix(in oklch,var(--violet) 30%,var(--surface-2))'
-                        : isTrip    ? 'color-mix(in oklch,var(--accent) 20%,var(--surface-2))'
                         : isToday   ? 'var(--surface-3)' : 'transparent',
               color: isSelected ? 'var(--info)'
                    : isShow     ? 'var(--violet)'
-                   : isTrip     ? 'var(--accent)'
                    : isToday    ? 'var(--ink)' : 'var(--ink-2)',
               border: isSelected ? '1px solid var(--info)' : isToday ? '1px solid var(--line)' : '1px solid transparent',
               fontWeight: isShow||isToday||isSelected ? 600 : 400,
@@ -639,7 +628,6 @@ const MiniCal = ({ gigs, trips, practiceMap, busyDates, onDayClick, selectedDay 
 
 const BandCard = () => {
   const [gigs, setGigs] = useState([]);
-  const [trips, setTrips] = useState([]);
   const [contacts, setContacts] = useState([]);
   const [pushing, setPushing] = useState(false);
   const [contentQueue, setContentQueue] = useState([]);
@@ -735,7 +723,6 @@ const BandCard = () => {
     fetch('/api/band/contacts').then(r=>r.json()).then(setContacts).catch(()=>{});
     fetch('/api/band/songs').then(r=>r.json()).then(setSongs).catch(()=>{});
     loadPractice();
-    fetch('/api/holidays').then(r=>r.json()).then(setTrips).catch(()=>{});
     fetch('/api/calendar/events').then(r=>r.json()).then(events => {
       const bandKeywords = ['show','gig','practice','band','cua','coming up aces'];
       const busy = new Set();
@@ -835,7 +822,7 @@ const BandCard = () => {
           </div>
         </div>
       )}
-      <MiniCal gigs={gigs} trips={trips} practiceMap={practiceMap} busyDates={busyDates} selectedDay={selectedDay}
+      <MiniCal gigs={gigs} practiceMap={practiceMap} busyDates={busyDates} selectedDay={selectedDay}
         onDayClick={ds => setSelectedDay(s => s === ds ? null : ds)} />
 
       {selectedDay && (() => {
@@ -1721,268 +1708,6 @@ const StudyCard = () => {
 };
 
 // =========================================================
-// READING
-// =========================================================
-const ReadingCard = () => {
-  const [reading, setReading] = useState(null);
-
-  useEffect(() => {
-    fetch('/api/reading').then(r=>r.json()).then(data => {
-      if (data && !Array.isArray(data)) setReading(data);
-    }).catch(()=>{});
-  }, []);
-
-  const updatePage = async () => {
-    if (!reading) return;
-    const p = prompt("Current page:", reading.current.page);
-    if (!p) return;
-    const page = parseInt(p);
-    await fetch('/api/reading/progress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page})}).catch(()=>{});
-    setReading(r=>({...r, current:{...r.current,page}}));
-    if (window.__toast) window.__toast(`Page updated to ${page}`);
-  };
-
-  const finishBook = async () => {
-    if (!reading || !reading.current) return;
-    if (!confirm(`Mark "${reading.current.title}" as finished?`)) return;
-    await fetch('/api/reading',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:'complete'})}).catch(()=>{});
-    const finished = reading.current;
-    const nextCurrent = (reading.queue||[])[0] || null;
-    const newQueue = (reading.queue||[]).slice(1);
-    setReading(r => ({
-      ...r,
-      completed_2026: (r.completed_2026||0) + 1,
-      current: nextCurrent ? {...nextCurrent, page:0, total_pages: nextCurrent.total_pages||300, started: new Date().toISOString().slice(0,10)} : null,
-      queue: newQueue,
-    }));
-    if (window.__toast) window.__toast(`"${finished.title}" marked finished!`);
-  };
-
-  const addToQueue = async () => {
-    const title = prompt("Book title:");
-    if (!title) return;
-    const author = prompt("Author:") || "";
-    await fetch('/api/reading',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:'add_queue',title,author})}).catch(()=>{});
-    setReading(r=>({...r, queue:[...(r.queue||[]),{title,author}]}));
-    if (window.__toast) window.__toast(`"${title}" added to queue`);
-  };
-
-  if (!reading) return (
-    <Card num="07" title="Reading" span={4} right={<span className="muted mono" style={{fontSize:11}}>loading…</span>}>
-      <div className="muted-2 mono" style={{fontSize:11,padding:'20px 0',textAlign:'center'}}>Loading…</div>
-    </Card>
-  );
-
-  const pct = reading.current ? Math.round((reading.current.page/reading.current.total_pages)*100) : 0;
-
-  return (
-    <Card num="07" title="Reading" span={4}
-      right={<>
-        <span className="muted mono" style={{fontSize:11}}>{reading.completed_2026} / {reading.goal_2026} books · 2026</span>
-        <button className="btn ghost" style={{padding:'3px 8px',fontSize:11}} onClick={addToQueue}><Icon name="plus" size={12}/>Queue</button>
-      </>}
-    >
-      {reading.current ? (
-        <div style={{display:"grid",gridTemplateColumns:"72px 1fr",gap:12}}>
-          <div className="media-cover" style={{background:"linear-gradient(160deg,oklch(0.5 0.12 60),oklch(0.3 0.05 60))",color:"#fff"}}>
-            {reading.current.title}
-          </div>
-          <div>
-            <div className="muted-2 mono" style={{fontSize:10.5,letterSpacing:".08em"}}>NOW READING</div>
-            <div className="serif" style={{fontSize:16,lineHeight:1.15,marginTop:2}}>{reading.current.title}</div>
-            <div className="muted" style={{fontSize:12}}>{reading.current.author} · p. {reading.current.page} / {reading.current.total_pages}</div>
-            <div className="progress" style={{marginTop:8}}><div className="bar amber" style={{width:pct+"%"}}/></div>
-            <div className="row" style={{marginTop:6,justifyContent:"space-between"}}>
-              <span className="muted mono" style={{fontSize:10.5}}>{pct}%</span>
-              <div className="row" style={{gap:4}}>
-                {pct >= 85 && <button className="btn primary" style={{padding:"3px 8px",fontSize:11}} onClick={finishBook}>✓ Finish</button>}
-                <button className="btn" style={{padding:"3px 8px",fontSize:11}} onClick={updatePage}>pg {reading.current.page}</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="muted-2 mono" style={{fontSize:11,padding:'16px 0',textAlign:'center'}}>No current book — start one from the queue.</div>
-      )}
-      <div className="section-h"><span>Up next</span><span className="line"/>
-        <span className="muted-2 mono" style={{fontSize:10.5}}>{(reading.queue||[]).length} queued</span>
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
-        {(reading.queue||[]).slice(0,3).map((b,i) => (
-          <div key={i}>
-            <div className="media-cover" style={{background:[
-              "linear-gradient(160deg,oklch(0.4 0.10 30),oklch(0.25 0.05 30))",
-              "linear-gradient(160deg,oklch(0.45 0.10 160),oklch(0.28 0.05 160))",
-              "linear-gradient(160deg,oklch(0.42 0.10 290),oklch(0.26 0.05 290))"
-            ][i%3],color:"#fff"}}>{b.title}</div>
-            <div className="muted mono" style={{fontSize:10.5,marginTop:4}}>{b.author}</div>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-};
-
-// =========================================================
-// HOLIDAYS / TRAVEL
-// =========================================================
-const HolidayCard = () => {
-  const [trips, setTrips] = useState([]);
-  const [showAdd, setShowAdd] = useState(false);
-  const [newTrip, setNewTrip] = useState({name:'',location:'',start:'',end:'',budget:'',notes:''});
-
-  useEffect(() => {
-    fetch('/api/holidays').then(r=>r.json()).then(data => {
-      if (data && data.length) setTrips(data);
-    }).catch(()=>{});
-  }, []);
-
-  const toggleCheck = async (tripId, idx) => {
-    await fetch(`/api/holidays/${tripId}/checklist/${idx}`,{method:'POST'}).catch(()=>{});
-    setTrips(ts => ts.map(t => t.id===tripId ? {
-      ...t, checklist: t.checklist.map((c,i)=>i===idx?{...c,done:!c.done}:c)
-    } : t));
-  };
-
-  const addTrip = async () => {
-    if (!newTrip.name || !newTrip.start) return;
-    const res = await fetch('/api/holidays', {method:'POST',headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({...newTrip, budget: parseFloat(newTrip.budget)||0, checklist:[]})}).then(r=>r.json());
-    setTrips(ts => [...ts, {...newTrip, id:res.id, budget:parseFloat(newTrip.budget)||0, checklist:[]}]
-      .sort((a,b)=>new Date(a.start)-new Date(b.start)));
-    setNewTrip({name:'',location:'',start:'',end:'',budget:'',notes:''});
-    setShowAdd(false);
-  };
-
-  const next = trips.find(t => new Date(t.start+'T12:00:00') > new Date()) || trips[0];
-  if (!next && !showAdd) return (
-    <Card num="08" title="Holidays / Travel" span={4} right={<button className="btn" onClick={()=>setShowAdd(true)}><Icon name="plus" size={13}/>Trip</button>}>
-      <div className="muted-2 mono" style={{fontSize:11,padding:'20px 0',textAlign:'center'}}>No trips planned yet.</div>
-    </Card>
-  );
-
-  const daysOut = next ? Math.round((new Date(next.start+'T12:00:00')-new Date())/86400000) : 0;
-  const done = (next?.checklist||[]).filter(c=>c.done).length;
-
-  return (
-    <Card num="08" title="Holidays / Travel" span={4}
-      right={<>
-        <span className="muted mono" style={{fontSize:11}}>{trips.length} trip{trips.length!==1?"s":""}</span>
-        <button className="btn" onClick={()=>setShowAdd(s=>!s)}><Icon name="plus" size={13}/>Trip</button>
-      </>}
-    >
-      {showAdd && (
-        <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:12,padding:'10px',background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid var(--line)'}}>
-          <div className="muted-2 mono" style={{fontSize:10.5,letterSpacing:'.06em'}}>ADD TRIP</div>
-          <input className="input" placeholder="Destination (e.g. Nashville, TN)" value={newTrip.name} onChange={e=>setNewTrip(t=>({...t,name:e.target.value}))} style={{fontSize:12}}/>
-          <div style={{display:'flex',gap:6}}>
-            <input className="input" type="date" value={newTrip.start} onChange={e=>setNewTrip(t=>({...t,start:e.target.value}))} style={{flex:1,fontSize:12}}/>
-            <input className="input" type="date" value={newTrip.end} onChange={e=>setNewTrip(t=>({...t,end:e.target.value}))} style={{flex:1,fontSize:12}}/>
-            <input className="input" placeholder="Budget $" type="number" value={newTrip.budget} onChange={e=>setNewTrip(t=>({...t,budget:e.target.value}))} style={{width:80,fontSize:12}}/>
-          </div>
-          <input className="input" placeholder="Notes" value={newTrip.notes} onChange={e=>setNewTrip(t=>({...t,notes:e.target.value}))} style={{fontSize:12}}/>
-          <div style={{display:'flex',gap:6,justifyContent:'flex-end'}}>
-            <button className="btn primary" onClick={addTrip} style={{fontSize:11}}>Add trip</button>
-            <button className="btn ghost" onClick={()=>setShowAdd(false)} style={{fontSize:11}}>✕</button>
-          </div>
-        </div>
-      )}
-      {next && <div style={{position:"relative",padding:12,borderRadius:6,overflow:"hidden",
-        background:"linear-gradient(135deg,oklch(0.32 0.06 220),oklch(0.22 0.04 220))",color:"#fff",marginBottom:12}}>
-        <div style={{position:"absolute",inset:0,opacity:0.12,background:"repeating-linear-gradient(45deg,#fff 0 1px,transparent 1px 14px)"}}/>
-        <div style={{position:"relative"}}>
-          <div className="mono" style={{fontSize:10.5,opacity:0.7,letterSpacing:".08em"}}>NEXT TRIP</div>
-          <div className="serif" style={{fontSize:20,lineHeight:1.1,marginTop:4}}>{next.name}</div>
-          <div className="mono" style={{fontSize:11,opacity:0.8,marginTop:2}}>{next.start} – {next.end} · {next.location}</div>
-          <div className="row" style={{marginTop:10,gap:14}}>
-            <div><div className="serif" style={{fontSize:26,lineHeight:1}}>{daysOut}</div><div className="mono" style={{fontSize:9.5,opacity:0.7,letterSpacing:".08em"}}>DAYS OUT</div></div>
-            {next.budget>0 && <>
-              <div style={{width:1,alignSelf:"stretch",background:"rgba(255,255,255,0.25)"}}/>
-              <div><div className="mono" style={{fontSize:13}}>${next.budget.toLocaleString()}</div><div className="mono" style={{fontSize:9.5,opacity:0.7,letterSpacing:".08em"}}>BUDGET</div></div>
-            </>}
-            <div style={{width:1,alignSelf:"stretch",background:"rgba(255,255,255,0.25)"}}/>
-            <div><div className="mono" style={{fontSize:13}}>{done}/{(next.checklist||[]).length}</div><div className="mono" style={{fontSize:9.5,opacity:0.7,letterSpacing:".08em"}}>CHECKLIST</div></div>
-          </div>
-        </div>
-      </div>}
-      {next && <><div className="section-h"><span>To do</span><span className="line"/></div>
-      {(next.checklist||[]).map((c,i)=>(
-        <div key={i} className="row" style={{padding:"5px 0",cursor:"pointer"}} onClick={()=>toggleCheck(next.id,i)}>
-          <Checkbox checked={c.done}/>
-          <span style={{flex:1,color:c.done?"var(--ink-3)":"var(--ink)",textDecoration:c.done?"line-through":"none",fontSize:12.5}}>{c.text||c.label}</span>
-        </div>
-      ))}</>}
-    </Card>
-  );
-};
-
-// =========================================================
-// JOURNAL
-// =========================================================
-const JournalCard = () => {
-  const [text, setText] = useState("");
-  const [entries, setEntries] = useState([]);
-  const [saving, setSaving] = useState(false);
-  const [prompt_text, setPromptText] = useState("What's one thing that worked today — and why?");
-  const prompts = [
-    "What's one thing that worked today — and why?",
-    "What's the next step on your biggest goal?",
-    "Who showed up for you today?",
-    "What did you learn that surprised you?",
-    "What would you do differently tomorrow?",
-    "What are you grateful for right now?",
-    "What's the one thing only YOU can do this week?",
-  ];
-
-  useEffect(() => {
-    fetch('/api/journal').then(r=>r.json()).then(data => {
-      if (data && data.length) setEntries(data.slice(0,5));
-    }).catch(()=>{});
-    setPromptText(prompts[new Date().getDay() % prompts.length]);
-  }, []);
-
-  const save = async () => {
-    if (!text.trim()) return;
-    setSaving(true);
-    const today = new Date().toISOString().slice(0,10);
-    await fetch('/api/journal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body:text,date:today})}).catch(()=>{});
-    setEntries(es=>[{id:Date.now(),date:today,body:text},...es.filter(e=>e.date!==today).slice(0,4)]);
-    setText('');
-    setSaving(false);
-  };
-
-  const streak = entries.length;
-
-  return (
-    <Card num="09" title="Journal" span={4}
-      right={<span className="muted mono" style={{fontSize:11}}>{streak}-day streak</span>}
-    >
-      <div className="muted-2 mono" style={{fontSize:10.5,letterSpacing:".08em",marginBottom:4}}>TONIGHT'S PROMPT</div>
-      <div className="serif" style={{fontSize:15,color:"var(--ink-2)",marginBottom:8,fontStyle:"italic"}}>{prompt_text}</div>
-      <textarea className="journal-text" placeholder="start writing…" value={text}
-        onChange={(e)=>setText(e.target.value)}
-        onKeyDown={(e)=>{if(e.ctrlKey&&e.key==='Enter')save();}}
-      />
-      <div className="hairline" style={{margin:"8px 0"}}/>
-      <div className="row" style={{justifyContent:"space-between"}}>
-        <span className="muted mono" style={{fontSize:10.5}}>{text.split(/\s+/).filter(Boolean).length} words · ctrl+↵ to save</span>
-        <button className="btn primary" onClick={save} disabled={saving}><Icon name="feather" size={12}/>{saving?"saving…":"Save entry"}</button>
-      </div>
-      <div className="section-h"><span>Recent</span><span className="line"/></div>
-      {entries.length===0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 0'}}>No entries yet. Start writing!</div>}
-      {entries.map((e,i)=>(
-        <div key={e.id||i} style={{padding:"6px 0",borderBottom:"1px solid var(--line-soft)"}}>
-          <div className="muted mono" style={{fontSize:10.5}}>{e.date}</div>
-          <div className="serif" style={{fontSize:12.5,color:"var(--ink-2)"}}>{(e.body||e.text||'').slice(0,120)}{(e.body||e.text||'').length>120?"…":""}</div>
-        </div>
-      ))}
-    </Card>
-  );
-};
-
-// =========================================================
 // PRACTICE — Piano & Guitar
 // =========================================================
 const PRACTICE_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -2504,7 +2229,7 @@ const TodayHub = () => {
 
   if (!data) return null;
 
-  const { agenda, habits, work_priority, trips } = data;
+  const { agenda, habits, work_priority } = data;
   const habitsToday = habits.today || {};
   const habitList = habits.list || [];
   const doneCount = habitList.filter(h => habitsToday[h.id]).length;
@@ -2566,9 +2291,9 @@ const TodayHub = () => {
           })}
         </div>
 
-        {/* Priority work + trips */}
+        {/* Priority work */}
         <div>
-          {work_priority.length > 0 && <>
+          {work_priority.length > 0 ? <>
             <div className="section-h"><span>Priority</span><span className="line"/></div>
             {work_priority.map(t => (
               <div key={t.id} style={{padding:'3px 0', borderBottom:'1px solid var(--line-soft)'}}>
@@ -2579,22 +2304,7 @@ const TodayHub = () => {
                 {t.project && <div className="muted-2 mono" style={{fontSize:10,paddingLeft:11}}>{t.project}</div>}
               </div>
             ))}
-          </>}
-          {trips.length > 0 && <>
-            <div className="section-h" style={{marginTop: work_priority.length > 0 ? 14 : 0}}>
-              <span>Trips</span><span className="line"/>
-            </div>
-            {trips.map(trip => (
-              <div key={trip.id} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0'}}>
-                <Icon name="plane" size={12} style={{color:'var(--accent)',flexShrink:0}}/>
-                <span style={{fontSize:12,flex:1}}>{trip.name}</span>
-                <span className="mono muted" style={{fontSize:11}}>
-                  {trip.days_out < 0 ? 'in progress' : trip.days_out === 0 ? 'today!' : `${trip.days_out}d`}
-                </span>
-              </div>
-            ))}
-          </>}
-          {work_priority.length === 0 && trips.length === 0 && (
+          </> : (
             <div>
               <div className="section-h"><span>Status</span><span className="line"/></div>
               <div className="muted" style={{fontSize:12,padding:'6px 0'}}>All clear — nothing urgent.</div>
@@ -2613,10 +2323,6 @@ const CalendarCard = () => {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
-  const [showAddBd, setShowAddBd] = useState(false);
-  const [bdName, setBdName] = useState('');
-  const [bdDate, setBdDate] = useState('');
-  const [bdRemind, setBdRemind] = useState(14);
 
   const load = () => {
     setLoading(true);
@@ -2627,23 +2333,14 @@ const CalendarCard = () => {
   };
   useEffect(load, []);
 
-  const addBd = async () => {
-    if (!bdName || !bdDate) return;
-    await fetch('/api/birthdays',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({name:bdName,date:bdDate,gift_remind_days:bdRemind})}).catch(()=>{});
-    setShowAddBd(false); setBdName(''); setBdDate('');
-    window.__toast?.(`Birthday added for ${bdName}`,'success');
-    load();
-  };
-
   const FILTERS = [
     {id:'all',label:'All'},{id:'show',label:'Shows'},
-    {id:'birthday',label:'Birthdays'},{id:'holiday',label:'Holidays'},
+    {id:'holiday',label:'Holidays'},
     {id:'work',label:'Work'},{id:'gcal',label:'Cal'},
   ];
-  const ICON  = {birthday:'heart',show:'music',holiday:'flag',work:'briefcase',gcal:'calendar',culture:'sparkles'};
-  const COLOR = {birthday:'amber',show:'violet',holiday:'mint',work:'info',gcal:'mint',culture:'amber'};
-  const LABEL = {birthday:'Birthday',show:'Show',holiday:'Holiday',work:'Work',gcal:'Event',culture:'Event'};
+  const ICON  = {show:'music',holiday:'flag',work:'briefcase',gcal:'calendar',culture:'sparkles'};
+  const COLOR = {show:'violet',holiday:'mint',work:'info',gcal:'mint',culture:'amber'};
+  const LABEL = {show:'Show',holiday:'Holiday',work:'Work',gcal:'Event',culture:'Event'};
 
   const todayMs = new Date(new Date().toISOString().slice(0,10)+'T12:00:00').getTime();
   const visible = events.filter(e => filter==='all' || e.type===filter);
@@ -2676,27 +2373,8 @@ const CalendarCard = () => {
             }}>{f.label}</button>
           ))}
         </div>
-        <button className="btn ghost" style={{padding:'3px 8px',fontSize:11}} onClick={()=>setShowAddBd(s=>!s)}>
-          <Icon name="plus" size={12}/> BD
-        </button>
       </>}
     >
-      {showAddBd && (
-        <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:12,padding:10,background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid var(--line)'}}>
-          <div className="muted-2 mono" style={{fontSize:10.5,letterSpacing:'.06em'}}>ADD BIRTHDAY</div>
-          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-            <input className="input" placeholder="Name" value={bdName} onChange={e=>setBdName(e.target.value)} style={{flex:1,minWidth:100,fontSize:12}}/>
-            <input className="input" placeholder="MM-DD or YYYY-MM-DD" value={bdDate} onChange={e=>setBdDate(e.target.value)} style={{flex:1,minWidth:120,fontSize:12}}/>
-            <input className="input" type="number" value={bdRemind} onChange={e=>setBdRemind(parseInt(e.target.value)||14)}
-              style={{width:56,fontSize:12}} title="Days before birthday to remind about gift"/>
-          </div>
-          <div style={{display:'flex',gap:6,justifyContent:'flex-end'}}>
-            <button className="btn primary" onClick={addBd} style={{fontSize:11}}>Save</button>
-            <button className="btn ghost" onClick={()=>setShowAddBd(false)} style={{fontSize:11}}>✕</button>
-          </div>
-          <div className="muted-2 mono" style={{fontSize:10}}>Third number = days before birthday to get a gift reminder</div>
-        </div>
-      )}
       {loading && <div className="muted-2 mono" style={{fontSize:11,padding:'16px 0',textAlign:'center'}}>Loading…</div>}
       {!loading && visible.length===0 && <div className="muted-2 mono" style={{fontSize:11,padding:'16px 0',textAlign:'center'}}>No upcoming events.</div>}
       {groups.map((evts, gi) => {
@@ -3043,6 +2721,6 @@ const TCPGCard = () => {
 
 window.MissionModules = {
   AgendaCard, FinanceCard, BandCard, HealthCard, WorkCard,
-  StudyCard, ReadingCard, HolidayCard, JournalCard, TodayHub, ActivityCard, CalendarCard,
+  StudyCard, TodayHub, ActivityCard, CalendarCard,
   TCPGCard, PracticeCard
 };

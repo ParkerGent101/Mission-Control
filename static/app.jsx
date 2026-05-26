@@ -32,19 +32,9 @@ const parseCommand = (text) => {
              module: 'health', summary: `Calories: ${rest[0]}${body.burned ? `, burned ${body.burned}` : ''}` };
   }
 
-  if ((cmd === 'page' || cmd === 'read') && !isNaN(+(rest[0] === 'page' ? rest[1] : rest[0]))) {
-    const pg = +(rest[0].toLowerCase() === 'page' ? rest[1] : rest[0]);
-    return { endpoint: '/api/reading/progress', method: 'POST', body: { page: pg },
-             module: 'reading', summary: `Reading → p.${pg}` };
-  }
-
   if (cmd === 'score' && rest[0] && !isNaN(+rest[0]))
     return { endpoint: '/api/study/score', method: 'POST', body: { score: +rest[0] },
              module: 'study', summary: `Practice score: ${rest[0]}%` };
-
-  if (cmd === 'journal' && rest.length)
-    return { endpoint: '/api/journal', method: 'POST', body: { body: rest.join(' ') },
-             module: 'journal', summary: 'Journal entry saved' };
 
   /* ── finance ── */
   if (cmd === 'finance' && rest.length >= 2) {
@@ -192,7 +182,6 @@ const HELP_CMDS = [
     { cmd: 'study score 78',              desc: 'log practice %' },
     { cmd: 'agenda "Team standup" at 09:00 Work' },
     { cmd: 'remind "Oil change" on 2026-06-15' },
-    { cmd: 'journal Had a great rehearsal tonight' },
   ]},
 ];
 
