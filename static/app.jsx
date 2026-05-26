@@ -386,6 +386,21 @@ const App = () => {
     return () => clearInterval(id);
   }, []);
 
+  // Auto-refresh all cards every 60s when the tab is visible, plus when the
+  // tab becomes visible after being hidden. Cards subscribe via useRefreshListener.
+  useEffectApp(() => {
+    const fire = () => window.dispatchEvent(new CustomEvent('mc:refresh'));
+    const tick = setInterval(() => {
+      if (document.visibilityState === 'visible') fire();
+    }, 60_000);
+    const onVisibility = () => { if (document.visibilityState === 'visible') fire(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(tick);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, []);
+
   useEffectApp(() => {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {

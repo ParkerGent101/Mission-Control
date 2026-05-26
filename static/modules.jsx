@@ -1,6 +1,18 @@
 /* Mission Control — module cards */
 const { useState, useMemo, useEffect, useRef, useCallback } = React;
 
+// Subscribe to the global 'mc:refresh' event so a card re-fetches without a page reload.
+// loadFn is captured fresh on every render via a ref, so it sees current state.
+const useRefreshListener = (loadFn) => {
+  const ref = useRef(loadFn);
+  ref.current = loadFn;
+  useEffect(() => {
+    const handler = () => ref.current && ref.current();
+    window.addEventListener('mc:refresh', handler);
+    return () => window.removeEventListener('mc:refresh', handler);
+  }, []);
+};
+
 const fmtMoney = (n, opts = {}) => {
   const sign = n < 0 ? "-" : "";
   const v = Math.abs(n);
@@ -81,7 +93,7 @@ const AgendaCard = () => {
     { l: "Fat",     v: 0, g: 70,  c: "var(--info)" },
   ]);
 
-  useEffect(() => {
+  const loadAgenda = () => {
     const today = new Date().toISOString().slice(0, 10);
     fetch('/api/agenda').then(r => r.json()).then(data => {
       if (data && data.length) {
@@ -97,14 +109,15 @@ const AgendaCard = () => {
       if (data.calories_target) setCalories(c => ({ ...c, target: data.calories_target }));
     }).catch(() => {});
     fetch('/api/reminders').then(r => r.json()).then(data => {
-      const today2 = new Date().toISOString().slice(0, 10);
       const upcoming = data
         .filter(r => r.next_due)
         .sort((a,b) => a.next_due.localeCompare(b.next_due))
         .slice(0, 6);
       setReminders(upcoming);
     }).catch(() => {});
-  }, []);
+  };
+  useEffect(loadAgenda, []);
+  useRefreshListener(loadAgenda);
 
   const toggle = (id) => {
     setItems(xs => xs.filter(x => x.id !== id));
@@ -304,6 +317,10 @@ const FinanceCard = () => {
   useEffect(() => {
     fetch('/api/finances/subscriptions').then(r=>r.json()).then(setSubs).catch(()=>{});
   }, []);
+  useRefreshListener(() => {
+    loadFinances(month);
+    fetch('/api/finances/subscriptions').then(r=>r.json()).then(setSubs).catch(()=>{});
+  });
   const changeMonth = (dir) => {
     const [y, m] = month.split('-').map(Number);
     let nm = m + dir, ny = y;
@@ -715,7 +732,7 @@ const BandCard = () => {
     }
   };
 
-  useEffect(() => {
+  const loadBandAll = () => {
     loadShows();
     fetch('/api/band/content').then(r=>r.json()).then(data => {
       setContentQueue((Array.isArray(data)?data:[]).filter(c=>c.status!=='done'));
@@ -734,7 +751,9 @@ const BandCard = () => {
       });
       setBusyDates(busy);
     }).catch(()=>{});
-  }, []);
+  };
+  useEffect(loadBandAll, []);
+  useRefreshListener(loadBandAll);
 
   const pushSite = async () => {
     setPushing(true);
@@ -1141,6 +1160,7 @@ const HealthCard = () => {
   }, [rawHealth, viewDate]);
 
   useEffect(() => { load(); }, []);
+  useRefreshListener(load);
 
   // Refetch the displayed workout when the user navigates day-by-day
   useEffect(() => {
@@ -1494,7 +1514,7 @@ const WorkCard = () => {
   const [newTaskProject, setNewTaskProject] = useState("");
   const priMap = {high:"P0", normal:"P1", low:"P2"};
 
-  useEffect(() => {
+  const loadWork = () => {
     fetch('/api/work').then(r=>r.json()).then(data => {
       if (data && data.length) {
         setAllTasks(data.filter(t=>!t.done).map(t=>({
@@ -1503,7 +1523,9 @@ const WorkCard = () => {
         })));
       }
     }).catch(()=>{});
-  }, []);
+  };
+  useEffect(loadWork, []);
+  useRefreshListener(loadWork);
 
   const markDone = async (id) => {
     await fetch(`/api/work/${id}/done`, {method:'POST'}).catch(()=>{});
@@ -1604,11 +1626,13 @@ const StudyCard = () => {
   const [sessionTopic, setSessionTopic] = useState("");
   const [sessionMins, setSessionMins] = useState("");
 
-  useEffect(() => {
+  const loadStudy = () => {
     fetch('/api/study').then(r=>r.json()).then(data => {
       if (data && data.domains) setStudy(data);
     }).catch(()=>{});
-  }, []);
+  };
+  useEffect(loadStudy, []);
+  useRefreshListener(loadStudy);
 
   if (!study) return (
     <Card num="06" title="Studying" span={4} right={<span className="tag info">loading…</span>}>
@@ -1788,6 +1812,7 @@ const PracticeCard = () => {
     fetch("/api/practice").then(r => r.json()).then(d => setData(d)).catch(() => {});
 
   useEffect(() => { load(); }, []);
+  useRefreshListener(load);
 
   const cur = data[inst];
   if (!cur) return null;
@@ -2332,6 +2357,7 @@ const CalendarCard = () => {
     }).catch(()=>setLoading(false));
   };
   useEffect(load, []);
+  useRefreshListener(load);
 
   const FILTERS = [
     {id:'all',label:'All'},{id:'show',label:'Shows'},
