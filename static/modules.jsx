@@ -1030,6 +1030,19 @@ const HealthCard = () => {
   const [todayPlan, setTodayPlan]     = useState(null);
   const [program, setProgram]         = useState(null);
   const [workoutOffset, setWorkoutOffset] = useState(0);
+  const [rawHealth, setRawHealth]     = useState(null);
+
+  // Local-timezone date string (NOT toISOString() which converts to UTC and
+  // would roll over to tomorrow during the evening for users west of UTC).
+  const localDateStr = (d) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  // The date currently being viewed (today + offset days), in YYYY-MM-DD local
+  const viewDate = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + workoutOffset);
+    return localDateStr(d);
+  })();
   const [rehabDone, setRehabDone]     = useState({});
   const [habitList, setHabitList]     = useState([]);
   const [todayHabits, setTodayHabits] = useState({});
@@ -1050,13 +1063,14 @@ const HealthCard = () => {
   };
 
   const calcStreak = (habitsLog) => {
-    const today = new Date().toISOString().slice(0, 10);
+    const localStr = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const today = localStr(new Date());
     let count = 0;
     const d = new Date();
     const todayLogged = (habitsLog[today] || {})['lift'] || (habitsLog[today] || {})['cardio'];
     if (!todayLogged) d.setDate(d.getDate() - 1);
     while (true) {
-      const ds = d.toISOString().slice(0, 10);
+      const ds = localStr(d);
       if (!(habitsLog[ds] || {})['lift'] && !(habitsLog[ds] || {})['cardio']) break;
       count++;
       d.setDate(d.getDate() - 1);
@@ -1066,8 +1080,8 @@ const HealthCard = () => {
 
   const load = () => {
     fetch('/api/health').then(r => r.json()).then(data => {
+      setRawHealth(data);
       const wlog = (data.weight_log || []).slice(-12);
-      setWeight(wlog.length ? wlog[wlog.length - 1].weight : null);
       setWeightLog(wlog.map(e => e.weight));
       const h = data.height_in || null;
       setHeight(h);
@@ -1080,29 +1094,42 @@ const HealthCard = () => {
       setProgram(prog);
 
       // Workout is fetched separately via useEffect on workoutOffset (see below)
+      // Weight / habits / food / calories are derived from rawHealth + viewDate in a separate effect
 
       const today = new Date();
       const grid = [];
       for (let i = 27; i >= 0; i--) {
         const d = new Date(today); d.setDate(today.getDate() - i);
-        const ds = d.toISOString().slice(0, 10);
+        const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
         const worked = (habitsLog[ds] || {})['lift'] || (habitsLog[ds] || {})['cardio'];
         grid.push({ ds, worked, isFuture: d > today, dow: d.toLocaleDateString('en-US', { weekday: 'short' }) });
       }
       setDots(grid);
       setHabitList(data.habit_list || []);
-      setTodayHabits(habitsLog[new Date().toISOString().slice(0, 10)] || {});
-      setFoodLog(data.food_log_today || []);
     }).catch(() => {});
   };
+
+  // Re-derive per-day state (weight / habits / food / calories) when day or data changes
+  useEffect(() => {
+    if (!rawHealth) return;
+    // Weight: use viewDate's entry if present, else most recent entry on or before viewDate
+    const weights = rawHealth.weight || {};
+    const dates = Object.keys(weights).sort();
+    let pickedW = null;
+    for (const d of dates) { if (d <= viewDate) pickedW = weights[d]; }
+    setWeight(pickedW);
+    // Habits: that day's row, or empty
+    setTodayHabits((rawHealth.habits || {})[viewDate] || {});
+    // Food log: that day's foods, or empty
+    const foods = ((rawHealth.food_log || {})[viewDate]) || [];
+    setFoodLog(foods);
+  }, [rawHealth, viewDate]);
 
   useEffect(() => { load(); }, []);
 
   // Refetch the displayed workout when the user navigates day-by-day
   useEffect(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + workoutOffset);
-    const ds = d.toISOString().slice(0, 10);
+    const ds = viewDate;
     fetch(`/api/health/workout?date=${ds}`).then(r => r.json()).then(w => {
       if (!w.connected) {
         setTodayPlan({ notConnected: true, error: w.error, weekday: '', date: ds });
@@ -1124,8 +1151,8 @@ const HealthCard = () => {
     const w = parseFloat(newWeight);
     if (!w || w < 80 || w > 500) return;
     await fetch('/api/health/weight', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ weight: w, date: new Date().toISOString().slice(0, 10) }) }).catch(() => {});
-    window.__toast?.(`Weight ${w} lb logged`, 'success');
+      body: JSON.stringify({ weight: w, date: viewDate }) }).catch(() => {});
+    window.__toast?.(`Weight ${w} lb logged for ${viewDate}`, 'success');
     setNewWeight(''); load();
   };
 
@@ -1151,20 +1178,22 @@ const HealthCard = () => {
     setFoodName(''); setFoodCal(''); setFoodProtein(''); setFoodCarbs(''); setFoodFat('');
     window.__toast?.(`${item.name} logged`, 'success');
     fetch('/api/health/food', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...item, date: new Date().toISOString().slice(0, 10) }) }).catch(() => {});
+      body: JSON.stringify({ ...item, date: viewDate }) }).catch(() => load());
+    setTimeout(load, 300);  // refresh raw data so subsequent ops see the new food
   };
 
   const deleteFood = (idx) => {
     setFoodLog(prev => prev.filter((_, i) => i !== idx));
     fetch('/api/health/food', { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ index: idx, date: new Date().toISOString().slice(0, 10) }) }).catch(() => {});
+      body: JSON.stringify({ index: idx, date: viewDate }) }).catch(() => {});
+    setTimeout(load, 300);
   };
 
   const toggleHabit = async (habitId) => {
     const newVal = !todayHabits[habitId];
     setTodayHabits(h => ({ ...h, [habitId]: newVal }));
     await fetch('/api/health/habit', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ habit: habitId, date: new Date().toISOString().slice(0, 10) }) }).catch(() => {});
+      body: JSON.stringify({ habit: habitId, date: viewDate }) }).catch(() => {});
     load();
   };
 
