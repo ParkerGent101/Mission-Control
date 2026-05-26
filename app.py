@@ -676,7 +676,7 @@ def get_finances():
             rows = svc.spreadsheets().values().get(
                 spreadsheetId=FINANCE_SHEET_ID, range=tab
             ).execute().get('values', [])
-            return jsonify(_parse_transaction_rows(rows))
+            return jsonify(_parse_transaction_rows(rows, tab=tab))
         except Exception:
             pass
     data = _load(FINANCE_FILE)
@@ -740,6 +740,30 @@ def delete_finance(tid):
     finances = _load(FINANCE_FILE)
     _save(FINANCE_FILE, [t for t in finances if t.get("id") != tid])
     return jsonify({"ok": True})
+
+@app.route("/api/finances/sheet", methods=["DELETE"])
+def delete_finance_sheet():
+    """Remove a sheet-sourced transaction by clearing its description + amount cells.
+    Query params: tab (sheet name), row (0-indexed), col (0-indexed start column)."""
+    if not FINANCE_SHEET_ID:
+        return jsonify({"error": "No finance sheet configured"}), 400
+    tab = request.args.get("tab", "").strip()
+    try:
+        row = int(request.args.get("row", ""))
+        col = int(request.args.get("col", ""))
+    except (TypeError, ValueError):
+        return jsonify({"error": "row and col must be integers"}), 400
+    if not tab or row < 0 or col < 0:
+        return jsonify({"error": "tab, row, col are required"}), 400
+    try:
+        svc = _sheets_svc()
+        a1 = f"'{tab}'!{_col_letter(col)}{row + 1}:{_col_letter(col + 1)}{row + 1}"
+        svc.spreadsheets().values().clear(
+            spreadsheetId=FINANCE_SHEET_ID, range=a1, body={}
+        ).execute()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/finances/<int:tid>", methods=["PATCH"])
 def patch_finance(tid):
@@ -1410,6 +1434,106 @@ def _health_habit_label(habit_id):
         pass
     return habit_id
 
+def _health_label_to_habit_id(label):
+    """Reverse: find a habit_id for a display label (case-insensitive)."""
+    try:
+        h = _load(HEALTH_FILE)
+        target = (label or "").strip().lower()
+        for hbt in (h.get("habit_list", []) if isinstance(h, dict) else []):
+            if hbt.get("label", "").strip().lower() == target:
+                return hbt.get("id")
+    except Exception:
+        pass
+    return None
+
+def _health_sheet_read():
+    """Read Daily + Food tabs from the Sheet, return dict in the shape of health.json sections.
+    Sheet wins on conflicts. Returns None if Sheets unavailable so caller can fall back to local JSON."""
+    if not HEALTH_SHEET_ID:
+        return None
+    try:
+        svc, err = _gdrive_service()
+        if err:
+            return None
+
+        result = {"weight": {}, "habits": {}, "calories": {}, "food_log": {}}
+
+        # --- Daily tab ---
+        daily = svc.spreadsheets().values().get(
+            spreadsheetId=HEALTH_SHEET_ID, range="Daily!A1:Z1000"
+        ).execute()
+        rows = daily.get("values", [])
+        if rows and len(rows) > 1:
+            headers = [str(h).strip() for h in rows[0]]
+            cmap = {h.lower(): i for i, h in enumerate(headers)}
+            known = {"date", "weight (lb)", "cal goal", "cal eaten", "cal burned", "notes"}
+            habit_cols = {h: i for h, i in cmap.items() if h and h not in known}
+
+            for row in rows[1:]:
+                if not row or not row[0]:
+                    continue
+                date_str = str(row[0]).strip()
+
+                def cell(label):
+                    idx = cmap.get(label.lower())
+                    if idx is None or idx >= len(row):
+                        return ""
+                    return str(row[idx]).strip()
+
+                w = cell("weight (lb)")
+                if w:
+                    try: result["weight"][date_str] = float(w)
+                    except ValueError: pass
+
+                cal_entry = {}
+                for src, dst in [("cal goal", "goal"), ("cal eaten", "calories"), ("cal burned", "burned")]:
+                    v = cell(src)
+                    if v:
+                        try: cal_entry[dst] = int(float(v))
+                        except ValueError: pass
+                if cal_entry:
+                    result["calories"][date_str] = cal_entry
+
+                habits_today = {}
+                for label_lower, idx in habit_cols.items():
+                    val = str(row[idx]).strip().upper() if idx < len(row) else ""
+                    habit_id = _health_label_to_habit_id(label_lower)
+                    if habit_id is None:
+                        continue
+                    if val in ("TRUE", "1", "YES"):
+                        habits_today[habit_id] = True
+                    elif val in ("FALSE", "0", "NO"):
+                        habits_today[habit_id] = False
+                if habits_today:
+                    result["habits"][date_str] = habits_today
+
+        # --- Food tab ---
+        food = svc.spreadsheets().values().get(
+            spreadsheetId=HEALTH_SHEET_ID, range="Food!A2:F1000"
+        ).execute()
+        for row in food.get("values", []):
+            if not row or len(row) < 2:
+                continue
+            date_str = str(row[0]).strip()
+            if not date_str:
+                continue
+            def num(i):
+                if i >= len(row) or not row[i]: return 0
+                try: return int(float(row[i]))
+                except ValueError: return 0
+            item = {
+                "name": str(row[1]) if len(row) > 1 else "",
+                "calories": num(2),
+                "protein":  num(3),
+                "carbs":    num(4),
+                "fat":      num(5),
+            }
+            result["food_log"].setdefault(date_str, []).append(item)
+
+        return result
+    except Exception:
+        return None
+
 # ── Google Drive / Sheets ─────────────────────────────────────────────────────
 
 def _extract_sheet_id(url_or_id):
@@ -1527,8 +1651,19 @@ def _parse_budget_rows(rows):
     expense_total = sum(v['actual'] for v in cat_data.values())
     return {'income': round(income_total, 2), 'expense': round(expense_total, 2), 'categories': categories}
 
-def _parse_transaction_rows(rows):
-    """Parse individual transactions from detail tables (Gas, Fun, Grocery Trip Totals)."""
+def _col_letter(n):
+    """0-indexed column number → A1-notation letters (0→A, 25→Z, 26→AA, ...)."""
+    s = ""
+    n = int(n)
+    while n >= 0:
+        s = chr(ord('A') + n % 26) + s
+        n = n // 26 - 1
+    return s
+
+def _parse_transaction_rows(rows, tab=""):
+    """Parse individual transactions from detail tables (Gas, Fun, Grocery Trip Totals).
+    Each returned txn carries sheet_tab/sheet_row/sheet_col so the frontend can delete
+    by clearing the source cells in the Google Sheet."""
     if not rows:
         return []
     max_cols = max((len(r) for r in rows), default=1)
@@ -1553,24 +1688,30 @@ def _parse_transaction_rows(rows):
         if header_row is None:
             continue
 
+        blanks_in_a_row = 0
         for ri in range(header_row + 2, len(rows)):
             row    = rows[ri]
             cell1  = row[header_col].strip()     if len(row) > header_col     else ''
             cell2  = row[header_col + 1].strip() if len(row) > header_col + 1 else ''
-            if not cell1 and not cell2:
-                break
             if 'total' in (cell1 + cell2).lower():
                 break
+            if not cell1 and not cell2:
+                blanks_in_a_row += 1
+                if blanks_in_a_row >= 5:
+                    break
+                continue
+            blanks_in_a_row = 0
             try: amt = float(cell2.replace('$','').replace(',','') or 0)
             except: amt = 0.0
-            if amt <= 0 and not cell1:
+            if amt <= 0:
                 continue
             desc, date_val = cell1, ''
             import re
             if cell1 and re.match(r'^\d{1,2}[-/]\w+$|^\w{3,}[-/]\d{1,2}$', cell1):
                 date_val, desc = cell1, cat
             transactions.append({'description': desc, 'date': date_val,
-                                  'amount': abs(amt), 'category': cat, 'type': 'expense'})
+                                  'amount': abs(amt), 'category': cat, 'type': 'expense',
+                                  'sheet_tab': tab, 'sheet_row': ri, 'sheet_col': header_col})
 
     return [{'id': i + 1, 'source': 'sheet', **t} for i, t in enumerate(transactions)]
 
@@ -2122,6 +2263,18 @@ def get_health():
     data = _load(HEALTH_FILE)
     if not isinstance(data, dict):
         data = {"habits": {}, "weight": {}, "calories": {}}
+
+    # Merge live Sheet data over local JSON (Sheet is source of truth)
+    sheet_data = _health_sheet_read()
+    if sheet_data:
+        for section in ("weight", "habits", "calories", "food_log"):
+            sheet_section = sheet_data.get(section, {})
+            if not sheet_section:
+                continue
+            local_section = data.get(section, {})
+            if not isinstance(local_section, dict):
+                local_section = {}
+            data[section] = {**local_section, **sheet_section}
 
     # Build weight_log: sorted list of {date, weight} objects
     weight_dict = data.get("weight", {})
