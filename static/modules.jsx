@@ -1162,8 +1162,8 @@ const HealthCard = () => {
   useEffect(() => { load(); }, []);
   useRefreshListener(load);
 
-  // Refetch the displayed workout when the user navigates day-by-day
-  useEffect(() => {
+  // Refetch the displayed workout when the user navigates day-by-day, on mount, and on mc:refresh.
+  const loadWorkout = () => {
     const ds = viewDate;
     fetch(`/api/health/workout?date=${ds}`).then(r => r.json()).then(w => {
       if (!w.connected) {
@@ -1180,7 +1180,9 @@ const HealthCard = () => {
         });
       }
     }).catch(() => setTodayPlan({ notConnected: true, error: 'fetch failed', date: ds }));
-  }, [workoutOffset]);
+  };
+  useEffect(loadWorkout, [workoutOffset]);
+  useRefreshListener(loadWorkout);
 
   const logWeight = async () => {
     const w = parseFloat(newWeight);

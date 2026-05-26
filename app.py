@@ -19,7 +19,7 @@ app.secret_key = os.environ.get("FLASK_SECRET", "mc-change-this-secret-key-2026"
 
 @app.after_request
 def no_cache_static(response):
-    if request.path.startswith("/static/"):
+    if request.path.startswith("/static/") or request.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
         response.headers["Pragma"] = "no-cache"
     return response
