@@ -199,7 +199,16 @@ def handle_500(e):
 
 @app.before_request
 def require_auth():
-    pass  # auth removed — personal app, no login needed
+    p = request.path
+    if p.startswith('/static/'):
+        return None
+    if p in ('/login', '/api/login', '/api/logout'):
+        return None
+    if session.get('authenticated'):
+        return None
+    if p.startswith('/api/'):
+        return jsonify({'error': 'auth_required'}), 401
+    return redirect('/login')
 
 @app.route("/login")
 def login_page():
@@ -211,7 +220,8 @@ def _effective_password():
 
 @app.route("/api/login", methods=["POST"])
 def do_login():
-    pw = (request.json or {}).get("password", "")
+    data = request.get_json(silent=True) or request.form
+    pw = data.get("password", "")
     if pw == _effective_password():
         session.permanent = True
         session["authenticated"] = True
@@ -867,6 +877,7 @@ def post_subscription():
     subs.append({"id": sid, "name": name, "acct": acct, "amt": amt, "due": due})
     _save(SUBS_FILE, subs)
     sheet_status = "not_configured"
+    sheet_error = None
     if FINANCE_SHEET_ID:
         sheet_status = "error"
         try:
@@ -887,9 +898,12 @@ def post_subscription():
                     body={'values': [[name, acct, due, amt]]}
                 ).execute()
                 sheet_status = "written"
-        except Exception:
-            pass  # local save kept; status reports failure
-    return jsonify({"id": sid, "sheet_status": sheet_status})
+        except Exception as e:
+            sheet_error = str(e)
+    resp = {"id": sid, "sheet_status": sheet_status}
+    if sheet_error:
+        resp["sheet_error"] = sheet_error
+    return jsonify(resp)
 
 @app.route("/api/finances/subscriptions/<int:sid>", methods=["DELETE"])
 def delete_subscription(sid):
@@ -2542,8 +2556,8 @@ def get_health():
     weight_dict = data.get("weight", {})
     weight_log = [{"date": d, "weight": w} for d, w in sorted(weight_dict.items())]
 
-    # Build habits_weekly for current Mon–Sun (UTC matches browser's toISOString date)
-    today = datetime.utcnow().date()
+    # Build habits_weekly for current Mon–Sun (local time so Sunday evening doesn't roll to Monday)
+    today = datetime.now().date()
     week_start = today - timedelta(days=today.weekday())  # Monday
     week_days = [(week_start + timedelta(days=i)) for i in range(7)]
     week_day_strs = [d.strftime("%Y-%m-%d") for d in week_days]
