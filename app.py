@@ -267,10 +267,10 @@ def tool_push_site(message="Update site content"):
     if not GITHUB_TOKEN:
         return "Push failed: GITHUB_TOKEN not set. Add it to .env"
     try:
-        with open(SHOWS_FILE, encoding="utf-8") as f:
-            content = f.read()
+        shows = _load(SHOWS_FILE)
+        content = json.dumps(shows, indent=2, ensure_ascii=False)
     except Exception as e:
-        return f"Push failed: could not read shows data: {e}"
+        return f"Push failed: could not load shows data: {e}"
     api_url = f"https://api.github.com/repos/{CUA_REPO}/contents/shows.json"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
@@ -634,11 +634,17 @@ def post_show():
     d = request.json or {}
     if not d.get("event"):
         return jsonify({"error": "event field is required"}), 400
-    return jsonify({"message": tool_add_show(d["date"], d["event"], d["venue"], d["city"], d.get("tickets",""), d.get("notes",""))})
+    message = tool_add_show(d["date"], d["event"], d["venue"], d["city"], d.get("tickets",""), d.get("notes",""))
+    status = 502 if "Push failed:" in message else 200
+    return jsonify({"message": message, "ok": status == 200}), status
 
 @app.route("/api/shows/<int:idx>", methods=["DELETE"])
 def delete_show(idx):
-    return jsonify({"message": tool_remove_show(idx)})
+    message = tool_remove_show(idx)
+    if message.startswith("No show"):
+        return jsonify({"message": message, "ok": False}), 404
+    status = 502 if "Push failed:" in message else 200
+    return jsonify({"message": message, "ok": status == 200}), status
 
 @app.route("/api/videos", methods=["GET"])
 def get_videos():

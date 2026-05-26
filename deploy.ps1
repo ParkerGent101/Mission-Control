@@ -71,7 +71,7 @@ gcloud run deploy $SERVICE `
     --timeout 120 `
     --min-instances 1 `
     --set-env-vars "DATA_DIR=/data,FINANCE_SHEET_ID=1UaFkSQ3wwrPt6pfZIfnNrlMQmerv-ZQ52KYyCF5rIvo,HEALTH_SHEET_ID=1IaAphdKbTYrX3OHL_CDsFieB1bi-H_DznRHdzaQwDfk" `
-    --set-secrets "ANTHROPIC_API_KEY=anthropic-api-key:latest,FLASK_SECRET=flask-secret:latest" `
+    --set-secrets "ANTHROPIC_API_KEY=anthropic-api-key:latest,FLASK_SECRET=flask-secret:latest,GITHUB_TOKEN=github-token:latest" `
     --add-volume "name=data,type=cloud-storage,bucket=$BUCKET" `
     --add-volume-mount "volume=data,mount-path=/data"
 

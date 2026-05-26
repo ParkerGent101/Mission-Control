@@ -290,7 +290,8 @@ const FinanceCard = () => {
         amount: t.type === 'expense' ? -t.amount : t.amount,
         date: t.date ? new Date(t.date + 'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '',
         color: t.type === 'income' ? 'var(--accent-2)' : 'var(--ink-4)',
-        pending: false, id: t.id, source: t.source
+        pending: false, id: t.id, source: t.source,
+        sheet_tab: t.sheet_tab, sheet_row: t.sheet_row, sheet_col: t.sheet_col
       })));
     }).catch(()=>{});
     fetch(`/api/finances/budget?month=${m}`).then(r=>r.json()).then(data => {
@@ -465,16 +466,21 @@ const FinanceCard = () => {
                 <span className="amount" style={{color:t.amount>0?"var(--accent-2)":"var(--ink)"}}>
                   {t.amount>0?"+":""}{fmtMoney(Math.abs(t.amount))}
                 </span>
-                {t.source !== 'sheet' && (
-                  <span style={{cursor:"pointer",color:"var(--ink-4)",padding:"0 2px",lineHeight:1}} title="Remove"
-                    onClick={async()=>{
+                <span style={{cursor:"pointer",color:"var(--ink-4)",padding:"0 2px",lineHeight:1}} title="Remove"
+                  onClick={async()=>{
+                    if (t.source === 'sheet') {
+                      if (t.sheet_tab == null || t.sheet_row == null || t.sheet_col == null) return;
+                      const qs = new URLSearchParams({tab: t.sheet_tab, row: t.sheet_row, col: t.sheet_col});
+                      const res = await fetch(`/api/finances/sheet?${qs}`,{method:"DELETE"});
+                      if (!res.ok) { alert("Could not delete from Google Sheet — check OAuth scope."); return; }
+                    } else {
                       await fetch(`/api/finances/${t.id}`,{method:"DELETE"});
-                      delete catOverrides.current[t.id];
-                      setTxns(ts => ts.filter(x => x.id !== t.id));
-                    }}>
-                    ×
-                  </span>
-                )}
+                    }
+                    delete catOverrides.current[t.id];
+                    loadFinances(month);
+                  }}>
+                  ×
+                </span>
               </div>
             );
           })}
@@ -675,6 +681,7 @@ const BandCard = () => {
   const loadShows = () => {
     return fetch('/api/shows').then(r=>r.json()).then(data => {
       const today = new Date();
+      today.setHours(0,0,0,0);
       const upcoming = data
         .map((s, i) => ({...s, originalIdx: i}))
         .filter(s => new Date(s.date+'T12:00:00') >= today)
@@ -689,15 +696,18 @@ const BandCard = () => {
   };
 
   const removeShow = async (g) => {
-    await fetch(`/api/shows/${g.originalIdx}`, {method:'DELETE'}).catch(()=>{});
-    loadShows();
-    if (window.__toast) window.__toast('Show removed — pushing to site…');
     setPushing(true);
-    const res = await fetch('/api/site/push', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({message:`Remove show: ${g.venue} on ${g.rawDate}`})})
-      .then(r=>r.json()).catch(()=>({message:'Push failed'}));
-    setPushing(false);
-    if (window.__toast) window.__toast(res.message);
+    try {
+      const res = await fetch(`/api/shows/${g.originalIdx}`, {method:'DELETE'});
+      const data = await res.json().catch(()=>({message:'Remove failed'}));
+      if (!res.ok) throw new Error(data.message || data.error || 'Remove failed');
+      await loadShows();
+      if (window.__toast) window.__toast(data.message);
+    } catch (err) {
+      if (window.__toast) window.__toast(err.message || 'Remove failed');
+    } finally {
+      setPushing(false);
+    }
   };
 
   useEffect(() => {
@@ -739,18 +749,19 @@ const BandCard = () => {
   const addShow = async () => {
     if (!newShow.date || !newShow.venue) return;
     const added = {...newShow};
-    await fetch('/api/shows', {method:'POST',headers:{'Content-Type':'application/json'},
+    setPushing(true);
+    const res = await fetch('/api/shows', {method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({date:added.date,event:'CUA Live',venue:added.venue,city:added.city,notes:added.notes})});
+    const data = await res.json().catch(()=>({message:'Add show failed'}));
+    setPushing(false);
+    if (!res.ok) {
+      if (window.__toast) window.__toast(data.message || data.error || 'Add show failed');
+      return;
+    }
     setNewShow({date:'',venue:'',city:'Fayetteville, AR',notes:''});
     setShowAddShow(false);
     await loadShows();
-    if (window.__toast) window.__toast('Show added — pushing to site…');
-    setPushing(true);
-    const res = await fetch('/api/site/push', {method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({message:`Add show: ${added.venue}, ${added.city} on ${added.date}`})})
-      .then(r=>r.json()).catch(()=>({message:'Push failed'}));
-    setPushing(false);
-    if (window.__toast) window.__toast(res.message);
+    if (window.__toast) window.__toast(data.message);
   };
 
   const addContact = async () => {
