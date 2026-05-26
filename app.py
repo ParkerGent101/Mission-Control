@@ -721,21 +721,41 @@ def get_finances_budget():
 @app.route("/api/finances", methods=["POST"])
 def post_finance():
     d = request.json
-    date     = d.get("date") or datetime.date.today().isoformat()
+    date     = d.get("date") or datetime.now().strftime("%Y-%m-%d")
     desc, amt = d.get("description", ""), float(d.get("amount", 0))
     txn_type, cat = d.get("type", "expense"), d.get("category", "Fun")
-    if FINANCE_SHEET_ID:
+    cat = _canonical_finance_category(cat)
+    if FINANCE_SHEET_ID and txn_type == "expense" and cat in DETAIL_TABLE_KEYWORDS:
         try:
             svc = _sheets_svc()
             tab = _month_tab(date[:7])
-            svc.spreadsheets().values().append(
-                spreadsheetId=FINANCE_SHEET_ID, range=tab,
-                valueInputOption='USER_ENTERED', insertDataOption='INSERT_ROWS',
-                body={'values': [[date, desc, amt, cat, txn_type]]}
+            rows = svc.spreadsheets().values().get(
+                spreadsheetId=FINANCE_SHEET_ID, range=tab
+            ).execute().get('values', [])
+            pos = _find_detail_table(rows, cat)
+            if not pos:
+                return jsonify({"error": f"No '{cat}' table found in sheet tab '{tab}'."}), 400
+            header_row, header_col = pos
+            target_row = _find_next_empty_table_row(rows, header_row, header_col)
+            # Refuse to overwrite the 'Total' row.
+            check = rows[target_row] if target_row < len(rows) else []
+            c1 = check[header_col].strip()     if len(check) > header_col     else ''
+            c2 = check[header_col + 1].strip() if len(check) > header_col + 1 else ''
+            if 'total' in (c1 + c2).lower():
+                return jsonify({"error": f"'{cat}' table is full — add more empty rows before the Total row."}), 400
+            # Fun = [description, amount]; Gas/Grocer = [date, amount]
+            col1 = desc if cat == 'Fun' else _format_short_date(date)
+            a1 = f"'{tab}'!{_col_letter(header_col)}{target_row + 1}:{_col_letter(header_col + 1)}{target_row + 1}"
+            svc.spreadsheets().values().update(
+                spreadsheetId=FINANCE_SHEET_ID, range=a1,
+                valueInputOption='USER_ENTERED',
+                body={'values': [[col1, amt]]}
             ).execute()
-            return jsonify({"ok": True})
-        except Exception:
-            pass  # fall through to local storage
+            return jsonify({"ok": True, "sheet_tab": tab, "sheet_row": target_row, "sheet_col": header_col})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    if FINANCE_SHEET_ID and txn_type == "expense":
+        return jsonify({"error": f"'{cat}' isn't a transaction-tracked category. Use the 'Add Subscription' form for subs; for Housing/Utilities/Loans/etc. edit the budget tracker in your Sheet directly."}), 400
     tool_add_transaction(desc, amt, txn_type, cat, date)
     return jsonify({"ok": True})
 
@@ -840,11 +860,36 @@ def get_subscriptions():
 @app.route("/api/finances/subscriptions", methods=["POST"])
 def post_subscription():
     d = request.json
+    name, acct = d.get("name", ""), d.get("acct", "")
+    amt, due = float(d.get("amt", 0)), d.get("due", "")
     subs = _load(SUBS_FILE)
     sid = max((s["id"] for s in subs), default=0) + 1
-    subs.append({"id": sid, "name": d.get("name",""), "acct": d.get("acct",""), "amt": float(d.get("amt",0)), "due": d.get("due","")})
+    subs.append({"id": sid, "name": name, "acct": acct, "amt": amt, "due": due})
     _save(SUBS_FILE, subs)
-    return jsonify({"id": sid})
+    sheet_status = "not_configured"
+    if FINANCE_SHEET_ID:
+        sheet_status = "error"
+        try:
+            svc = _sheets_svc()
+            tab = _month_tab(datetime.now().strftime("%Y-%m"))
+            rows = svc.spreadsheets().values().get(
+                spreadsheetId=FINANCE_SHEET_ID, range=tab
+            ).execute().get('values', [])
+            target_row = _find_budget_section_next_row(rows, 'Subscriptions')
+            if target_row is None:
+                sheet_status = "section_full"
+            else:
+                # Layout: A=category(blank, merged), B=description, C=account, D=due, E=budgeted, F=actual
+                a1 = f"'{tab}'!B{target_row + 1}:E{target_row + 1}"
+                svc.spreadsheets().values().update(
+                    spreadsheetId=FINANCE_SHEET_ID, range=a1,
+                    valueInputOption='USER_ENTERED',
+                    body={'values': [[name, acct, due, amt]]}
+                ).execute()
+                sheet_status = "written"
+        except Exception:
+            pass  # local save kept; status reports failure
+    return jsonify({"id": sid, "sheet_status": sheet_status})
 
 @app.route("/api/finances/subscriptions/<int:sid>", methods=["DELETE"])
 def delete_subscription(sid):
@@ -1429,6 +1474,65 @@ def _health_sheet_append_food(date_str, item):
     except Exception:
         pass
 
+def _health_sheet_clear_food(date_str, index=None, name=None):
+    """Clear matching Food tab row(s) and return remaining calories for that date."""
+    if not HEALTH_SHEET_ID:
+        return {"deleted": False, "remaining_calories": None}
+    try:
+        svc, err = _gdrive_service()
+        if err:
+            return {"deleted": False, "remaining_calories": None}
+        rows = svc.spreadsheets().values().get(
+            spreadsheetId=HEALTH_SHEET_ID, range="Food!A2:F1000"
+        ).execute().get("values", [])
+
+        idx = None
+        if index is not None:
+            try:
+                idx = int(index)
+            except (TypeError, ValueError):
+                idx = None
+        target_name = str(name or "").strip().lower()
+        date_match_idx = 0
+        rows_to_clear = []
+
+        for sheet_row, row in enumerate(rows, start=2):
+            row_date = str(row[0]).strip() if len(row) > 0 else ""
+            row_name = str(row[1]).strip() if len(row) > 1 else ""
+            if row_date != date_str or not row_name:
+                continue
+            should_clear = False
+            if idx is not None:
+                should_clear = date_match_idx == idx
+            elif target_name:
+                should_clear = row_name.lower() == target_name
+            if should_clear:
+                rows_to_clear.append(sheet_row)
+                if idx is not None:
+                    break
+            date_match_idx += 1
+
+        remaining_calories = 0
+        for sheet_row, row in enumerate(rows, start=2):
+            if sheet_row in rows_to_clear:
+                continue
+            row_date = str(row[0]).strip() if len(row) > 0 else ""
+            if row_date != date_str:
+                continue
+            try:
+                remaining_calories += int(float(row[2])) if len(row) > 2 and row[2] else 0
+            except ValueError:
+                pass
+
+        if rows_to_clear:
+            svc.spreadsheets().values().batchClear(
+                spreadsheetId=HEALTH_SHEET_ID,
+                body={"ranges": [f"Food!A{r}:F{r}" for r in rows_to_clear]},
+            ).execute()
+        return {"deleted": bool(rows_to_clear), "remaining_calories": remaining_calories}
+    except Exception:
+        return {"deleted": False, "remaining_calories": None}
+
 def _health_habit_label(habit_id):
     """Look up the display label for a habit_id from health.json habit_list."""
     try:
@@ -1602,7 +1706,13 @@ def _parse_budget_rows(rows):
         cat_val = row[0].strip()
         if cat_val and not any(ch.isdigit() for ch in cat_val):
             current_cat = cat_val
-        if not current_cat:
+        # Prefer the row's description (col B) over a stale carried-forward parent
+        # when the parent isn't a known category — handles sheets that put each
+        # utility/subscription sub-item in col A with no merged parent.
+        desc_val = row[1].strip() if len(row) > 1 else ''
+        row_key = cat_val or desc_val or current_cat
+        canon = _canon_cat(row_key)
+        if not canon:
             continue
         budg_str   = row[budget_col].strip() if len(row) > budget_col else ''
         actual_str = row[actual_col].strip() if len(row) > actual_col else ''
@@ -1613,10 +1723,10 @@ def _parse_budget_rows(rows):
         try: actual = float(actual_str.replace('$','').replace(',','') or 0)
         except: actual = 0.0
         if budg > 0 or actual > 0:
-            if current_cat not in cat_data:
-                cat_data[current_cat] = {'budgeted': 0.0, 'actual': 0.0}
-            cat_data[current_cat]['budgeted'] += budg
-            cat_data[current_cat]['actual']   += actual
+            if canon not in cat_data:
+                cat_data[canon] = {'budgeted': 0.0, 'actual': 0.0}
+            cat_data[canon]['budgeted'] += budg
+            cat_data[canon]['actual']   += actual
 
     # Parse income section (right side — scan for "Income" header column)
     income_total = 0.0
@@ -1666,6 +1776,156 @@ def _col_letter(n):
         n = n // 26 - 1
     return s
 
+DETAIL_TABLE_KEYWORDS = {
+    'Gas':           ['gas total', 'gas totals'],
+    'Fun':           ['fun total', 'fun totals'],
+    'Food / Grocer': ['grocery trip', 'groceries total', 'grocery'],
+}
+
+# Canonical budget category map. Lookup is lowercase, exact-match first then substring.
+# Mirrors normFinCat in modules.jsx but adds common utility/subscription sub-names so
+# every line item collapses to one parent bar.
+_CANON_CAT_EXACT = {
+    'housing': 'Housing', 'rent': 'Housing', 'mortgage': 'Housing',
+    'utilities': 'Utilities', 'utilites': 'Utilities', 'utilties': 'Utilities',
+    'water': 'Utilities', 'sewer': 'Utilities', 'trash': 'Utilities',
+    'electric': 'Utilities', 'electricity': 'Utilities', 'power': 'Utilities',
+    'internet': 'Utilities', 'wifi': 'Utilities', 'wi-fi': 'Utilities', 'cable': 'Utilities',
+    'heating': 'Utilities', 'cooling': 'Utilities',
+    'water, sewer, trash': 'Utilities',
+    'subscriptions': 'Subscriptions', 'subscription': 'Subscriptions', 'streaming': 'Subscriptions',
+    'netflix': 'Subscriptions', 'hulu': 'Subscriptions', 'spotify': 'Subscriptions',
+    'apple music': 'Subscriptions', 'youtube': 'Subscriptions', 'amazon prime': 'Subscriptions',
+    'prime': 'Subscriptions', 'disney+': 'Subscriptions', 'disney plus': 'Subscriptions',
+    'hbo': 'Subscriptions', 'hbo max': 'Subscriptions', 'paramount': 'Subscriptions', 'peacock': 'Subscriptions',
+    'patreon': 'Subscriptions', 'github': 'Subscriptions', 'chatgpt': 'Subscriptions',
+    'claude': 'Subscriptions', 'notion': 'Subscriptions', 'adobe': 'Subscriptions',
+    'icloud': 'Subscriptions', 'microsoft 365': 'Subscriptions', 'office 365': 'Subscriptions',
+    'food': 'Food / Grocer', 'food / grocer': 'Food / Grocer', 'grocer': 'Food / Grocer',
+    'groceries': 'Food / Grocer', 'grocery': 'Food / Grocer',
+    'fun': 'Fun', 'dining': 'Fun', 'restaurants': 'Fun',
+    'gaming': 'Fun', 'entertainment': 'Fun',
+    'gas': 'Gas', 'fuel': 'Gas', 'transportation': 'Gas', 'transport': 'Gas', 'auto': 'Gas',
+    'shopping': 'Shopping',
+    'band': 'Band',
+    'loans': 'Loans', 'loan': 'Loans',
+}
+_CANON_SUBSTR = [
+    ('netflix', 'Subscriptions'), ('hulu', 'Subscriptions'), ('spotify', 'Subscriptions'),
+    ('disney', 'Subscriptions'), ('prime', 'Subscriptions'), ('youtube', 'Subscriptions'),
+    ('apple', 'Subscriptions'), ('hbo', 'Subscriptions'),
+    ('internet', 'Utilities'), ('electric', 'Utilities'), ('water', 'Utilities'),
+    ('cable', 'Utilities'), ('power', 'Utilities'), ('sewer', 'Utilities'),
+    ('trash', 'Utilities'),
+    ('rent', 'Housing'), ('mortgage', 'Housing'),
+    ('grocer', 'Food / Grocer'),
+]
+
+def _canon_cat(raw):
+    if not raw:
+        return 'Other'
+    key = str(raw).strip().lower()
+    if key in _CANON_CAT_EXACT:
+        return _CANON_CAT_EXACT[key]
+    for substr, canon in _CANON_SUBSTR:
+        if substr in key:
+            return canon
+    return str(raw).strip()
+
+def _canonical_finance_category(raw):
+    key = str(raw or "").strip()
+    aliases = {
+        'auto': 'Gas',
+        'dining': 'Fun',
+        'entertainment': 'Fun',
+        'food': 'Food / Grocer',
+        'food / grocer': 'Food / Grocer',
+        'food/grocer': 'Food / Grocer',
+        'fuel': 'Gas',
+        'fun': 'Fun',
+        'gaming': 'Fun',
+        'gas': 'Gas',
+        'groceries': 'Food / Grocer',
+        'grocery': 'Food / Grocer',
+        'grocer': 'Food / Grocer',
+        'restaurants': 'Fun',
+        'transport': 'Gas',
+        'transportation': 'Gas',
+    }
+    return aliases.get(key.lower(), key or 'Fun')
+
+def _find_detail_table(rows, category):
+    """Return (header_row, header_col) for the detail table for `category`, or None."""
+    keywords = DETAIL_TABLE_KEYWORDS.get(category)
+    if not keywords or not rows:
+        return None
+    max_cols = max((len(r) for r in rows), default=1)
+    padded = [r + [''] * (max_cols - len(r)) for r in rows]
+    for ri, row in enumerate(padded):
+        for ci, cell in enumerate(row):
+            if any(kw in str(cell).lower() for kw in keywords):
+                return (ri, ci)
+    return None
+
+def _find_next_empty_table_row(rows, header_row, header_col):
+    """Find first row index after header where both data columns are empty,
+    stopping before any 'total' row. Returns row index (0-based)."""
+    max_cols = max((len(r) for r in rows), default=1)
+    padded = [r + [''] * (max_cols - len(r)) for r in rows]
+    for ri in range(header_row + 2, len(padded)):
+        row = padded[ri]
+        cell1 = str(row[header_col]).strip() if len(row) > header_col else ''
+        cell2 = str(row[header_col + 1]).strip() if len(row) > header_col + 1 else ''
+        if 'total' in (cell1 + cell2).lower():
+            return ri  # caller will refuse to write here
+        if not cell1 and not cell2:
+            return ri
+    return len(padded)
+
+def _format_short_date(iso_date):
+    """Convert 'YYYY-MM-DD' to 'D-MMM' (e.g. '2026-05-15' -> '15-May')."""
+    try:
+        d = datetime.strptime(iso_date[:10], '%Y-%m-%d')
+        return f"{d.day}-{d.strftime('%b')}"
+    except Exception:
+        return iso_date
+
+def _find_budget_section_next_row(rows, canon_target):
+    """Find the next insertion row inside a budget-tracker section matching canon_target.
+    Returns 0-based row index to write to, or None if section not found."""
+    if not rows:
+        return None
+    max_cols = max((len(r) for r in rows), default=1)
+    padded = [r + [''] * (max_cols - len(r)) for r in rows]
+
+    hdr_row_idx = 0
+    for i, row in enumerate(padded[:5]):
+        rl = ' '.join(row).lower()
+        if 'budget' in rl or 'actual amount' in rl:
+            hdr_row_idx = i
+            break
+
+    section_start = None
+    current_cat = ''
+    for ri in range(hdr_row_idx + 1, len(padded)):
+        row = padded[ri]
+        rl = ' '.join(row[:8]).lower()
+        if any(kw in rl for kw in ['anticipated', 'actual total', 'roommate', 'savings total']):
+            break
+        cat_val = row[0].strip() if len(row) > 0 else ''
+        desc_val = row[1].strip() if len(row) > 1 else ''
+        if cat_val and not any(ch.isdigit() for ch in cat_val):
+            current_cat = cat_val
+        row_canon = _canon_cat(cat_val or desc_val or current_cat)
+        if row_canon == canon_target:
+            if section_start is None:
+                section_start = ri
+            if not desc_val and not cat_val:
+                return ri
+        elif section_start is not None:
+            return None
+    return None
+
 def _parse_transaction_rows(rows, tab=""):
     """Parse individual transactions from detail tables (Gas, Fun, Grocery Trip Totals).
     Each returned txn carries sheet_tab/sheet_row/sheet_col so the frontend can delete
@@ -1675,11 +1935,7 @@ def _parse_transaction_rows(rows, tab=""):
     max_cols = max((len(r) for r in rows), default=1)
     rows = [r + [''] * (max_cols - len(r)) for r in rows]
 
-    table_configs = [
-        ('Gas',          ['gas total', 'gas totals']),
-        ('Fun',          ['fun total', 'fun totals']),
-        ('Food / Grocer', ['grocery trip', 'groceries total', 'grocery']),
-    ]
+    table_configs = [(cat, kws) for cat, kws in DETAIL_TABLE_KEYWORDS.items()]
     transactions = []
 
     for cat, keywords in table_configs:
@@ -2493,15 +2749,29 @@ def delete_health_food():
     food_log = health.setdefault("food_log", {})
     items = food_log.get(date, [])
     idx = d.get("index")
+    try:
+        idx = int(idx) if idx is not None else None
+    except (TypeError, ValueError):
+        idx = None
     name = d.get("name")
+    local_deleted = False
     if idx is not None and 0 <= idx < len(items):
         items.pop(idx)
         food_log[date] = items
         _save(HEALTH_FILE, health)
+        local_deleted = True
     elif name:
         food_log[date] = [f for f in items if f.get("name") != name]
         _save(HEALTH_FILE, health)
-    return jsonify({"ok": True})
+        local_deleted = len(food_log[date]) != len(items)
+
+    sheet_result = _health_sheet_clear_food(date, index=idx, name=name)
+    if sheet_result["remaining_calories"] is not None:
+        _health_sheet_update_daily(date, {"Cal Eaten": sheet_result["remaining_calories"]})
+    elif local_deleted:
+        total_today = sum(int(f.get("calories", 0) or 0) for f in food_log.get(date, []))
+        _health_sheet_update_daily(date, {"Cal Eaten": total_today})
+    return jsonify({"ok": True, "sheet_deleted": sheet_result["deleted"]})
 
 # ── Work ───────────────────────────────────────────────────────────────────────
 

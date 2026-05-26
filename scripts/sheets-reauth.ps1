@@ -107,18 +107,10 @@ $status = Get-DriveStatus
 if ($status -and $status.connected -eq $true -and -not $ResetToken) {
     Write-Host "Google Drive/Sheets is already connected." -ForegroundColor Green
 } else {
-    Write-Host "Requesting Google authorization URL..." -ForegroundColor Cyan
-    $authResp = Invoke-RestMethod -Uri "$BaseUrl/api/drive/auth" -Method Get -TimeoutSec 10
-    if (-not $authResp.auth_url) {
-        Write-Host "ERROR: /api/drive/auth did not return an auth_url." -ForegroundColor Red
-        if ($authResp.error) {
-            Write-Host "App error: $($authResp.error)" -ForegroundColor Yellow
-        }
-        exit 1
-    }
-
+    $startUrl = "$BaseUrl/api/drive/auth/start"
     Write-Host "Opening browser for Google sign-in..." -ForegroundColor Green
-    Start-Process $authResp.auth_url
+    Write-Host "Auth start URL: $startUrl" -ForegroundColor Gray
+    Start-Process $startUrl
     Write-Host "Complete the sign-in. The browser should redirect back to $BaseUrl."
 
     $connected = $false

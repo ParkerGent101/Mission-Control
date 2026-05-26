@@ -310,11 +310,20 @@ const FinanceCard = () => {
     if (nm > 12) { nm = 1; ny++; } if (nm < 1) { nm = 12; ny--; }
     setMonth(`${ny}-${String(nm).padStart(2,'0')}`);
   };
+  const todayLocal = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  };
 
   const logExpense = async () => {
     if (!desc || !amt) return;
-    await fetch('/api/finances', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ description: desc, amount: parseFloat(amt), type, category: cat, date: new Date().toISOString().slice(0,10) }) });
+    const res = await fetch('/api/finances', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ description: desc, amount: parseFloat(amt), type, category: cat, date: todayLocal() }) });
+    if (!res.ok) {
+      const body = await res.json().catch(()=>({}));
+      alert(body.error || `Failed to add expense (${res.status})`);
+      return;
+    }
     setDesc(''); setAmt(''); setShowAdd(false);
     loadFinances(month);
   };
@@ -323,9 +332,16 @@ const FinanceCard = () => {
     if (!subName || !subAmt) return;
     const res = await fetch('/api/finances/subscriptions', { method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ name: subName, acct: subAcct, amt: parseFloat(subAmt), due: subDue }) }).then(r=>r.json());
+    if (res.sheet_status && res.sheet_status !== 'written' && res.sheet_status !== 'not_configured') {
+      const msg = res.sheet_status === 'section_full'
+        ? "Saved locally — the Subscriptions section in your Sheet has no empty rows. Add a blank row and re-sync."
+        : `Saved locally — Sheet write failed (${res.sheet_status}).`;
+      alert(msg);
+    }
     setSubs(s => [...s, { id: res.id, name: subName, acct: subAcct, amt: parseFloat(subAmt), due: subDue }]);
     setSubName(''); setSubAcct(''); setSubAmt(''); setSubDue('');
     setShowAddSub(false);
+    loadFinances(month);
   };
 
   const deleteSub = async (sid) => {
@@ -342,12 +358,13 @@ const FinanceCard = () => {
   const subTotal = subs.reduce((s,c)=>s+c.amt, 0);
 
   const categories = budget && budget.categories && budget.categories.length > 0
-    ? budget.categories.map(c => ({
-        ...c,
-        name: normFinCat(c.name),
-        color: FIN_CAT_COLOR[normFinCat(c.name)] || 'var(--ink-4)',
-        budget: c.budgeted,
-      }))
+    ? Object.values(budget.categories.reduce((acc, c) => {
+        const name = normFinCat(c.name);
+        if (!acc[name]) acc[name] = { name, budgeted: 0, actual: 0, color: FIN_CAT_COLOR[name] || 'var(--ink-4)' };
+        acc[name].budgeted += Number(c.budgeted) || 0;
+        acc[name].actual   += Number(c.actual)   || 0;
+        return acc;
+      }, {})).map(c => ({ ...c, budget: c.budgeted }))
     : defaultCategories.map(c => ({
         ...c,
         actual: c.name === 'Subscriptions'
