@@ -2168,19 +2168,39 @@ def get_health():
 
 @app.route("/api/health/workout")
 def get_health_workout():
-    """Return today's workout from the Health sheet. Mon=Day 1, ..., Sat=Day 6, Sun=rest."""
+    """Return workout for a given date (defaults to today in America/Chicago).
+    Mon=Day 1, ..., Sat=Day 6, Sun=rest. Use ?date=YYYY-MM-DD to view another day."""
     if not HEALTH_SHEET_ID:
         return jsonify({"connected": False, "error": "HEALTH_SHEET_ID not set"})
     sheets, err = _gdrive_service()
     if err:
         return jsonify({"connected": False, "error": err})
 
-    # Map weekday to workout day (Python's weekday(): Mon=0..Sun=6 → app's Day 1..6, Sun=rest)
-    today = datetime.now()
-    wd = today.weekday()  # 0=Mon, 6=Sun
+    # Default to "today" in Parker's timezone (America/Chicago), not server UTC
+    date_param = request.args.get("date", "")
+    if date_param:
+        try:
+            target = datetime.strptime(date_param, "%Y-%m-%d")
+        except ValueError:
+            target = None
+    else:
+        target = None
+    if target is None:
+        try:
+            from zoneinfo import ZoneInfo
+            target = datetime.now(ZoneInfo("America/Chicago"))
+        except Exception:
+            # Fallback: subtract 5 hours from UTC (CDT offset)
+            from datetime import timedelta
+            target = datetime.utcnow() - timedelta(hours=5)
+
+    wd = target.weekday()  # 0=Mon, 6=Sun
+    date_str = target.strftime("%Y-%m-%d")
+    weekday_name = target.strftime("%A")
+
     if wd == 6:
-        return jsonify({"connected": True, "rest_day": True, "weekday": "Sunday",
-                        "date": today.strftime("%Y-%m-%d"), "day": None, "focus": "Rest", "exercises": []})
+        return jsonify({"connected": True, "rest_day": True, "weekday": weekday_name,
+                        "date": date_str, "day": None, "focus": "Rest", "exercises": []})
     day_num = wd + 1  # Mon=1, Tue=2, ..., Sat=6
 
     try:
@@ -2214,8 +2234,7 @@ def get_health_workout():
 
     return jsonify({
         "connected": True, "rest_day": False,
-        "weekday": today.strftime("%A"),
-        "date": today.strftime("%Y-%m-%d"),
+        "weekday": weekday_name, "date": date_str,
         "day": day_num, "focus": focus, "exercises": exercises
     })
 

@@ -673,7 +673,7 @@ const BandCard = () => {
 
 
   const loadShows = () => {
-    fetch('/api/shows').then(r=>r.json()).then(data => {
+    return fetch('/api/shows').then(r=>r.json()).then(data => {
       const today = new Date();
       const upcoming = data
         .map((s, i) => ({...s, originalIdx: i}))
@@ -738,22 +738,16 @@ const BandCard = () => {
 
   const addShow = async () => {
     if (!newShow.date || !newShow.venue) return;
+    const added = {...newShow};
     await fetch('/api/shows', {method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({date:newShow.date,event:'CUA Live',venue:newShow.venue,city:newShow.city,notes:newShow.notes})});
-    const today = new Date();
-    const sd = new Date(newShow.date+'T12:00:00');
-    if (sd >= today) {
-      setGigs(gs => [...gs, {venue:newShow.venue, city:newShow.city, rawDate:newShow.date,
-        date:sd.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}),
-        days:Math.round((sd-today)/86400000), status:'confirmed', notes:newShow.notes}]
-        .sort((a,b)=>new Date(a.rawDate)-new Date(b.rawDate)));
-    }
+      body:JSON.stringify({date:added.date,event:'CUA Live',venue:added.venue,city:added.city,notes:added.notes})});
     setNewShow({date:'',venue:'',city:'Fayetteville, AR',notes:''});
     setShowAddShow(false);
+    await loadShows();
     if (window.__toast) window.__toast('Show added — pushing to site…');
     setPushing(true);
     const res = await fetch('/api/site/push', {method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({message:`Add show: ${newShow.venue}, ${newShow.city} on ${newShow.date}`})})
+      body:JSON.stringify({message:`Add show: ${added.venue}, ${added.city} on ${added.date}`})})
       .then(r=>r.json()).catch(()=>({message:'Push failed'}));
     setPushing(false);
     if (window.__toast) window.__toast(res.message);
@@ -884,20 +878,6 @@ const BandCard = () => {
           </button>
         </div>
       ))}
-
-      <div className="section-h"><span>Content Queue</span><span className="line"/></div>
-      <div style={{display:"flex",gap:8,marginBottom:8}}>
-        <input className="input" placeholder="Add idea (clip, reel, post)…" value={newIdea} onChange={e=>setNewIdea(e.target.value)}
-          onKeyDown={e=>{if(e.key==='Enter')addIdea();}} style={{flex:1,fontSize:12}}/>
-        <button className="btn" onClick={addIdea}>+</button>
-      </div>
-      {contentQueue.slice(0,4).map((c,i) => (
-        <div key={i} className="row" style={{padding:"4px 0",borderBottom:"1px solid var(--line-soft)",fontSize:12.5}}>
-          <span style={{flex:1}}>{c.title}</span>
-          <span className="tag muted" style={{fontSize:10}}>{c.status}</span>
-        </div>
-      ))}
-      {contentQueue.length===0 && <div className="muted-2 mono" style={{fontSize:11,padding:'4px 0'}}>Queue empty</div>}
 
       </>}
 
@@ -1049,6 +1029,7 @@ const HealthCard = () => {
   const [editHeight, setEditHeight]   = useState(false);
   const [todayPlan, setTodayPlan]     = useState(null);
   const [program, setProgram]         = useState(null);
+  const [workoutOffset, setWorkoutOffset] = useState(0);
   const [rehabDone, setRehabDone]     = useState({});
   const [habitList, setHabitList]     = useState([]);
   const [todayHabits, setTodayHabits] = useState({});
@@ -1098,22 +1079,7 @@ const HealthCard = () => {
       const prog = data.workout_program || null;
       setProgram(prog);
 
-      // Pull today's workout from the Google Sheet (Mon=Day 1, ..., Sat=Day 6, Sun=rest)
-      fetch('/api/health/workout').then(r => r.json()).then(w => {
-        if (!w.connected) {
-          setTodayPlan({ notConnected: true, error: w.error });
-        } else if (w.rest_day) {
-          setTodayPlan({ restDay: true, weekday: w.weekday });
-        } else {
-          setTodayPlan({
-            label: `Day ${w.day} · ${w.weekday}`,
-            focus: w.focus,
-            exercises: w.exercises || [],
-            intensity: '',
-            note: '',
-          });
-        }
-      }).catch(() => setTodayPlan({ notConnected: true, error: 'fetch failed' }));
+      // Workout is fetched separately via useEffect on workoutOffset (see below)
 
       const today = new Date();
       const grid = [];
@@ -1131,6 +1097,28 @@ const HealthCard = () => {
   };
 
   useEffect(() => { load(); }, []);
+
+  // Refetch the displayed workout when the user navigates day-by-day
+  useEffect(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + workoutOffset);
+    const ds = d.toISOString().slice(0, 10);
+    fetch(`/api/health/workout?date=${ds}`).then(r => r.json()).then(w => {
+      if (!w.connected) {
+        setTodayPlan({ notConnected: true, error: w.error, weekday: '', date: ds });
+      } else if (w.rest_day) {
+        setTodayPlan({ restDay: true, weekday: w.weekday, date: w.date });
+      } else {
+        setTodayPlan({
+          label: `Day ${w.day} · ${w.weekday}`,
+          focus: w.focus,
+          exercises: w.exercises || [],
+          intensity: '', note: '',
+          date: w.date, weekday: w.weekday,
+        });
+      }
+    }).catch(() => setTodayPlan({ notConnected: true, error: 'fetch failed', date: ds }));
+  }, [workoutOffset]);
 
   const logWeight = async () => {
     const w = parseFloat(newWeight);
@@ -1314,6 +1302,12 @@ const HealthCard = () => {
       </div>
 
       {/* ── Today's plan ── */}
+      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8, fontSize:11 }}>
+        <button className="btn ghost" style={{padding:'2px 8px', fontSize:11}} onClick={() => setWorkoutOffset(o => o - 1)}>◀</button>
+        <button className="btn ghost" style={{padding:'2px 10px', fontSize:11}} onClick={() => setWorkoutOffset(0)}>Today</button>
+        <button className="btn ghost" style={{padding:'2px 8px', fontSize:11}} onClick={() => setWorkoutOffset(o => o + 1)}>▶</button>
+        <span className="muted-2 mono" style={{fontSize:10.5, marginLeft:'auto'}}>{todayPlan?.date || ''}{workoutOffset !== 0 ? ` (${workoutOffset > 0 ? '+' : ''}${workoutOffset}d)` : ''}</span>
+      </div>
       {todayPlan && todayPlan.notConnected && (
         <div style={{ padding: '8px 10px', borderRadius: 'var(--r)', background: 'var(--surface-2)', marginBottom: 12, fontSize: 11 }}>
           <span className="muted-2 mono">Connect Google Sheets to see today's workout. </span>
