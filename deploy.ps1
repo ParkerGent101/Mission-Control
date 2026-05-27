@@ -3,10 +3,13 @@
 # Normal deploy (code + data changes):
 #   powershell -ExecutionPolicy Bypass -File deploy.ps1
 #
+# Code-only deploy (DO NOT overwrite live GCS data with local data/*.json):
+#   powershell -ExecutionPolicy Bypass -File deploy.ps1 -SkipData
+#
 # First-time setup (enables APIs, creates bucket & secrets):
 #   powershell -ExecutionPolicy Bypass -File deploy.ps1 -Setup
 
-param([switch]$Setup)
+param([switch]$Setup, [switch]$SkipData)
 
 $PROJECT_ID = "mission-control-496004"
 $REGION     = "us-central1"
@@ -46,19 +49,23 @@ if ($Setup) {
     Remove-Item $tmp
 }
 
-Write-Host "==> Syncing data to GCS (force-uploading key files)..." -ForegroundColor Cyan
-# Data files live at bucket ROOT (mounted at /data on Cloud Run), not in a data/ prefix
-$dataFiles = @(
-    "shows.json","band_songs.json","band_contacts.json","band_content.json",
-    "finances.json","savings.json","health.json","agenda.json","tasks.json",
-    "reminders.json","work_tasks.json","reading.json","gaming.json",
-    "holidays.json","journal.json","subscriptions.json","drive_config.json"
-)
-foreach ($f in $dataFiles) {
-    $local = "data\$f"
-    if (Test-Path $local) {
-        gcloud storage cp $local "gs://$BUCKET/$f" 2>$null
-        Write-Host "  uploaded $f"
+if ($SkipData) {
+    Write-Host "==> Skipping data upload (-SkipData): live GCS data left untouched." -ForegroundColor Yellow
+} else {
+    Write-Host "==> Syncing data to GCS (force-uploading key files)..." -ForegroundColor Cyan
+    # Data files live at bucket ROOT (mounted at /data on Cloud Run), not in a data/ prefix
+    $dataFiles = @(
+        "shows.json","band_songs.json","band_contacts.json","band_content.json",
+        "finances.json","savings.json","health.json","agenda.json","tasks.json",
+        "reminders.json","work_tasks.json","reading.json","gaming.json",
+        "holidays.json","journal.json","subscriptions.json","drive_config.json"
+    )
+    foreach ($f in $dataFiles) {
+        $local = "data\$f"
+        if (Test-Path $local) {
+            gcloud storage cp $local "gs://$BUCKET/$f" 2>$null
+            Write-Host "  uploaded $f"
+        }
     }
 }
 

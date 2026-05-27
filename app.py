@@ -2933,7 +2933,15 @@ def health_food_suggestions():
     Powers the food-name autocomplete so repeat items (protein shakes, etc.) prefill numbers.
     """
     health = _load(HEALTH_FILE)
-    log = health.get("food_log", {}) if isinstance(health, dict) else {}
+    log = dict(health.get("food_log", {})) if isinstance(health, dict) else {}
+    # Merge the Google Sheet "Food" tab (source of truth), same as /api/health, so
+    # foods logged via the Sheet also become autocomplete suggestions.
+    try:
+        sheet_data = _health_sheet_read()
+        if sheet_data and sheet_data.get("food_log"):
+            log = {**log, **sheet_data["food_log"]}
+    except Exception:
+        pass
     agg = {}
     for date in sorted(log.keys()):  # ascending: later dates overwrite macros with most-recent
         for it in (log.get(date) or []):

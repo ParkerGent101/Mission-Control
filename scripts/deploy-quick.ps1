@@ -7,10 +7,12 @@
 #   powershell -ExecutionPolicy Bypass -File scripts\deploy-quick.ps1
 #   powershell -ExecutionPolicy Bypass -File scripts\deploy-quick.ps1 -SkipCommit
 #   powershell -ExecutionPolicy Bypass -File scripts\deploy-quick.ps1 -Message "fix: finance card fallback"
+#   powershell -ExecutionPolicy Bypass -File scripts\deploy-quick.ps1 -SkipData   # code only; don't push local data/*.json to live
 
 param(
     [string]$Message = "",
-    [switch]$SkipCommit
+    [switch]$SkipCommit,
+    [switch]$SkipData
 )
 
 # Treat native-command stderr lines as regular output, not PowerShell errors.
@@ -27,7 +29,7 @@ $SAFE_SOURCE = @("app.py", "requirements.txt", "Dockerfile", ".dockerignore", "d
 $SAFE_DATA   = @(
     "shows.json","band_songs.json","band_contacts.json","band_content.json",
     "finances.json","savings.json","health.json","agenda.json","tasks.json",
-    "reminders.json","work_tasks.json","study.json","reading.json","gaming.json",
+    "reminders.json","work_tasks.json","reading.json","gaming.json",
     "holidays.json","journal.json","subscriptions.json","drive_config.json"
 )
 
@@ -97,7 +99,12 @@ if (-not $SkipCommit) {
 # --- Deploy via existing deploy.ps1 ---
 Write-Host ""
 Write-Host "==> Deploying to Cloud Run (via deploy.ps1)..." -ForegroundColor Cyan
-& "$PROJECT_DIR\deploy.ps1"
+if ($SkipData) {
+    Write-Host "  (-SkipData: live GCS data will NOT be overwritten)" -ForegroundColor Yellow
+    & "$PROJECT_DIR\deploy.ps1" -SkipData
+} else {
+    & "$PROJECT_DIR\deploy.ps1"
+}
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: Deploy failed." -ForegroundColor Red
     exit 1
