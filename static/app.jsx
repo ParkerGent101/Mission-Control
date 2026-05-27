@@ -507,10 +507,10 @@ const App = () => {
   const M = window.MissionModules;
   const cards = [
     { id: "health",   label: "Health & Fitness", icon: "heart",      el: <M.HealthCard cardProps={dashboardCardProps("health", 12)} /> },
+    { id: "calendar", label: "Calendar",         icon: "calendar",   el: <M.CalendarCard cardProps={dashboardCardProps("calendar", 12)} /> },
     { id: "finance",  label: "Finance",          icon: "wallet",     el: <M.FinanceCard cardProps={dashboardCardProps("finance", 7)} /> },
     { id: "band",     label: "Band",             icon: "music",      el: <M.BandCard cardProps={dashboardCardProps("band", 5)} /> },
     { id: "practice", label: "Piano Practice",   icon: "target",     el: <M.PracticeCard cardProps={dashboardCardProps("practice", 6)} /> },
-    { id: "calendar", label: "Calendar",         icon: "calendar",   el: <M.CalendarCard cardProps={dashboardCardProps("calendar", 6)} /> },
   ];
 
   const visibleDashboardCards = cards.filter(c => t.modules[c.id] !== false && !dashboardMinimized.includes(c.id));
