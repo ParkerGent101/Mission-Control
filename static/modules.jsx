@@ -2116,11 +2116,13 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
   for (let i=0;i<firstDay;i++) cells.push(null);
   for (let d=1;d<=daysInMonth;d++) cells.push(d);
 
-  // Highlights: visible, in viewed month, flagged (or birthday/anniversary/show), future only
+  // These types auto-appear in Highlights; band/work only show if manually highlighted.
+  const AUTO_HL = ['show','birthday','anniversary','holiday','other','piano'];
+  const isHL = e => e.highlight || AUTO_HL.includes(e.type);
+  // Highlights: visible, in viewed month, auto-or-flagged, future only
   const monthPrefix = `${cal.y}-${pad(cal.m+1)}`;
   const highlights = events
-    .filter(e => isVisible(e) && e.date.startsWith(monthPrefix)
-      && (e.highlight || ['birthday','anniversary','show'].includes(e.type)) && dayDiff(e.date) >= 0)
+    .filter(e => isVisible(e) && e.date.startsWith(monthPrefix) && isHL(e) && dayDiff(e.date) >= 0)
     .sort((a,b)=> a.date < b.date ? -1 : 1);
 
   const openAdd = (date='') => setForm(f=>({...blankForm, open:true, date: date||f.date}));
@@ -2304,7 +2306,9 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
                 </div>
                 {e.id
                   ? <div style={{display:'flex',gap:1,alignItems:'center'}}>
-                      <button className="icon-btn" onClick={()=>toggleHighlight(e)} title={e.highlight?'Remove highlight':'Highlight on month agenda'} style={{color:e.highlight?cv(e.type):'var(--ink-4)'}}><Icon name="sparkles" size={11}/></button>
+                      {AUTO_HL.includes(e.type)
+                        ? <span className="icon-btn" title="Always highlighted" style={{color:cv(e.type),cursor:'default'}}><Icon name="sparkles" size={11}/></span>
+                        : <button className="icon-btn" onClick={()=>toggleHighlight(e)} title={e.highlight?'Remove highlight':'Highlight on month agenda'} style={{color:e.highlight?cv(e.type):'var(--ink-4)'}}><Icon name="sparkles" size={11}/></button>}
                       <button className="icon-btn" onClick={()=>openEdit(e)} title="Edit event" style={{color:'var(--ink-4)'}}><Icon name="feather" size={11}/></button>
                       <button className="icon-btn" onClick={()=>delEvent(e.id)} title="Delete event" style={{color:'var(--ink-4)'}}><Icon name="x" size={11}/></button>
                     </div>
