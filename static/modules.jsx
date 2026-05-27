@@ -2055,6 +2055,7 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [manual, setManual] = useState([]);
+  const [selectedDay, setSelectedDay] = useState(null);
 
   const load = () => {
     setLoading(true);
@@ -2111,13 +2112,6 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
     .filter(e => isVisible(e) && e.date.startsWith(monthPrefix)
       && (e.highlight || ['birthday','anniversary','show'].includes(e.type)) && dayDiff(e.date) >= 0)
     .sort((a,b)=> a.date < b.date ? -1 : 1);
-
-  // Combined upcoming list buckets
-  const visible = events.filter(isVisible);
-  const bucket = ms => ms<=7*864e5?0:ms<=30*864e5?1:2;
-  const groups=[[],[],[]];
-  visible.forEach(e=>{ const ms=new Date(e.date+'T12:00:00').getTime()-todayMs; if(ms>=0) groups[bucket(ms)].push(e); });
-  const GROUP_LABELS=['This Week','This Month','Later'];
 
   const openAdd = (date='') => setForm(f=>({...blankForm, open:true, date: date||f.date}));
   const openEdit = (e) => {
@@ -2238,12 +2232,13 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
           const ds = `${cal.y}-${pad(cal.m+1)}-${pad(d)}`;
           const evs = byDate[ds]||[];
           const isToday = d===todayObj.getDate() && cal.m===todayObj.getMonth() && cal.y===todayObj.getFullYear();
+          const isSel = ds===selectedDay;
           return (
-            <div key={i} onClick={()=>openAdd(ds)} title={evs.map(e=>e.title).join(', ')} style={{
+            <div key={i} onClick={()=>setSelectedDay(s=>s===ds?null:ds)} title={evs.map(e=>e.title).join(', ')} style={{
               minHeight:42, padding:'3px 3px 4px', borderRadius:5, cursor:'pointer',
-              background: isToday?'var(--surface-3)':evs.length?'var(--surface-2)':'transparent',
-              border: isToday?'1px solid var(--line)':'1px solid transparent'}}>
-              <div className="mono" style={{fontSize:10.5,textAlign:'center',color:isToday?'var(--ink)':'var(--ink-3)',fontWeight:isToday?600:400}}>{d}</div>
+              background: isSel?`color-mix(in oklch,var(--accent) 18%,var(--surface-2))`:isToday?'var(--surface-3)':evs.length?'var(--surface-2)':'transparent',
+              border: isSel?'1px solid var(--accent)':isToday?'1px solid var(--line)':'1px solid transparent'}}>
+              <div className="mono" style={{fontSize:10.5,textAlign:'center',color:isSel?'var(--accent)':isToday?'var(--ink)':'var(--ink-3)',fontWeight:(isToday||isSel)?600:400}}>{d}</div>
               <div style={{display:'flex',gap:2,flexWrap:'wrap',justifyContent:'center',marginTop:2}}>
                 {evs.slice(0,4).map((e,j)=>(<span key={j} style={{width:5,height:5,borderRadius:'50%',background:cv(e.type)}}/>))}
                 {evs.length>4 && <span className="mono" style={{fontSize:8,color:'var(--ink-4)'}}>+{evs.length-4}</span>}
@@ -2280,18 +2275,18 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
         </div>
       )}
 
-      {loading && <div className="muted-2 mono" style={{fontSize:11,padding:'12px 0',textAlign:'center'}}>Loading…</div>}
-      {!loading && visible.length===0 && <div className="muted-2 mono" style={{fontSize:11,padding:'12px 0',textAlign:'center'}}>No upcoming events.</div>}
-      {groups.map((evts, gi) => {
-        if (!evts.length) return null;
+      {selectedDay && (() => {
+        const dayEvents = byDate[selectedDay] || [];
+        const label = new Date(selectedDay+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
         return (
-          <div key={gi}>
-            <div className="section-h"><span>{GROUP_LABELS[gi]}</span><span className="line"/>
-              <span className="muted-2 mono" style={{fontSize:10.5}}>{evts.length}</span>
+          <div style={{marginTop:6}}>
+            <div className="section-h" style={{alignItems:'center'}}>
+              <span>{label}</span><span className="line"/>
+              <button className="btn ghost" onClick={()=>openAdd(selectedDay)} title="Add event on this day" style={{padding:'2px 7px',fontSize:10.5,fontFamily:'var(--font-mono)',display:'flex',alignItems:'center',gap:3}}><Icon name="plus" size={11}/>Add</button>
             </div>
-            {evts.map((e,i)=>(
-              <div key={i} style={{display:'grid',gridTemplateColumns:'58px 15px 1fr auto',gap:8,alignItems:'center',padding:'5px 0',borderBottom:'1px solid var(--line-soft)'}}>
-                <span className="mono" style={{fontSize:10.5,color:'var(--ink-4)'}}>{fmtDate(e.date)}</span>
+            {dayEvents.length===0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 0',textAlign:'center'}}>No events — tap Add to create one.</div>}
+            {dayEvents.map((e,i)=>(
+              <div key={i} style={{display:'grid',gridTemplateColumns:'15px 1fr auto',gap:8,alignItems:'center',padding:'5px 0',borderBottom:'1px solid var(--line-soft)'}}>
                 <Icon name={ICON[e.type]||'calendar'} size={12} style={{color:cv(e.type)}}/>
                 <div>
                   <div style={{fontSize:12,color:'var(--ink)',fontWeight:500,lineHeight:1.3}}>{e.title}</div>
@@ -2308,7 +2303,7 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
             ))}
           </div>
         );
-      })}
+      })()}
     </Card>
   );
 };
