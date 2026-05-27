@@ -2926,6 +2926,34 @@ def post_health_food():
     _health_sheet_update_daily(date, {"Cal Eaten": total_today})
     return jsonify({"ok": True})
 
+@app.route("/api/health/food/suggestions")
+def health_food_suggestions():
+    """Distinct previously-logged foods with their most-recent macros + usage count.
+
+    Powers the food-name autocomplete so repeat items (protein shakes, etc.) prefill numbers.
+    """
+    health = _load(HEALTH_FILE)
+    log = health.get("food_log", {}) if isinstance(health, dict) else {}
+    agg = {}
+    for date in sorted(log.keys()):  # ascending: later dates overwrite macros with most-recent
+        for it in (log.get(date) or []):
+            name = (it.get("name") or "").strip()
+            if not name:
+                continue
+            key = name.lower()
+            entry = agg.get(key, {"count": 0})
+            entry.update({
+                "name": name,
+                "calories": int(it.get("calories", 0) or 0),
+                "protein": int(it.get("protein", 0) or 0),
+                "carbs": int(it.get("carbs", 0) or 0),
+                "fat": int(it.get("fat", 0) or 0),
+            })
+            entry["count"] += 1
+            agg[key] = entry
+    out = sorted(agg.values(), key=lambda x: (-x["count"], x["name"].lower()))
+    return jsonify(out)
+
 @app.route("/api/health/food", methods=["DELETE"])
 def delete_health_food():
     d = request.json or {}

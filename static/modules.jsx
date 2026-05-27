@@ -948,6 +948,8 @@ const HealthCard = ({ cardProps = {} } = {}) => {
   const [foodProtein, setFoodProtein] = useState('');
   const [foodCarbs, setFoodCarbs]     = useState('');
   const [foodFat, setFoodFat]         = useState('');
+  const [foodSug, setFoodSug]         = useState([]);   // previously-logged foods for autocomplete
+  const [sugOpen, setSugOpen]         = useState(false);
   const [water, setWater]             = useState(0);   // oz of water today
   const [waterBottleOz, setWaterBottleOz] = useState(32);
   const [waterGoalOz, setWaterGoalOz]     = useState(128);
@@ -981,6 +983,7 @@ const HealthCard = ({ cardProps = {} } = {}) => {
   };
 
   const load = () => {
+    fetch('/api/health/food/suggestions').then(r => r.json()).then(d => setFoodSug(Array.isArray(d) ? d : [])).catch(() => {});
     fetch('/api/health').then(r => r.json()).then(data => {
       setRawHealth(data);
       const wlog = (data.weight_log || []).slice(-12);
@@ -1097,6 +1100,15 @@ const HealthCard = ({ cardProps = {} } = {}) => {
     setTimeout(load, 300);  // refresh raw data so subsequent ops see the new food
   };
 
+  const pickFood = (s) => {
+    setFoodName(s.name);
+    setFoodCal(s.calories ? String(s.calories) : '');
+    setFoodProtein(s.protein ? String(s.protein) : '');
+    setFoodCarbs(s.carbs ? String(s.carbs) : '');
+    setFoodFat(s.fat ? String(s.fat) : '');
+    setSugOpen(false);
+  };
+
   const deleteFood = (idx) => {
     setFoodLog(prev => prev.filter((_, i) => i !== idx));
     fetch('/api/health/food', { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
@@ -1148,6 +1160,8 @@ const HealthCard = ({ cardProps = {} } = {}) => {
   const totalProtein = foodLog.reduce((s, f) => s + f.protein,  0);
   const totalCarbs   = foodLog.reduce((s, f) => s + f.carbs,    0);
   const totalFat     = foodLog.reduce((s, f) => s + f.fat,      0);
+  const foodQuery    = foodName.trim().toLowerCase();
+  const foodMatches  = (foodQuery ? foodSug.filter(s => s.name.toLowerCase().includes(foodQuery)) : foodSug).slice(0, 6);
   const macroData    = [
     { value: totalProtein, color: 'var(--accent)', label: 'Protein', grams: totalProtein },
     { value: totalCarbs,   color: 'var(--warn)',   label: 'Carbs',   grams: totalCarbs   },
@@ -1263,9 +1277,29 @@ const HealthCard = ({ cardProps = {} } = {}) => {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <input className="input" placeholder="Item name" value={foodName}
-            onChange={e => setFoodName(e.target.value)}
-            style={{ fontSize: 11, padding: '3px 6px' }} />
+          <div style={{ position: 'relative' }}>
+            <input className="input" placeholder="Item name" value={foodName}
+              onChange={e => { setFoodName(e.target.value); setSugOpen(true); }}
+              onFocus={() => setSugOpen(true)}
+              onBlur={() => setTimeout(() => setSugOpen(false), 150)}
+              style={{ fontSize: 11, padding: '3px 6px', width: '100%' }} />
+            {sugOpen && foodMatches.length > 0 && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, marginTop: 2,
+                background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 6,
+                maxHeight: 180, overflowY: 'auto', boxShadow: '0 6px 18px rgba(0,0,0,.28)' }}>
+                {foodMatches.map((s, i) => (
+                  <div key={i} onMouseDown={e => { e.preventDefault(); pickFood(s); }}
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
+                      padding: '5px 8px', cursor: 'pointer', borderBottom: '1px solid var(--line-soft)' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-3)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    <span style={{ fontSize: 11, color: 'var(--ink)' }}>{s.name}</span>
+                    <span className="mono" style={{ fontSize: 9.5, color: 'var(--ink-4)', whiteSpace: 'nowrap' }}>{s.calories} kcal · P{s.protein} C{s.carbs} F{s.fat}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <div style={{ display: 'flex', gap: 4 }}>
             <input className="input" type="number" placeholder="kcal" value={foodCal}
               onChange={e => setFoodCal(e.target.value)}
