@@ -1214,9 +1214,10 @@ def calendar_overview():
         except Exception:
             continue
         cat = m.get("category", "other")
-        item_common = {"type": cat, "title": m.get("title", ""), "meta": m.get("meta", ""),
+        item_common = {"type": cat, "title": m.get("title", ""), "meta": _event_meta(m),
                        "highlight": m.get("highlight", False), "id": m.get("id", "")}
-        if m.get("recurring") == "annual":
+        rec = m.get("recurring")
+        if rec == "annual":
             for yr in range(today.year, cutoff.year + 1):
                 try:
                     occ = base.replace(year=yr)
@@ -1226,6 +1227,15 @@ def calendar_overview():
                     iso = occ.isoformat()
                     events.append({"date": iso, **item_common})
                     manual_keys.add((item_common["title"], iso))
+        elif rec == "weekly":
+            wds = m.get("weekdays") or []
+            day = max(base, today)  # don't show occurrences before the anchor date
+            while wds and day <= cutoff:
+                if ((day.weekday() + 1) % 7) in wds:  # python Mon=0 -> JS Sun=0 convention
+                    iso = day.isoformat()
+                    events.append({"date": iso, **item_common})
+                    manual_keys.add((item_common["title"], iso))
+                day += timedelta(days=1)
         elif today <= base <= cutoff:
             events.append({"date": m["date"], **item_common})
             manual_keys.add((item_common["title"], m["date"]))
@@ -1258,14 +1268,48 @@ def calendar_overview():
 
 VALID_EVENT_CATEGORIES = {"band", "work", "birthday", "anniversary", "other"}
 
+def _clean_weekdays(val):
+    """Normalize a weekdays payload to a sorted list of unique JS getDay indices (0=Sun..6=Sat)."""
+    if not isinstance(val, list):
+        return []
+    out = set()
+    for w in val:
+        try:
+            iw = int(w)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= iw <= 6:
+            out.add(iw)
+    return sorted(out)
+
+def _fmt_time(hhmm):
+    """'17:00' -> '5:00pm'. Returns '' on bad input."""
+    try:
+        h, mm = str(hhmm).split(":")
+        h, mm = int(h), int(mm)
+    except Exception:
+        return ""
+    ap = "am" if h < 12 else "pm"
+    return f"{(h % 12) or 12}:{mm:02d}{ap}"
+
+def _event_meta(m):
+    """Combine a manual event's time range with its note for display (e.g. '6:00pm–8:00pm · Studio')."""
+    rng = ""
+    if m.get("time"):
+        rng = _fmt_time(m["time"]) + (f"–{_fmt_time(m['end_time'])}" if m.get("end_time") else "")
+    note = m.get("meta", "")
+    return f"{rng} · {note}" if (rng and note) else (rng or note)
+
 def _push_event_to_gcal(m):
     """Push one manual event to Google Calendar. Returns htmlLink or None (silent on errors)."""
     return _gcal_create_event(
         title=m.get("title", ""),
         date_str=m.get("date", ""),
         time_str=m.get("time", ""),
+        end_time=m.get("end_time", ""),
         description=m.get("meta", ""),
-        recurrence="annual" if m.get("recurring") == "annual" else "",
+        recurrence=m.get("recurring", ""),
+        weekdays=m.get("weekdays") or None,
     )
 
 @app.route("/api/calendar/events/manual", methods=["GET"])
@@ -1288,15 +1332,24 @@ def post_manual_event():
         return jsonify({"error": "invalid_date"}), 400
 
     annual = category in ("birthday", "anniversary")
+    weekdays = _clean_weekdays(d.get("weekdays"))
+    if annual:
+        recurring = "annual"
+    elif (d.get("recurring") == "weekly") and weekdays:
+        recurring = "weekly"
+    else:
+        recurring = ""
     record = {
         "id": f"evt_{int(datetime.now().timestamp()*1000)}",
         "category": category,
         "title": title,
         "date": date,
         "time": (d.get("time") or "").strip(),
+        "end_time": (d.get("end_time") or "").strip(),
         "meta": (d.get("meta") or "").strip(),
         "highlight": True if annual else bool(d.get("highlight")),
-        "recurring": "annual" if annual else "",
+        "recurring": recurring,
+        "weekdays": weekdays,
         "gcal_link": "",
         "created": datetime.now().strftime("%Y-%m-%d"),
     }
@@ -1308,6 +1361,52 @@ def post_manual_event():
     items.append(record)
     _save(CALENDAR_EVENTS_FILE, items)
     return jsonify({"ok": True, "event": record})
+
+@app.route("/api/calendar/events/manual/<eid>", methods=["PATCH"])
+def patch_manual_event(eid):
+    d = request.json or {}
+    items = _load(CALENDAR_EVENTS_FILE, [])
+    found = next((m for m in items if m.get("id") == eid), None)
+    if not found:
+        return jsonify({"error": "not_found"}), 404
+    if "category" in d:
+        cat = (d.get("category") or "").strip()
+        if cat not in VALID_EVENT_CATEGORIES:
+            return jsonify({"error": "invalid_category"}), 400
+        found["category"] = cat
+        if cat in ("birthday", "anniversary"):
+            found["recurring"] = "annual"
+        elif found.get("recurring") == "annual":
+            found["recurring"] = ""  # leaving annual category clears annual recurrence
+    if "title" in d:
+        title = (d.get("title") or "").strip()
+        if title:
+            found["title"] = title
+    if "date" in d:
+        date = (d.get("date") or "").strip()
+        try:
+            datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            return jsonify({"error": "invalid_date"}), 400
+        found["date"] = date
+    if "time" in d:
+        found["time"] = (d.get("time") or "").strip()
+    if "end_time" in d:
+        found["end_time"] = (d.get("end_time") or "").strip()
+    if "weekdays" in d:
+        found["weekdays"] = _clean_weekdays(d.get("weekdays"))
+    if "recurring" in d and found.get("category") not in ("birthday", "anniversary"):
+        rec = d.get("recurring")
+        found["recurring"] = "weekly" if (rec == "weekly" and found.get("weekdays")) else ""
+    if "meta" in d:
+        found["meta"] = (d.get("meta") or "").strip()
+    if "highlight" in d:
+        found["highlight"] = bool(d.get("highlight"))
+    # Birthdays/anniversaries are always highlighted.
+    if found.get("category") in ("birthday", "anniversary"):
+        found["highlight"] = True
+    _save(CALENDAR_EVENTS_FILE, items)
+    return jsonify({"ok": True, "event": found})
 
 @app.route("/api/calendar/events/manual/<eid>", methods=["DELETE"])
 def delete_manual_event(eid):
@@ -2317,10 +2416,16 @@ def _gcal_service():
             return None, "auth_required"
     return build('calendar', 'v3', credentials=creds), None
 
-def _gcal_create_event(title, date_str, time_str="", duration_min=60, description="", location="", recurrence=""):
+# JS getDay() index (0=Sun..6=Sat) -> RFC5545 BYDAY code
+_BYDAY = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]
+
+def _gcal_create_event(title, date_str, time_str="", duration_min=60, description="", location="",
+                       recurrence="", end_time="", weekdays=None):
     """Create a Google Calendar event. Silent on errors. Returns event link or None.
 
-    recurrence="annual" adds an RRULE:FREQ=YEARLY rule (used for birthdays/anniversaries).
+    recurrence="annual"  -> RRULE:FREQ=YEARLY (birthdays/anniversaries)
+    recurrence="weekly"  -> RRULE:FREQ=WEEKLY;BYDAY=... using `weekdays` (JS getDay indices)
+    end_time ("HH:MM")   -> sets the event end for timed events (overrides duration_min)
     """
     try:
         svc, err = _gcal_service()
@@ -2336,7 +2441,14 @@ def _gcal_create_event(title, date_str, time_str="", duration_min=60, descriptio
         else:
             start = dt.strptime(date_str, "%Y-%m-%d")
         if time_str:
-            end = start + timedelta(minutes=int(duration_min))
+            end = None
+            if end_time:
+                try:
+                    end = dt.strptime(f"{date_str} {end_time}", "%Y-%m-%d %H:%M")
+                except ValueError:
+                    end = None
+            if end is None or end <= start:
+                end = start + timedelta(minutes=int(duration_min))
             body = {
                 "summary": title,
                 "description": description,
@@ -2356,6 +2468,10 @@ def _gcal_create_event(title, date_str, time_str="", duration_min=60, descriptio
             }
         if recurrence == "annual":
             body["recurrence"] = ["RRULE:FREQ=YEARLY"]
+        elif recurrence == "weekly" and weekdays:
+            days = ",".join(_BYDAY[w] for w in weekdays if 0 <= w <= 6)
+            if days:
+                body["recurrence"] = [f"RRULE:FREQ=WEEKLY;BYDAY={days}"]
         created = svc.events().insert(calendarId="primary", body=body).execute()
         return created.get("htmlLink")
     except Exception:

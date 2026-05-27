@@ -2050,10 +2050,11 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
   const todayObj = new Date();
   const [cal, setCal] = useState({ y: todayObj.getFullYear(), m: todayObj.getMonth() });
   const [vis, setVis] = useState({band:true,work:true,birthday:true,anniversary:true,other:true,show:true,holiday:true,culture:true,gcal:true});
-  const blankForm = {open:false, category:'band', date:'', title:'', time:'', meta:'', highlight:false};
+  const blankForm = {open:false, id:null, category:'band', date:'', title:'', time:'', end_time:'', meta:'', highlight:false, recurring:'', weekdays:[]};
   const [form, setForm] = useState(blankForm);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [manual, setManual] = useState([]);
 
   const load = () => {
     setLoading(true);
@@ -2061,6 +2062,7 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
       setEvents(d.events||[]);
       setLoading(false);
     }).catch(()=>setLoading(false));
+    fetch('/api/calendar/events/manual').then(r=>r.json()).then(d=>setManual(Array.isArray(d)?d:[])).catch(()=>{});
   };
   useEffect(load, []);
   useRefreshListener(load);
@@ -2118,21 +2120,39 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
   const GROUP_LABELS=['This Week','This Month','Later'];
 
   const openAdd = (date='') => setForm(f=>({...blankForm, open:true, date: date||f.date}));
+  const openEdit = (e) => {
+    const rec = manual.find(x=>x.id===e.id) || {};   // use the stored record (true date for recurring)
+    setForm({open:true, id:e.id, category: rec.category||e.type||'other',
+      title: rec.title!==undefined?rec.title:(e.title||''),
+      date: rec.date||e.date||'', time: rec.time||'', end_time: rec.end_time||'',
+      meta: rec.meta!==undefined?rec.meta:(e.meta||''),
+      highlight: rec.highlight!==undefined?!!rec.highlight:!!e.highlight,
+      recurring: rec.recurring||'', weekdays: rec.weekdays||[]});
+  };
   const setCat = c => setForm(f=>({...f, category:c}));
   const annual = form.category==='birthday' || form.category==='anniversary';
 
   const submit = async () => {
     if (!form.title.trim() || !form.date) return;
     setSaving(true);
-    const res = await fetch('/api/calendar/events/manual', {method:'POST',headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({category:form.category,title:form.title,date:form.date,time:form.time,meta:form.meta,highlight:form.highlight})});
+    const editing = !!form.id;
+    const url = editing ? `/api/calendar/events/manual/${form.id}` : '/api/calendar/events/manual';
+    const res = await fetch(url, {method: editing?'PATCH':'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({category:form.category,title:form.title,date:form.date,time:form.time,end_time:form.end_time,meta:form.meta,highlight:form.highlight,recurring:form.recurring,weekdays:form.weekdays})});
     setSaving(false);
-    if (!res.ok) { if (window.__toast) window.__toast('Add event failed'); return; }
+    if (!res.ok) { if (window.__toast) window.__toast(editing?'Save failed':'Add event failed'); return; }
     setForm(blankForm);
     load();
-    if (window.__toast) window.__toast('Event added');
+    if (window.__toast) window.__toast(editing?'Event updated':'Event added');
   };
   const delEvent = async (id) => { if(!id) return; await fetch(`/api/calendar/events/manual/${id}`, {method:'DELETE'}); load(); };
+  const toggleHighlight = async (e) => {
+    if (!e.id) return;
+    const cur = manual.find(x=>x.id===e.id);
+    const next = cur ? !cur.highlight : !e.highlight;
+    await fetch(`/api/calendar/events/manual/${e.id}`, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({highlight:next})});
+    load();
+  };
   const syncGoogle = async () => {
     setSyncing(true);
     const res = await fetch('/api/calendar/sync-google', {method:'POST'}).then(r=>r.json()).catch(()=>({ok:false}));
@@ -2154,7 +2174,7 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
     >
       {form.open && (
         <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:10,padding:'10px',background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid var(--line)'}}>
-          <div className="muted-2 mono" style={{fontSize:10.5,letterSpacing:'.06em'}}>ADD EVENT</div>
+          <div className="muted-2 mono" style={{fontSize:10.5,letterSpacing:'.06em'}}>{form.id?'EDIT EVENT':'ADD EVENT'}</div>
           <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
             {[['band','Band'],['work','Work'],['birthday','Birthday'],['anniversary','Anniversary'],['other','Other']].map(([id,lbl])=>(
               <button key={id} className="btn ghost" onClick={()=>setCat(id)} style={{padding:'2px 8px',fontSize:10.5,fontFamily:'var(--font-mono)',
@@ -2163,19 +2183,41 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
                 borderColor: form.category===id?cv(id):'transparent'}}>{lbl}</button>
             ))}
           </div>
-          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-            <input className="input" type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={{width:150,fontSize:12}}/>
-            <input className="input" type="time" value={form.time} onChange={e=>setForm(f=>({...f,time:e.target.value}))} style={{width:110,fontSize:12}}/>
-            <input className="input" placeholder="Title" value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))} style={{flex:1,minWidth:120,fontSize:12}}/>
+          <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
+            <input className="input" type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} title={form.recurring==='weekly'?'Repeats start on/after this date':'Date'} style={{width:150,fontSize:12}}/>
+            <input className="input" type="time" value={form.time} onChange={e=>setForm(f=>({...f,time:e.target.value}))} title="Start time" style={{width:104,fontSize:12}}/>
+            <span className="muted-2" style={{fontSize:12}}>–</span>
+            <input className="input" type="time" value={form.end_time} onChange={e=>setForm(f=>({...f,end_time:e.target.value}))} title="End time" style={{width:104,fontSize:12}}/>
           </div>
+          <input className="input" placeholder="Title" value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))} style={{fontSize:12}}/>
+          {!annual && (
+            <div style={{display:'flex',gap:4,alignItems:'center',flexWrap:'wrap'}}>
+              <span className="muted-2 mono" style={{fontSize:10,letterSpacing:'.06em',marginRight:2}}>REPEATS</span>
+              {[['','Once'],['weekly','Weekly']].map(([id,lbl])=>(
+                <button key={id||'once'} className="btn ghost" onClick={()=>setForm(f=>({...f,recurring:id}))} style={{padding:'2px 9px',fontSize:10.5,fontFamily:'var(--font-mono)',
+                  color: form.recurring===id?'var(--accent)':'var(--ink-4)',
+                  background: form.recurring===id?'var(--surface-3)':'transparent',
+                  borderColor: form.recurring===id?'var(--line)':'transparent'}}>{lbl}</button>
+              ))}
+              {form.recurring==='weekly' && ['S','M','T','W','T','F','S'].map((lbl,idx)=>{
+                const on = (form.weekdays||[]).includes(idx);
+                return <button key={idx} className="btn ghost" title={['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][idx]}
+                  onClick={()=>setForm(f=>({...f,weekdays: on ? f.weekdays.filter(w=>w!==idx) : [...(f.weekdays||[]), idx]}))}
+                  style={{padding:'2px 0',width:22,fontSize:10.5,fontFamily:'var(--font-mono)',
+                    color:on?'var(--ink)':'var(--ink-4)', background:on?cv(form.category):'transparent',
+                    borderColor:on?cv(form.category):'var(--line-soft)'}}>{lbl}</button>;
+              })}
+            </div>
+          )}
           <input className="input" placeholder="Note (optional)" value={form.meta} onChange={e=>setForm(f=>({...f,meta:e.target.value}))} style={{fontSize:12}}/>
           <label style={{display:'flex',alignItems:'center',gap:6,fontSize:11,color:'var(--ink-3)',cursor: annual?'default':'pointer'}}>
             <input type="checkbox" checked={form.highlight||annual} disabled={annual} onChange={e=>setForm(f=>({...f,highlight:e.target.checked}))}/>
             Highlight on month agenda (countdown)
           </label>
           {annual && <div className="muted-2 mono" style={{fontSize:10}}>Saved to Google Calendar as a yearly event.</div>}
+          {form.recurring==='weekly' && <div className="muted-2 mono" style={{fontSize:10}}>Repeats weekly on the selected days.</div>}
           <div style={{display:'flex',gap:6,justifyContent:'flex-end'}}>
-            <button className="btn primary" onClick={submit} disabled={saving} style={{fontSize:11}}>{saving?'Saving…':'Add event'}</button>
+            <button className="btn primary" onClick={submit} disabled={saving} style={{fontSize:11}}>{saving?'Saving…':(form.id?'Save':'Add event')}</button>
             <button className="btn ghost" onClick={()=>setForm(blankForm)} style={{fontSize:11}}>✕</button>
           </div>
         </div>
@@ -2256,7 +2298,11 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
                   {e.meta&&<div style={{fontSize:10.5,color:'var(--ink-4)'}}>{e.meta}</div>}
                 </div>
                 {e.id
-                  ? <button className="icon-btn" onClick={()=>delEvent(e.id)} title="Delete event" style={{color:'var(--ink-4)'}}><Icon name="x" size={11}/></button>
+                  ? <div style={{display:'flex',gap:1,alignItems:'center'}}>
+                      <button className="icon-btn" onClick={()=>toggleHighlight(e)} title={e.highlight?'Remove highlight':'Highlight on month agenda'} style={{color:e.highlight?cv(e.type):'var(--ink-4)'}}><Icon name="sparkles" size={11}/></button>
+                      <button className="icon-btn" onClick={()=>openEdit(e)} title="Edit event" style={{color:'var(--ink-4)'}}><Icon name="feather" size={11}/></button>
+                      <button className="icon-btn" onClick={()=>delEvent(e.id)} title="Delete event" style={{color:'var(--ink-4)'}}><Icon name="x" size={11}/></button>
+                    </div>
                   : <span className="tag" style={{fontSize:10,padding:'1px 6px',whiteSpace:'nowrap',color:cv(e.type),borderColor:`color-mix(in oklch,${cv(e.type)} 40%,var(--line))`}}>{LABEL[e.type]||e.type}</span>}
               </div>
             ))}
