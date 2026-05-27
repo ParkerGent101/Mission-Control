@@ -2,11 +2,11 @@
 const { useState: useOB, useEffect: useEffectOB } = React;
 
 const PERSONAS = [
-  { id: "it",         label: "IT / Tech",    icon: "briefcase",  modules: ["agenda","work","study","finance","health","activity"] },
+  { id: "it",         label: "IT / Tech",    icon: "briefcase",  modules: ["agenda","work","finance","health","activity"] },
   { id: "musician",   label: "Musician",      icon: "music",      modules: ["agenda","band","finance","health","journal","activity"] },
   { id: "freelancer", label: "Freelancer",    icon: "briefcase",  modules: ["agenda","work","finance","holidays","health","activity"] },
-  { id: "student",    label: "Student",       icon: "graduation", modules: ["agenda","study","reading","health","finance","activity"] },
-  { id: "all",        label: "Everything",    icon: "sparkles",   modules: ["agenda","finance","band","health","work","study","reading","holidays","journal","activity"] },
+  { id: "student",    label: "Student",       icon: "graduation", modules: ["agenda","reading","health","finance","activity"] },
+  { id: "all",        label: "Everything",    icon: "sparkles",   modules: ["agenda","finance","band","health","work","reading","holidays","journal","activity"] },
 ];
 
 const ALL_MODULES = [
@@ -15,7 +15,6 @@ const ALL_MODULES = [
   { id: "band",     label: "Band",     icon: "music",      desc: "Shows, content, contacts" },
   { id: "health",   label: "Health",   icon: "heart",      desc: "Habits, weight, calories" },
   { id: "work",     label: "Work",     icon: "briefcase",  desc: "Work tasks & projects" },
-  { id: "study",    label: "Study",    icon: "graduation", desc: "Certs & learning" },
   { id: "reading",  label: "Reading",  icon: "book",       desc: "Book progress & queue" },
   { id: "holidays", label: "Travel",   icon: "plane",      desc: "Trip planning" },
   { id: "journal",  label: "Journal",  icon: "feather",    desc: "Daily entries" },

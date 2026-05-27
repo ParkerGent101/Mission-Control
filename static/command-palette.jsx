@@ -14,7 +14,6 @@ const COMMANDS = [
   { group: "Go to",     icon: "music",     label: "Band",                      hint: "G B",action: "go:band" },
   { group: "Go to",     icon: "heart",     label: "Health & Fitness",          hint: "G P",action: "go:health" },
   { group: "Go to",     icon: "briefcase", label: "Work",                      hint: "G W",action: "go:work" },
-  { group: "Go to",     icon: "graduation",label: "Studying",                  hint: "G S",action: "go:study" },
   { group: "Go to",     icon: "book",      label: "Reading",                   hint: "G R",action: "go:reading" },
 { group: "Go to",     icon: "plane",     label: "Holidays",                  hint: "G T",action: "go:holidays" },
   { group: "Go to",     icon: "feather",   label: "Journal",                   hint: "G J",action: "go:journal" },

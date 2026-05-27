@@ -59,7 +59,7 @@ BAND_CONTACTS_FILE = DATA_DIR / "band_contacts.json"
 AGENDA_FILE      = DATA_DIR / "agenda.json"
 HEALTH_FILE      = DATA_DIR / "health.json"
 WORK_FILE        = DATA_DIR / "work_tasks.json"
-STUDY_FILE       = DATA_DIR / "study.json"
+CALENDAR_EVENTS_FILE = DATA_DIR / "calendar_events.json"
 BRIEF_FILE       = DATA_DIR / "brief.json"
 DB_PATH          = DATA_DIR / "mission_control.db"
 FINANCE_SHEET_ID = os.environ.get("FINANCE_SHEET_ID", "")
@@ -440,27 +440,6 @@ def tool_add_work_task(title, project="", priority="normal", notes=""):
     _save(WORK_FILE, items)
     return f"Work task #{wid} added: {title} [{project or 'GLS'}]"
 
-# ── Study tools ────────────────────────────────────────────────────────────────
-
-def tool_log_study_session(minutes, topic="", date=""):
-    study = _load(STUDY_FILE)
-    if not isinstance(study, dict):
-        study = {}
-    sessions = study.setdefault("sessions", [])
-    sessions.append({"date": date or datetime.now().strftime("%Y-%m-%d"), "minutes": int(minutes), "topic": topic})
-    study["total_hours"] = round(sum(s.get("minutes", 0) for s in sessions) / 60, 1)
-    _save(STUDY_FILE, study)
-    cert = study.get("cert", "CISM")
-    return f"Study: {minutes}min{f' — {topic}' if topic else ''}. {cert} total: {study['total_hours']}h"
-
-def tool_log_practice_score(score):
-    study = _load(STUDY_FILE)
-    if not isinstance(study, dict):
-        study = {}
-    study.setdefault("practice_scores", []).append(int(score))
-    _save(STUDY_FILE, study)
-    return f"Practice score {score}% logged"
-
 # ── Health tools ───────────────────────────────────────────────────────────────
 
 def tool_log_weight(weight, date=""):
@@ -501,8 +480,6 @@ TOOL_MAP = {
     "financial_summary":    lambda i: tool_financial_summary(i.get("category")),
     "add_agenda_item":      lambda i: tool_add_agenda_item(**i),
     "add_work_task":        lambda i: tool_add_work_task(**i),
-    "log_study_session":    lambda i: tool_log_study_session(i["minutes"], i.get("topic",""), i.get("date","")),
-    "log_practice_score":   lambda i: tool_log_practice_score(i["score"]),
     "log_weight":           lambda i: tool_log_weight(i["weight"], i.get("date","")),
     "log_calories":         lambda i: tool_log_calories(i["consumed"], i.get("burned",0), i.get("date","")),
 }
@@ -523,8 +500,6 @@ TOOLS = [
     {"name":"financial_summary","description":"Get finance summary","input_schema":{"type":"object","properties":{"category":{"type":"string"}}}},
     {"name":"add_agenda_item","description":"Add an item to today's agenda","input_schema":{"type":"object","properties":{"label":{"type":"string"},"time":{"type":"string","description":"HH:MM"},"tag":{"type":"string"},"date":{"type":"string"}},"required":["label"]}},
     {"name":"add_work_task","description":"Add a GLS or coding work task (work_tasks.json)","input_schema":{"type":"object","properties":{"title":{"type":"string"},"project":{"type":"string","description":"e.g. GLS Security, GLS IT, GLS SharePoint, Code"},"priority":{"type":"string","enum":["high","normal","low"]},"notes":{"type":"string"}},"required":["title"]}},
-    {"name":"log_study_session","description":"Log a CISM study session","input_schema":{"type":"object","properties":{"minutes":{"type":"integer"},"topic":{"type":"string"},"date":{"type":"string"}},"required":["minutes"]}},
-    {"name":"log_practice_score","description":"Log a CISM practice test score (0-100)","input_schema":{"type":"object","properties":{"score":{"type":"integer"}},"required":["score"]}},
     {"name":"log_weight","description":"Log today's weight in lbs","input_schema":{"type":"object","properties":{"weight":{"type":"number"},"date":{"type":"string"}},"required":["weight"]}},
     {"name":"log_calories","description":"Log calories consumed and/or burned","input_schema":{"type":"object","properties":{"consumed":{"type":"integer"},"burned":{"type":"integer"},"date":{"type":"string"}},"required":["consumed"]}},
 ]
@@ -548,15 +523,13 @@ SMART ROUTING:
 • "remind me" / "don't forget" → add_reminder
 • "add to today" / "schedule at [time]" → add_agenda_item
 • "read page X" / "on page X" → log_reading_page
-• "studied Xmin" / "X minutes on CISM" → log_study_session
-• "practice test X%" → log_practice_score
 • "weigh Xlb" / "weight is X" → log_weight
 • "ate X cal" / "burned X cal" → log_calories
 • "journal:" / "note to self:" → add_journal_entry
 • "GLS task:" / "work task:" / "code task:" → add_work_task
 
 RESPONSE FORMAT — always reply with ONLY this JSON (no markdown, no extra text):
-{{"module":"agenda|finance|band|health|work|study|reading|holidays|journal|none","action":"added|logged|updated|scheduled|found|noted","summary":"one-line description of what was done","reply":"brief conversational reply (1-2 sentences max)"}}""".format(today=datetime.now().strftime("%B %d, %Y"))
+{{"module":"agenda|finance|band|health|work|reading|holidays|journal|none","action":"added|logged|updated|scheduled|found|noted","summary":"one-line description of what was done","reply":"brief conversational reply (1-2 sentences max)"}}""".format(today=datetime.now().strftime("%B %d, %Y"))
 
 client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
@@ -1011,7 +984,7 @@ def data_reset():
     to_clear = [
         FINANCE_FILE, SUBS_FILE, SAVINGS_FILE, TASKS_FILE, WORK_FILE,
         REMINDERS_FILE, CONTENT_FILE, BAND_CONTACTS_FILE, AGENDA_FILE,
-        HEALTH_FILE, STUDY_FILE, BRIEF_FILE,
+        HEALTH_FILE, BRIEF_FILE,
     ]
     for f in to_clear:
         p = Path(f)
@@ -1232,6 +1205,31 @@ def calendar_overview():
             except Exception:
                 pass
 
+    # Manually-added calendar events (band / work / birthday / anniversary / other)
+    # Annual events (birthdays, anniversaries) are projected onto each year in the window.
+    manual_keys = set()  # (title, date) of emitted manual events, used to dedupe Google copies
+    for m in _load(CALENDAR_EVENTS_FILE, []):
+        try:
+            base = datetime.strptime(m["date"], "%Y-%m-%d").date()
+        except Exception:
+            continue
+        cat = m.get("category", "other")
+        item_common = {"type": cat, "title": m.get("title", ""), "meta": m.get("meta", ""),
+                       "highlight": m.get("highlight", False), "id": m.get("id", "")}
+        if m.get("recurring") == "annual":
+            for yr in range(today.year, cutoff.year + 1):
+                try:
+                    occ = base.replace(year=yr)
+                except ValueError:
+                    occ = base.replace(year=yr, day=28)  # Feb 29 -> Feb 28
+                if today <= occ <= cutoff:
+                    iso = occ.isoformat()
+                    events.append({"date": iso, **item_common})
+                    manual_keys.add((item_common["title"], iso))
+        elif today <= base <= cutoff:
+            events.append({"date": m["date"], **item_common})
+            manual_keys.add((item_common["title"], m["date"]))
+
     # Google Calendar (if connected)
     try:
         svc, err = _gcal_service()
@@ -1245,14 +1243,97 @@ def calendar_overview():
             for item in items:
                 start = item.get('start', {}).get('dateTime', item.get('start', {}).get('date', ''))
                 if start:
+                    summary = item.get('summary', '(no title)')
+                    # Skip events we pushed ourselves (any manual event) to avoid double-listing
+                    if (summary, start[:10]) in manual_keys:
+                        continue
                     events.append({"date": start[:10], "type": "gcal",
-                        "title": item.get('summary', '(no title)'),
+                        "title": summary,
                         "meta": item.get('location', '')})
     except Exception:
         pass
 
     events.sort(key=lambda e: e["date"])
     return jsonify({"events": events})
+
+VALID_EVENT_CATEGORIES = {"band", "work", "birthday", "anniversary", "other"}
+
+def _push_event_to_gcal(m):
+    """Push one manual event to Google Calendar. Returns htmlLink or None (silent on errors)."""
+    return _gcal_create_event(
+        title=m.get("title", ""),
+        date_str=m.get("date", ""),
+        time_str=m.get("time", ""),
+        description=m.get("meta", ""),
+        recurrence="annual" if m.get("recurring") == "annual" else "",
+    )
+
+@app.route("/api/calendar/events/manual", methods=["GET"])
+def get_manual_events():
+    return jsonify(_load(CALENDAR_EVENTS_FILE, []))
+
+@app.route("/api/calendar/events/manual", methods=["POST"])
+def post_manual_event():
+    d = request.json or {}
+    category = (d.get("category") or "other").strip()
+    title = (d.get("title") or "").strip()
+    date = (d.get("date") or "").strip()
+    if category not in VALID_EVENT_CATEGORIES:
+        return jsonify({"error": "invalid_category"}), 400
+    if not title or not date:
+        return jsonify({"error": "title_and_date_required"}), 400
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        return jsonify({"error": "invalid_date"}), 400
+
+    annual = category in ("birthday", "anniversary")
+    record = {
+        "id": f"evt_{int(datetime.now().timestamp()*1000)}",
+        "category": category,
+        "title": title,
+        "date": date,
+        "time": (d.get("time") or "").strip(),
+        "meta": (d.get("meta") or "").strip(),
+        "highlight": True if annual else bool(d.get("highlight")),
+        "recurring": "annual" if annual else "",
+        "gcal_link": "",
+        "created": datetime.now().strftime("%Y-%m-%d"),
+    }
+    # Push every category to Google at create time (no-op/silent if Google isn't connected).
+    link = _push_event_to_gcal(record)
+    record["gcal_link"] = link or ""
+
+    items = _load(CALENDAR_EVENTS_FILE, [])
+    items.append(record)
+    _save(CALENDAR_EVENTS_FILE, items)
+    return jsonify({"ok": True, "event": record})
+
+@app.route("/api/calendar/events/manual/<eid>", methods=["DELETE"])
+def delete_manual_event(eid):
+    items = _load(CALENDAR_EVENTS_FILE, [])
+    kept = [e for e in items if e.get("id") != eid]
+    _save(CALENDAR_EVENTS_FILE, kept)
+    return jsonify({"ok": True, "removed": len(items) - len(kept)})
+
+@app.route("/api/calendar/sync-google", methods=["POST"])
+def sync_calendar_google():
+    """Back-fill: push every not-yet-synced manual event up to Google Calendar."""
+    svc, err = _gcal_service()
+    if err or not svc:
+        return jsonify({"ok": False, "error": err or "not_connected"})
+    items = _load(CALENDAR_EVENTS_FILE, [])
+    synced = 0
+    for m in items:
+        if m.get("gcal_link"):
+            continue
+        link = _push_event_to_gcal(m)
+        if link:
+            m["gcal_link"] = link
+            synced += 1
+    _save(CALENDAR_EVENTS_FILE, items)
+    pending = sum(1 for m in items if not m.get("gcal_link"))
+    return jsonify({"ok": True, "synced": synced, "pending": pending, "total": len(items)})
 
 # ── Google Sheets auto-sync helpers ──────────────────────────────────────────
 
@@ -1358,11 +1439,29 @@ def _health_sheet_update_daily(date_str, updates):
         row = _health_sheet_find_or_create_row(svc, date_str)
         if not row:
             return
+
+        def _col_letter(i):
+            return chr(ord('A') + i) if i < 26 else 'A' + chr(ord('A') + i - 26)
+
         data = []
         for label, value in updates.items():
-            col_info = cols.get(str(label).strip().lower())
+            key = str(label).strip().lower()
+            col_info = cols.get(key)
             if not col_info:
-                continue
+                # Column doesn't exist yet — append it to the header row and use it.
+                next_idx = (max((i for _, i in cols.values())) + 1) if cols else 0
+                letter = _col_letter(next_idx)
+                try:
+                    svc.spreadsheets().values().update(
+                        spreadsheetId=HEALTH_SHEET_ID,
+                        range=f"Daily!{letter}1",
+                        valueInputOption="RAW",
+                        body={"values": [[str(label).strip()]]},
+                    ).execute()
+                except Exception:
+                    continue
+                cols[key] = (letter, next_idx)
+                col_info = cols[key]
             letter, _ = col_info
             if isinstance(value, bool):
                 value = "TRUE" if value else "FALSE"
@@ -1492,7 +1591,7 @@ def _health_sheet_read():
         if err:
             return None
 
-        result = {"weight": {}, "habits": {}, "calories": {}, "food_log": {}}
+        result = {"weight": {}, "habits": {}, "calories": {}, "food_log": {}, "water": {}}
 
         # --- Daily tab ---
         daily = svc.spreadsheets().values().get(
@@ -1502,7 +1601,7 @@ def _health_sheet_read():
         if rows and len(rows) > 1:
             headers = [str(h).strip() for h in rows[0]]
             cmap = {h.lower(): i for i, h in enumerate(headers)}
-            known = {"date", "weight (lb)", "cal goal", "cal eaten", "cal burned", "notes"}
+            known = {"date", "weight (lb)", "cal goal", "cal eaten", "cal burned", "notes", "water (oz)"}
             habit_cols = {h: i for h, i in cmap.items() if h and h not in known}
 
             for row in rows[1:]:
@@ -1519,6 +1618,11 @@ def _health_sheet_read():
                 w = cell("weight (lb)")
                 if w:
                     try: result["weight"][date_str] = float(w)
+                    except ValueError: pass
+
+                wat = cell("water (oz)")
+                if wat:
+                    try: result["water"][date_str] = int(float(wat))
                     except ValueError: pass
 
                 cal_entry = {}
@@ -2213,8 +2317,11 @@ def _gcal_service():
             return None, "auth_required"
     return build('calendar', 'v3', credentials=creds), None
 
-def _gcal_create_event(title, date_str, time_str="", duration_min=60, description="", location=""):
-    """Create a Google Calendar event. Silent on errors. Returns event link or None."""
+def _gcal_create_event(title, date_str, time_str="", duration_min=60, description="", location="", recurrence=""):
+    """Create a Google Calendar event. Silent on errors. Returns event link or None.
+
+    recurrence="annual" adds an RRULE:FREQ=YEARLY rule (used for birthdays/anniversaries).
+    """
     try:
         svc, err = _gcal_service()
         if err:
@@ -2247,6 +2354,8 @@ def _gcal_create_event(title, date_str, time_str="", duration_min=60, descriptio
                 "start": {"date": start.strftime("%Y-%m-%d")},
                 "end":   {"date": end_day.strftime("%Y-%m-%d")},
             }
+        if recurrence == "annual":
+            body["recurrence"] = ["RRULE:FREQ=YEARLY"]
         created = svc.events().insert(calendarId="primary", body=body).execute()
         return created.get("htmlLink")
     except Exception:
@@ -2435,7 +2544,7 @@ def get_health():
     # Merge live Sheet data over local JSON (Sheet is source of truth)
     sheet_data = _health_sheet_read()
     if sheet_data:
-        for section in ("weight", "habits", "calories", "food_log"):
+        for section in ("weight", "habits", "calories", "food_log", "water"):
             sheet_section = sheet_data.get(section, {})
             if not sheet_section:
                 continue
@@ -2484,8 +2593,9 @@ def get_health():
 
     today_str = today.strftime("%Y-%m-%d")
     food_log_today = data.get("food_log", {}).get(today_str, [])
+    water_today = data.get("water", {}).get(today_str, 0)
 
-    return jsonify({**data, "weight_log": weight_log, "habits_weekly": habits_weekly, "calories_target": cal_target, "food_log_today": food_log_today})
+    return jsonify({**data, "weight_log": weight_log, "habits_weekly": habits_weekly, "calories_target": cal_target, "food_log_today": food_log_today, "water_today": water_today})
 
 @app.route("/api/health/workout")
 def get_health_workout():
@@ -2589,13 +2699,68 @@ def post_health_weight():
     _health_sheet_update_daily(date, {"Weight (lb)": d["weight"]})
     return jsonify({"ok": True})
 
+@app.route("/api/health/water", methods=["POST"])
+def post_health_water():
+    """Set the day's total water intake in ounces. Body: {oz, date?}. Default goal is 1 gallon (128 oz)."""
+    d = request.json or {}
+    health = _load(HEALTH_FILE)
+    if not isinstance(health, dict):
+        health = {"habits": {}, "weight": {}, "calories": {}}
+    date = d.get("date", datetime.now().strftime("%Y-%m-%d"))
+    try:
+        bottle_oz = max(1.0, float(health.get("water_bottle_oz", 32) or 32))
+    except (TypeError, ValueError):
+        bottle_oz = 32.0
+    try:
+        if "add_bottles" in d:
+            current = int(float(health.get("water", {}).get(date, 0) or 0))
+            oz = current + (float(d.get("add_bottles") or 0) * bottle_oz)
+        elif "add_oz" in d:
+            current = int(float(health.get("water", {}).get(date, 0) or 0))
+            oz = current + float(d.get("add_oz") or 0)
+        else:
+            oz = float(d.get("oz", 0))
+        oz = max(0, int(round(oz)))
+    except (TypeError, ValueError):
+        oz = 0
+    health.setdefault("water", {})[date] = oz
+    _save(HEALTH_FILE, health)
+    _log("health", "water", f"{oz} oz ({oz / bottle_oz:.1f} Owala bottles)")
+    _health_sheet_update_daily(date, {"Water (oz)": oz})
+    return jsonify({"ok": True, "oz": oz})
+
+@app.route("/api/health/rehab", methods=["POST"])
+def post_health_rehab():
+    """Persist one elbow rehab checkbox for a date. Body: {date?, key, done?}."""
+    d = request.json or {}
+    health = _load(HEALTH_FILE)
+    if not isinstance(health, dict):
+        health = {"habits": {}, "weight": {}, "calories": {}}
+    date = d.get("date", datetime.now().strftime("%Y-%m-%d"))
+    key = str(d.get("key") or d.get("exercise") or d.get("index") or "").strip()
+    if not key:
+        return jsonify({"error": "missing key"}), 400
+
+    rehab = health.setdefault("rehab", {})
+    day = rehab.setdefault(date, {})
+    if "done" in d:
+        raw_done = d.get("done")
+        done = raw_done.strip().lower() in ("1", "true", "yes", "on") if isinstance(raw_done, str) else bool(raw_done)
+    else:
+        done = not bool(day.get(key, False))
+    day[key] = done
+
+    _save(HEALTH_FILE, health)
+    _log("health", "rehab", f"{key} {'✓' if done else '✗'}")
+    return jsonify({"ok": True, "key": key, "done": done})
+
 @app.route("/api/health/config", methods=["POST"])
 def post_health_config():
     d = request.json or {}
     health = _load(HEALTH_FILE)
     if not isinstance(health, dict):
         health = {"habits": {}, "weight": {}, "calories": {}}
-    for key in ("height_in", "goal_weight"):
+    for key in ("height_in", "goal_weight", "water_bottle_oz", "water_goal_oz"):
         if key in d:
             health[key] = d[key]
     _save(HEALTH_FILE, health)
@@ -2722,52 +2887,6 @@ def delete_work(wid):
     _save(WORK_FILE, items)
     if deleted:
         _log("work", "delete", deleted.get("title", ""), deleted.get("project", ""))
-    return jsonify({"ok": True})
-
-# ── Study ──────────────────────────────────────────────────────────────────────
-
-@app.route("/api/study", methods=["GET"])
-def get_study():
-    data = _load(STUDY_FILE)
-    if isinstance(data, list):
-        return jsonify({})
-    return jsonify(data)
-
-@app.route("/api/study/score", methods=["POST"])
-def post_study_score():
-    d = request.json
-    study = _load(STUDY_FILE)
-    if not isinstance(study, dict):
-        study = {}
-    study.setdefault("practice_scores", []).append(d.get("score", 0))
-    _save(STUDY_FILE, study)
-    return jsonify({"ok": True})
-
-@app.route("/api/study/domain/<int:did>", methods=["POST"])
-def post_study_domain(did):
-    d = request.json
-    study = _load(STUDY_FILE)
-    for domain in study.get("domains", []):
-        if domain["id"] == did:
-            domain.update({k: v for k, v in d.items() if k != "id"})
-            _save(STUDY_FILE, study)
-            return jsonify({"ok": True})
-    return jsonify({"error": "not found"}), 404
-
-@app.route("/api/study/session", methods=["POST"])
-def post_study_session():
-    d = request.json
-    study = _load(STUDY_FILE)
-    sessions = study.setdefault("sessions", [])
-    mins = d.get("minutes", 0)
-    topic = d.get("topic", "")
-    sessions.append({
-        "date": d.get("date", datetime.now().strftime("%Y-%m-%d")),
-        "minutes": mins, "topic": topic
-    })
-    study["total_hours"] = round(sum(s.get("minutes", 0) for s in sessions) / 60, 1)
-    _save(STUDY_FILE, study)
-    _log("study", "session", f"{mins}min{f' — {topic}' if topic else ''}")
     return jsonify({"ok": True})
 
 # ── Activity Log ───────────────────────────────────────────────────────────────
@@ -2934,20 +3053,20 @@ def get_tcpg_health():
 
 PRACTICE_DEFAULT = {
     "piano": {"this_week_focus": "", "last_lesson_notes": "", "scales": [], "reminders": [], "sessions": []},
-    "guitar": {"this_week_focus": "", "last_lesson_notes": "", "scales": [], "reminders": [], "sessions": []},
 }
 
 @app.route("/api/practice", methods=["GET"])
 def get_practice():
     data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
-    for inst in ("piano", "guitar"):
-        if inst not in data:
-            data[inst] = PRACTICE_DEFAULT[inst]
+    if "piano" not in data:
+        data["piano"] = PRACTICE_DEFAULT["piano"]
+    # piano-only now — drop any legacy guitar data so it can't resurface
+    data.pop("guitar", None)
     return jsonify(data)
 
 @app.route("/api/practice/<instrument>", methods=["POST"])
 def update_practice(instrument):
-    if instrument not in ("piano", "guitar"):
+    if instrument != "piano":
         return jsonify({"error": "invalid instrument"}), 400
     data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
     body = request.json or {}
@@ -2959,7 +3078,7 @@ def update_practice(instrument):
 
 @app.route("/api/practice/<instrument>/scale", methods=["POST"])
 def add_practice_scale(instrument):
-    if instrument not in ("piano", "guitar"):
+    if instrument != "piano":
         return jsonify({"error": "invalid instrument"}), 400
     data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
     scales = data[instrument].get("scales", [])
@@ -2971,7 +3090,7 @@ def add_practice_scale(instrument):
 
 @app.route("/api/practice/<instrument>/scale/<int:scale_id>/toggle", methods=["POST"])
 def toggle_practice_scale(instrument, scale_id):
-    if instrument not in ("piano", "guitar"):
+    if instrument != "piano":
         return jsonify({"error": "invalid instrument"}), 400
     data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
     for s in data[instrument].get("scales", []):
@@ -2982,7 +3101,7 @@ def toggle_practice_scale(instrument, scale_id):
 
 @app.route("/api/practice/<instrument>/scale/<int:scale_id>", methods=["DELETE"])
 def delete_practice_scale(instrument, scale_id):
-    if instrument not in ("piano", "guitar"):
+    if instrument != "piano":
         return jsonify({"error": "invalid instrument"}), 400
     data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
     data[instrument]["scales"] = [s for s in data[instrument].get("scales", []) if s["id"] != scale_id]
@@ -2991,7 +3110,7 @@ def delete_practice_scale(instrument, scale_id):
 
 @app.route("/api/practice/<instrument>/reminder", methods=["POST"])
 def add_practice_reminder(instrument):
-    if instrument not in ("piano", "guitar"):
+    if instrument != "piano":
         return jsonify({"error": "invalid instrument"}), 400
     data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
     reminders = data[instrument].get("reminders", [])
@@ -3003,7 +3122,7 @@ def add_practice_reminder(instrument):
 
 @app.route("/api/practice/<instrument>/reminder/<int:rid>/toggle", methods=["POST"])
 def toggle_practice_reminder(instrument, rid):
-    if instrument not in ("piano", "guitar"):
+    if instrument != "piano":
         return jsonify({"error": "invalid instrument"}), 400
     data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
     for r in data[instrument].get("reminders", []):
@@ -3014,7 +3133,7 @@ def toggle_practice_reminder(instrument, rid):
 
 @app.route("/api/practice/<instrument>/reminder/<int:rid>", methods=["DELETE"])
 def delete_practice_reminder(instrument, rid):
-    if instrument not in ("piano", "guitar"):
+    if instrument != "piano":
         return jsonify({"error": "invalid instrument"}), 400
     data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
     data[instrument]["reminders"] = [r for r in data[instrument].get("reminders", []) if r["id"] != rid]
@@ -3023,7 +3142,7 @@ def delete_practice_reminder(instrument, rid):
 
 @app.route("/api/practice/<instrument>/session", methods=["POST"])
 def log_practice_session(instrument):
-    if instrument not in ("piano", "guitar"):
+    if instrument != "piano":
         return jsonify({"error": "invalid instrument"}), 400
     data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
     body = request.json or {}

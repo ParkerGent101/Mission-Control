@@ -51,7 +51,7 @@ Write-Host "==> Syncing data to GCS (force-uploading key files)..." -ForegroundC
 $dataFiles = @(
     "shows.json","band_songs.json","band_contacts.json","band_content.json",
     "finances.json","savings.json","health.json","agenda.json","tasks.json",
-    "reminders.json","work_tasks.json","study.json","reading.json","gaming.json",
+    "reminders.json","work_tasks.json","reading.json","gaming.json",
     "holidays.json","journal.json","subscriptions.json","drive_config.json"
 )
 foreach ($f in $dataFiles) {

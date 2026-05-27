@@ -32,9 +32,22 @@ const parseCommand = (text) => {
              module: 'health', summary: `Calories: ${rest[0]}${body.burned ? `, burned ${body.burned}` : ''}` };
   }
 
-  if (cmd === 'score' && rest[0] && !isNaN(+rest[0]))
-    return { endpoint: '/api/study/score', method: 'POST', body: { score: +rest[0] },
-             module: 'study', summary: `Practice score: ${rest[0]}%` };
+  if (cmd === 'water') {
+    const first = rest[0]?.toLowerCase();
+    if (!first || first === 'bottle')
+      return { endpoint: '/api/health/water', method: 'POST', body: { add_bottles: 1 },
+               module: 'health', summary: 'Water: +1 bottle' };
+    if (first === 'reset')
+      return { endpoint: '/api/health/water', method: 'POST', body: { oz: 0 },
+               module: 'health', summary: 'Water reset' };
+    if (!isNaN(+rest[0])) {
+      const usesBottle = rest.some(t => t.toLowerCase().startsWith('bottle'));
+      return { endpoint: '/api/health/water', method: 'POST',
+               body: usesBottle ? { add_bottles: +rest[0] } : { add_oz: +rest[0] },
+               module: 'health',
+               summary: usesBottle ? `Water: +${rest[0]} bottle${+rest[0] === 1 ? '' : 's'}` : `Water: +${rest[0]} oz` };
+    }
+  }
 
   /* ── finance ── */
   if (cmd === 'finance' && rest.length >= 2) {
@@ -51,7 +64,7 @@ const parseCommand = (text) => {
   }
 
   /* ── health ── */
-  if (cmd === 'health' && rest.length >= 2) {
+  if (cmd === 'health' && rest.length >= 1) {
     const [act, ...args] = rest;
     const a = act.toLowerCase();
     if (a === 'weight' && !isNaN(+args[0]))
@@ -63,6 +76,20 @@ const parseCommand = (text) => {
       if (bi !== -1 && args[bi+1]) body.burned = +args[bi+1];
       return { endpoint: '/api/health/calories', method: 'POST', body,
                module: 'health', summary: `Calories: ${args[0]}` };
+    }
+    if (a === 'water') {
+      if (!args[0] || args[0].toLowerCase() === 'bottle')
+        return { endpoint: '/api/health/water', method: 'POST', body: { add_bottles: 1 },
+                 module: 'health', summary: 'Water: +1 bottle' };
+      if (args[0].toLowerCase() === 'reset')
+        return { endpoint: '/api/health/water', method: 'POST', body: { oz: 0 },
+                 module: 'health', summary: 'Water reset' };
+      if (!isNaN(+args[0])) {
+        const usesBottle = args.some(t => t.toLowerCase().startsWith('bottle'));
+        return { endpoint: '/api/health/water', method: 'POST',
+                 body: usesBottle ? { add_bottles: +args[0] } : { add_oz: +args[0] },
+                 module: 'health', summary: usesBottle ? `Water: +${args[0]} bottle${+args[0] === 1 ? '' : 's'}` : `Water: +${args[0]} oz` };
+      }
     }
     if (a === 'habit' && args.length)
       return { endpoint: '/api/health/habit', method: 'POST', body: { habit: args.join(' ') },
@@ -83,19 +110,6 @@ const parseCommand = (text) => {
     if (a === 'done' && args[0] && !isNaN(+args[0]))
       return { endpoint: `/api/work/${args[0]}/done`, method: 'POST', body: {},
                module: 'work', summary: `Work task #${args[0]} done` };
-  }
-
-  /* ── study ── */
-  if (cmd === 'study' && rest.length) {
-    const [first, ...args] = rest;
-    if (first.toLowerCase() === 'score' && args[0] && !isNaN(+args[0]))
-      return { endpoint: '/api/study/score', method: 'POST', body: { score: +args[0] },
-               module: 'study', summary: `Practice score: ${args[0]}%` };
-    if (!isNaN(+first)) {
-      const topic = args.join(' ');
-      return { endpoint: '/api/study/session', method: 'POST', body: { minutes: +first, topic },
-               module: 'study', summary: `Study: ${first}min${topic ? ' — ' + topic : ''}` };
-    }
   }
 
   /* ── agenda ── */
@@ -155,6 +169,7 @@ const HELP_CMDS = [
     { cmd: 'weight 185',                  desc: 'log weight (lb)' },
     { cmd: 'calories 2200',               desc: 'log daily intake' },
     { cmd: 'calories 2000 burned 350',    desc: 'with burned kcal' },
+    { cmd: 'water',                       desc: 'add one Owala bottle' },
     { cmd: 'page 142  · read 142',        desc: 'update book page' },
     { cmd: 'score 74',                    desc: 'log practice test %' },
   ]},
@@ -166,6 +181,7 @@ const HELP_CMDS = [
   { group: 'Health', items: [
     { cmd: 'health weight 184' },
     { cmd: 'health calories 1800' },
+    { cmd: 'health water 16',             desc: 'add ounces' },
     { cmd: 'health habit Lift',           desc: 'toggle habit done' },
   ]},
   { group: 'Work', items: [
@@ -178,8 +194,6 @@ const HELP_CMDS = [
     { cmd: 'band contact "John Smith" "The Venue" Fayetteville' },
   ]},
   { group: 'More', items: [
-    { cmd: 'study 60 Domain 1',           desc: 'log study session' },
-    { cmd: 'study score 78',              desc: 'log practice %' },
     { cmd: 'agenda "Team standup" at 09:00 Work' },
     { cmd: 'remind "Oil change" on 2026-06-15' },
   ]},
@@ -335,7 +349,7 @@ const SIDEBAR_NAV = [
   { id: "band",      icon: "music",      label: "Band"      },
   { id: "health",    icon: "heart",      label: "Health"    },
   { id: "practice",  icon: "target",     label: "Practice"  },
-  { id: "study",     icon: "graduation", label: "Study"     },
+  { id: "calendar",  icon: "calendar",   label: "Calendar"  },
 ];
 
 const MOBILE_NAV = [
@@ -350,8 +364,18 @@ const MODULE_LABELS = [
   ["band","Band","music"],
   ["health","Health","heart"],
   ["practice","Practice","target"],
-  ["study","Study","graduation"],
 ];
+
+const DASHBOARD_MINIMIZED_KEY = "mc_dashboard_minimized";
+
+const readDashboardMinimized = () => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(DASHBOARD_MINIMIZED_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
 
 const App = () => {
   const [t, setTweak] = useTweaks(() => {
@@ -368,6 +392,7 @@ const App = () => {
   const [needsOnboarding, setNeedsOnboarding] = useStateApp(null);
   const [showSettings, setShowSettings] = useStateApp(false);
   const [userName, setUserName] = useStateApp(() => localStorage.getItem('mc_name') || 'Parker');
+  const [dashboardMinimized, setDashboardMinimized] = useStateApp(readDashboardMinimized);
 
   useEffectApp(() => {
     fetch('/api/onboarding').then(r => r.json()).then(d => setNeedsOnboarding(d.needed)).catch(() => setNeedsOnboarding(false));
@@ -425,6 +450,10 @@ const App = () => {
     localStorage.setItem('mc_tweaks', JSON.stringify(t));
   }, [t]);
 
+  useEffectApp(() => {
+    localStorage.setItem(DASHBOARD_MINIMIZED_KEY, JSON.stringify(dashboardMinimized));
+  }, [dashboardMinimized]);
+
   const onAction = (c) => {
     if (!c?.action) return;
     if (c.action === "open:tweaks") {
@@ -464,14 +493,28 @@ const App = () => {
   const date = now.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
   const weekNum = Math.ceil((now - new Date(now.getFullYear(), 0, 1)) / 604800000);
 
+  const minimizeDashboardCard = (id) => {
+    setDashboardMinimized(xs => xs.includes(id) ? xs : [...xs, id]);
+  };
+  const restoreDashboardCard = (id) => {
+    setDashboardMinimized(xs => xs.filter(x => x !== id));
+  };
+  const restoreAllDashboardCards = () => setDashboardMinimized([]);
+  const dashboardCardProps = (id, span) => active === "dashboard"
+    ? { span, onDashboardMinimize: () => minimizeDashboardCard(id) }
+    : {};
+
   const M = window.MissionModules;
   const cards = [
-    { id: "finance",  el: <M.FinanceCard />  },
-    { id: "band",     el: <M.BandCard />     },
-    { id: "health",   el: <M.HealthCard />   },
-    { id: "practice", el: <M.PracticeCard /> },
-    { id: "study",    el: <M.StudyCard />    },
+    { id: "health",   label: "Health & Fitness", icon: "heart",      el: <M.HealthCard cardProps={dashboardCardProps("health", 12)} /> },
+    { id: "finance",  label: "Finance",          icon: "wallet",     el: <M.FinanceCard cardProps={dashboardCardProps("finance", 7)} /> },
+    { id: "band",     label: "Band",             icon: "music",      el: <M.BandCard cardProps={dashboardCardProps("band", 5)} /> },
+    { id: "practice", label: "Piano Practice",   icon: "target",     el: <M.PracticeCard cardProps={dashboardCardProps("practice", 6)} /> },
+    { id: "calendar", label: "Calendar",         icon: "calendar",   el: <M.CalendarCard cardProps={dashboardCardProps("calendar", 6)} /> },
   ];
+
+  const visibleDashboardCards = cards.filter(c => t.modules[c.id] !== false && !dashboardMinimized.includes(c.id));
+  const minimizedDashboardCards = cards.filter(c => t.modules[c.id] !== false && dashboardMinimized.includes(c.id));
 
   const pageTitle = active === "dashboard"
     ? `Good ${now.getHours() < 12 ? "morning" : now.getHours() < 17 ? "afternoon" : "evening"}, ${userName}.`
@@ -549,9 +592,28 @@ const App = () => {
         </div>
         {active === "dashboard" ? (
           <div className="grid">
-            {cards.map((c) => (
+            {minimizedDashboardCards.length > 0 && (
+              <div className="dashboard-minimized span-12">
+                <div className="dashboard-minimized-title">
+                  <span className="muted-2 mono">Minimized</span>
+                  <span className="tag">{minimizedDashboardCards.length}</span>
+                </div>
+                <div className="dashboard-minimized-list">
+                  {minimizedDashboardCards.map(c => (
+                    <button key={c.id} className="dashboard-minimized-btn" onClick={() => restoreDashboardCard(c.id)}
+                      title={`Restore ${c.label}`}>
+                      <Icon name={c.icon} size={14} />
+                      <span>{c.label}</span>
+                      <Icon name="plus" size={11} />
+                    </button>
+                  ))}
+                </div>
+                <button className="btn ghost" onClick={restoreAllDashboardCards}>Restore all</button>
+              </div>
+            )}
+            {visibleDashboardCards.map((c) => (
               <React.Fragment key={c.id}>
-                {t.modules[c.id] !== false && c.el}
+                {c.el}
               </React.Fragment>
             ))}
           </div>

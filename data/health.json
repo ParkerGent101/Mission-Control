@@ -65,6 +65,10 @@
     {
       "id": "piano",
       "label": "Piano"
+    },
+    {
+      "id": "study",
+      "label": "Study"
     }
   ],
   "workout_config": {
