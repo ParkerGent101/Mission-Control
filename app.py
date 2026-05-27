@@ -1266,7 +1266,7 @@ def calendar_overview():
     events.sort(key=lambda e: e["date"])
     return jsonify({"events": events})
 
-VALID_EVENT_CATEGORIES = {"band", "work", "birthday", "anniversary", "other"}
+VALID_EVENT_CATEGORIES = {"band", "work", "piano", "birthday", "anniversary", "other"}
 
 def _clean_weekdays(val):
     """Normalize a weekdays payload to a sorted list of unique JS getDay indices (0=Sun..6=Sat)."""

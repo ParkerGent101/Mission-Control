@@ -2049,7 +2049,7 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
   const [loading, setLoading] = useState(true);
   const todayObj = new Date();
   const [cal, setCal] = useState({ y: todayObj.getFullYear(), m: todayObj.getMonth() });
-  const [vis, setVis] = useState({band:true,work:true,birthday:true,anniversary:true,other:true,show:true,holiday:true,culture:true,gcal:true});
+  const [vis, setVis] = useState({band:true,work:true,piano:true,show:true,birthday:true,anniversary:true,other:true,holiday:true,culture:true,gcal:true});
   const blankForm = {open:false, id:null, category:'band', date:'', title:'', time:'', end_time:'', meta:'', highlight:false, recurring:'', weekdays:[]};
   const [form, setForm] = useState(blankForm);
   const [saving, setSaving] = useState(false);
@@ -2068,19 +2068,29 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
   useEffect(load, []);
   useRefreshListener(load);
 
-  // type → colour var / icon / label. "band" + "show" share violet; manual + auto types coexist.
-  const COLORVAR = {band:'violet',show:'violet',work:'info',birthday:'accent',anniversary:'danger',
-                    other:'warn',holiday:'accent-2',culture:'accent-2',gcal:'accent-2'};
-  const ICON  = {band:'music',show:'music',work:'briefcase',birthday:'sparkles',anniversary:'heart',
+  // Each type gets its own distinct hue (oklch around the wheel) so the dots read at a glance.
+  const COLOR = {
+    band:       'oklch(0.70 0.14 300)',  // violet
+    show:       'oklch(0.68 0.19 335)',  // magenta
+    work:       'oklch(0.70 0.13 245)',  // blue
+    piano:      'oklch(0.75 0.11 190)',  // teal
+    birthday:   'oklch(0.80 0.14 80)',   // amber
+    anniversary:'oklch(0.66 0.19 20)',   // red
+    holiday:    'oklch(0.74 0.14 150)',  // green
+    culture:    'oklch(0.84 0.14 100)',  // yellow
+    other:      'oklch(0.74 0.16 50)',   // orange
+    gcal:       'oklch(0.68 0.04 250)',  // slate / external
+  };
+  const ICON  = {band:'music',show:'mic',work:'briefcase',piano:'target',birthday:'sparkles',anniversary:'heart',
                  other:'flag',holiday:'flag',culture:'sparkles',gcal:'calendar'};
-  const LABEL = {band:'Band',show:'Show',work:'Work',birthday:'Birthday',anniversary:'Anniversary',
+  const LABEL = {band:'Band',show:'Show',work:'Work',piano:'Piano',birthday:'Birthday',anniversary:'Anniversary',
                  other:'Other',holiday:'Holiday',culture:'Event',gcal:'Event'};
-  const cv = t => `var(--${COLORVAR[t]||'ink-3'})`;
+  const cv = t => COLOR[t] || 'var(--ink-3)';
 
   const CHIPS = [
-    {id:'band',label:'Band'},{id:'work',label:'Work'},{id:'birthday',label:'Bday'},
-    {id:'anniversary',label:'Anniv'},{id:'other',label:'Other'},{id:'show',label:'Shows'},
-    {id:'holiday',label:'Holidays'},{id:'culture',label:'Culture'},{id:'gcal',label:'Google'},
+    {id:'band',label:'Band'},{id:'work',label:'Work'},{id:'piano',label:'Piano'},{id:'show',label:'Shows'},
+    {id:'birthday',label:'Bday'},{id:'anniversary',label:'Anniv'},
+    {id:'holiday',label:'Holidays'},{id:'other',label:'Other'},{id:'culture',label:'Culture'},{id:'gcal',label:'Google'},
   ];
   const isVisible = e => vis[e.type] !== false;
 
@@ -2170,7 +2180,7 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
         <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:10,padding:'10px',background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid var(--line)'}}>
           <div className="muted-2 mono" style={{fontSize:10.5,letterSpacing:'.06em'}}>{form.id?'EDIT EVENT':'ADD EVENT'}</div>
           <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
-            {[['band','Band'],['work','Work'],['birthday','Birthday'],['anniversary','Anniversary'],['other','Other']].map(([id,lbl])=>(
+            {[['band','Band'],['work','Work'],['piano','Piano'],['birthday','Birthday'],['anniversary','Anniversary'],['other','Other']].map(([id,lbl])=>(
               <button key={id} className="btn ghost" onClick={()=>setCat(id)} style={{padding:'2px 8px',fontSize:10.5,fontFamily:'var(--font-mono)',
                 color: form.category===id?cv(id):'var(--ink-4)',
                 background: form.category===id?`color-mix(in oklch,${cv(id)} 18%,transparent)`:'transparent',
@@ -2225,8 +2235,8 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
         </div>
       </div>
 
-      <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:2}}>
-        {['S','M','T','W','T','F','S'].map((d,i)=>(<div key={'h'+i} style={{textAlign:'center',color:'var(--ink-4)',fontFamily:'var(--font-mono)',fontSize:10,paddingBottom:3}}>{d}</div>))}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:3}}>
+        {['S','M','T','W','T','F','S'].map((d,i)=>(<div key={'h'+i} style={{textAlign:'center',color:'var(--ink-4)',fontFamily:'var(--font-mono)',fontSize:10.5,paddingBottom:4}}>{d}</div>))}
         {cells.map((d,i)=>{
           if(!d) return <div key={i}/>;
           const ds = `${cal.y}-${pad(cal.m+1)}-${pad(d)}`;
@@ -2235,13 +2245,13 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
           const isSel = ds===selectedDay;
           return (
             <div key={i} onClick={()=>setSelectedDay(s=>s===ds?null:ds)} title={evs.map(e=>e.title).join(', ')} style={{
-              minHeight:42, padding:'3px 3px 4px', borderRadius:5, cursor:'pointer',
+              minHeight:60, padding:'5px 4px', borderRadius:6, cursor:'pointer',
               background: isSel?`color-mix(in oklch,var(--accent) 18%,var(--surface-2))`:isToday?'var(--surface-3)':evs.length?'var(--surface-2)':'transparent',
               border: isSel?'1px solid var(--accent)':isToday?'1px solid var(--line)':'1px solid transparent'}}>
-              <div className="mono" style={{fontSize:10.5,textAlign:'center',color:isSel?'var(--accent)':isToday?'var(--ink)':'var(--ink-3)',fontWeight:(isToday||isSel)?600:400}}>{d}</div>
-              <div style={{display:'flex',gap:2,flexWrap:'wrap',justifyContent:'center',marginTop:2}}>
-                {evs.slice(0,4).map((e,j)=>(<span key={j} style={{width:5,height:5,borderRadius:'50%',background:cv(e.type)}}/>))}
-                {evs.length>4 && <span className="mono" style={{fontSize:8,color:'var(--ink-4)'}}>+{evs.length-4}</span>}
+              <div className="mono" style={{fontSize:12,textAlign:'center',color:isSel?'var(--accent)':isToday?'var(--ink)':'var(--ink-3)',fontWeight:(isToday||isSel)?700:500}}>{d}</div>
+              <div style={{display:'flex',gap:3,flexWrap:'wrap',justifyContent:'center',marginTop:4}}>
+                {evs.slice(0,5).map((e,j)=>(<span key={j} title={e.title} style={{width:7,height:7,borderRadius:'50%',background:cv(e.type)}}/>))}
+                {evs.length>5 && <span className="mono" style={{fontSize:8.5,color:'var(--ink-4)'}}>+{evs.length-5}</span>}
               </div>
             </div>
           );
