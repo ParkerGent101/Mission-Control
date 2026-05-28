@@ -371,6 +371,23 @@
   .card { overflow: hidden; }
   .card-body { overflow-x: hidden; min-width: 0; }
 
+  /* ─── Smooth nested scroll panes ─────
+     Inner overflow:auto regions (transaction lists, etc.) used to "trap"
+     touch swipes once they reached their bounds. overscroll-behavior:contain
+     stops the rubber-band but the page itself can still scroll once the
+     user lifts and re-swipes; -webkit-overflow-scrolling gives momentum. */
+  .scroll-pane {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-gutter: stable;
+  }
+  /* Make any inline overflowY:auto also momentum-scroll on iOS */
+  [style*="overflowY:auto"], [style*="overflow-y:auto"] {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
   /* ─── Mobile bottom sheet ───────────────────────── */
   .sheet-overlay {
     position: fixed; inset: 0; z-index: 150;

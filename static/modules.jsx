@@ -328,6 +328,8 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
   const [subName, setSubName] = useState(""); const [subAcct, setSubAcct] = useState(""); const [subAmt, setSubAmt] = useState(""); const [subDue, setSubDue] = useState("");
   const catOverrides = React.useRef({});
   const [budget, setBudget] = React.useState(null);
+  const [collapsedCats, setCollapsedCats] = useState({});
+  const toggleCat = (name) => setCollapsedCats(s => ({...s, [name]: !s[name]}));
 
   const loadFinances = (m) => {
     fetch(`/api/finances?month=${m}`).then(r=>r.json()).then(data => {
@@ -498,60 +500,96 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
         <div>
           <div className="section-h"><span>Transactions</span><span className="line"/><span className="muted-2" style={{fontSize:10.5}}>{txns.filter(t=>t.amount<0).length} expenses</span></div>
           {txns.length === 0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 0'}}>No transactions this month.</div>}
-          <div style={{maxHeight:480,overflowY:'auto',marginRight:-4,paddingRight:4}}>
-          {txns.map((t,i) => {
-            const nc = t.amount > 0 ? null : normFinCat(t.cat);
-            return (
-              <div key={t.id||i} className="txn" style={{gridTemplateColumns:"10px 1fr auto auto auto",gap:6,alignItems:'center'}}>
-                <span className="cat-dot" style={{background:t.amount>0?"var(--accent-2)":FIN_CAT_COLOR[nc]||"var(--ink-4)"}}/>
-                <div>
-                  <div className="merchant">{t.merchant}</div>
-                  <div className="meta">{t.date}</div>
-                </div>
-                {t.amount < 0 && t.source !== 'sheet'
-                  ? <select
-                      value={nc}
-                      onChange={e => {
-                        const newCat = e.target.value;
-                        catOverrides.current[t.id] = newCat;
-                        setTxns(ts => ts.map(x => x.id===t.id ? {...x, cat: newCat} : x));
-                        fetch(`/api/finances/${t.id}`, {
-                          method:'PATCH', headers:{'Content-Type':'application/json'},
-                          body: JSON.stringify({category: newCat})
-                        }).catch(()=>{});
-                      }}
-                      style={{fontSize:10,padding:'2px 4px',height:22,width:116,
-                        background:'var(--surface-2)',border:'1px solid var(--line)',
-                        borderRadius:'var(--r)',color:FIN_CAT_COLOR[nc]||'var(--ink-3)',
-                        cursor:'pointer',fontFamily:'var(--font-mono)'}}
-                    >
-                      {FIN_CAT_NAMES.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                  : <span style={{fontSize:10,color:'var(--ink-4)',fontFamily:'var(--font-mono)'}}>
-                      {t.amount > 0 ? 'income' : normFinCat(t.cat)}
+          <div className="scroll-pane" style={{maxHeight:480,marginRight:-4,paddingRight:4}}>
+          {(() => {
+            const groups = {};
+            txns.forEach(t => {
+              const key = t.amount > 0 ? 'Income' : normFinCat(t.cat);
+              (groups[key] = groups[key] || []).push(t);
+            });
+            const order = [];
+            if (groups['Income']) order.push('Income');
+            categories.forEach(c => { if (groups[c.name] && !order.includes(c.name)) order.push(c.name); });
+            Object.keys(groups).forEach(k => { if (!order.includes(k)) order.push(k); });
+            return order.map(name => {
+              const items = groups[name];
+              const isCollapsed = !!collapsedCats[name];
+              const total = items.reduce((s,t)=>s+Math.abs(t.amount),0);
+              const groupColor = name === 'Income' ? 'var(--accent-2)' : (FIN_CAT_COLOR[name] || 'var(--ink-4)');
+              return (
+                <div key={name}>
+                  <div onClick={()=>toggleCat(name)} title={isCollapsed?'Expand':'Collapse'}
+                    style={{display:'flex',alignItems:'center',gap:8,padding:'7px 4px',cursor:'pointer',
+                            userSelect:'none',borderTop:'1px solid var(--line-soft)',marginTop:2}}>
+                    <span style={{display:'inline-block',width:8,fontSize:9,color:'var(--ink-3)',
+                                  transform: isCollapsed ? 'rotate(-90deg)' : 'none',
+                                  transition:'transform .12s'}}>▼</span>
+                    <span style={{width:8,height:8,borderRadius:2,background:groupColor,flexShrink:0}}/>
+                    <span style={{fontSize:11,fontFamily:'var(--font-mono)',letterSpacing:'.05em',
+                                  textTransform:'uppercase',color:'var(--ink-2)'}}>{name}</span>
+                    <span className="muted-2 mono" style={{fontSize:10}}>{items.length}</span>
+                    <span style={{flex:1}}/>
+                    <span className="amount" style={{fontSize:11,color:name==='Income'?'var(--accent-2)':'var(--ink-3)'}}>
+                      {name==='Income'?'+':''}{fmtMoney(total)}
                     </span>
-                }
-                <span className="amount" style={{color:t.amount>0?"var(--accent-2)":"var(--ink)"}}>
-                  {t.amount>0?"+":""}{fmtMoney(Math.abs(t.amount))}
-                </span>
-                <span style={{cursor:"pointer",color:"var(--ink-4)",padding:"0 2px",lineHeight:1}} title="Remove"
-                  onClick={async()=>{
-                    if (t.source === 'sheet') {
-                      if (t.sheet_tab == null || t.sheet_row == null || t.sheet_col == null) return;
-                      const qs = new URLSearchParams({tab: t.sheet_tab, row: t.sheet_row, col: t.sheet_col});
-                      const res = await fetch(`/api/finances/sheet?${qs}`,{method:"DELETE"});
-                      if (!res.ok) { alert("Could not delete from Google Sheet — check OAuth scope."); return; }
-                    } else {
-                      await fetch(`/api/finances/${t.id}`,{method:"DELETE"});
-                    }
-                    delete catOverrides.current[t.id];
-                    loadFinances(month);
-                  }}>
-                  ×
-                </span>
-              </div>
-            );
-          })}
+                  </div>
+                  {!isCollapsed && items.map((t,i) => {
+                    const nc = t.amount > 0 ? null : normFinCat(t.cat);
+                    return (
+                      <div key={t.id||i} className="txn" style={{gridTemplateColumns:"10px 1fr auto auto auto",gap:6,alignItems:'center',paddingLeft:18}}>
+                        <span className="cat-dot" style={{background:t.amount>0?"var(--accent-2)":FIN_CAT_COLOR[nc]||"var(--ink-4)"}}/>
+                        <div>
+                          <div className="merchant">{t.merchant}</div>
+                          <div className="meta">{t.date}</div>
+                        </div>
+                        {t.amount < 0 && t.source !== 'sheet'
+                          ? <select
+                              value={nc}
+                              onChange={e => {
+                                const newCat = e.target.value;
+                                catOverrides.current[t.id] = newCat;
+                                setTxns(ts => ts.map(x => x.id===t.id ? {...x, cat: newCat} : x));
+                                fetch(`/api/finances/${t.id}`, {
+                                  method:'PATCH', headers:{'Content-Type':'application/json'},
+                                  body: JSON.stringify({category: newCat})
+                                }).catch(()=>{});
+                              }}
+                              style={{fontSize:10,padding:'2px 4px',height:22,width:116,
+                                background:'var(--surface-2)',border:'1px solid var(--line)',
+                                borderRadius:'var(--r)',color:FIN_CAT_COLOR[nc]||'var(--ink-3)',
+                                cursor:'pointer',fontFamily:'var(--font-mono)'}}
+                            >
+                              {FIN_CAT_NAMES.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                          : <span style={{fontSize:10,color:'var(--ink-4)',fontFamily:'var(--font-mono)'}}>
+                              {t.amount > 0 ? 'income' : normFinCat(t.cat)}
+                            </span>
+                        }
+                        <span className="amount" style={{color:t.amount>0?"var(--accent-2)":"var(--ink)"}}>
+                          {t.amount>0?"+":""}{fmtMoney(Math.abs(t.amount))}
+                        </span>
+                        <span style={{cursor:"pointer",color:"var(--ink-4)",padding:"0 2px",lineHeight:1}} title="Remove"
+                          onClick={async()=>{
+                            if (t.source === 'sheet') {
+                              if (t.sheet_tab == null || t.sheet_row == null || t.sheet_col == null) return;
+                              const qs = new URLSearchParams({tab: t.sheet_tab, row: t.sheet_row, col: t.sheet_col});
+                              const res = await fetch(`/api/finances/sheet?${qs}`,{method:"DELETE"});
+                              if (!res.ok) { alert("Could not delete from Google Sheet — check OAuth scope."); return; }
+                            } else {
+                              await fetch(`/api/finances/${t.id}`,{method:"DELETE"});
+                            }
+                            delete catOverrides.current[t.id];
+                            loadFinances(month);
+                          }}>
+                          ×
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            });
+          })()}
           </div>
         </div>
         <div>
@@ -980,6 +1018,40 @@ const HealthCard = ({ cardProps = {} } = {}) => {
       d.setDate(d.getDate() - 1);
     }
     return count;
+  };
+
+  // Supplements tracked via the habit endpoint but rendered as standalone boxes
+  const SUPPLEMENTS = [
+    { id: 'Creatine', label: 'Creatine', sub: '5g daily',     color: 'var(--info)'     },
+    { id: 'Vitamins', label: 'Vitamins', sub: 'Multi · daily', color: 'var(--accent-2)' },
+  ];
+  const SUPPLEMENT_IDS = SUPPLEMENTS.map(s => s.id);
+
+  const calcSupplementStreak = (id) => {
+    const habits = (rawHealth && rawHealth.habits) || {};
+    const today = localDateStr(new Date());
+    let count = 0;
+    const d = new Date();
+    if (!(habits[today] || {})[id]) d.setDate(d.getDate() - 1);
+    while (true) {
+      const ds = localDateStr(d);
+      if (!(habits[ds] || {})[id]) break;
+      count++;
+      d.setDate(d.getDate() - 1);
+    }
+    return count;
+  };
+
+  const supplementWeek = (id) => {
+    const habits = (rawHealth && rawHealth.habits) || {};
+    const today = new Date();
+    const out = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today); d.setDate(today.getDate() - i);
+      const ds = localDateStr(d);
+      out.push({ ds, taken: !!(habits[ds] || {})[id], dow: d.toLocaleDateString('en-US', { weekday: 'narrow' }) });
+    }
+    return out;
   };
 
   const load = () => {
@@ -1455,30 +1527,88 @@ const HealthCard = ({ cardProps = {} } = {}) => {
         </div>
       )}
 
-      {/* ── Today's habits ── */}
-      {habitList.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          <div className="section-h" style={{ marginBottom: 7 }}>
-            <span>Today's Habits</span><span className="line" />
-            <span className="muted-2 mono" style={{ fontSize: 10 }}>
-              {Object.values(todayHabits).filter(Boolean).length}/{habitList.length} done
-            </span>
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-            {habitList.map(h => {
-              const done = !!todayHabits[h.id];
-              return (
-                <button key={h.id}
-                  className={'btn ' + (done ? 'primary' : 'ghost')}
-                  style={{ fontSize: 11, padding: '3px 10px', opacity: done ? 1 : 0.65 }}
-                  onClick={() => toggleHabit(h.id)}>
-                  {done ? '✓ ' : ''}{h.label}
-                </button>
-              );
-            })}
-          </div>
+      {/* ── Supplements ── */}
+      <div style={{ marginBottom: 12 }}>
+        <div className="section-h" style={{ marginBottom: 7 }}>
+          <span>Supplements · Today</span><span className="line" />
+          <span className="muted-2 mono" style={{ fontSize: 10 }}>
+            {SUPPLEMENTS.filter(s => todayHabits[s.id]).length}/{SUPPLEMENTS.length} taken
+          </span>
         </div>
-      )}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+          {SUPPLEMENTS.map(s => {
+            const taken = !!todayHabits[s.id];
+            const streak = calcSupplementStreak(s.id);
+            const week = supplementWeek(s.id);
+            return (
+              <div key={s.id} onClick={() => toggleHabit(s.id)} role="button" tabIndex={0}
+                onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && toggleHabit(s.id)}
+                style={{
+                  cursor: 'pointer', userSelect: 'none', padding: '8px 10px', borderRadius: 'var(--r)',
+                  border: '1px solid ' + (taken ? `color-mix(in oklch, ${s.color} 55%, var(--line))` : 'var(--line-soft)'),
+                  background: taken ? `color-mix(in oklch, ${s.color} 14%, var(--surface-2))` : 'var(--surface-2)',
+                  transition: 'background .15s, border-color .15s',
+                }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+                  <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: taken ? s.color : 'var(--ink-2)' }}>{s.label}</span>
+                  <span style={{
+                    width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                    border: '1.5px solid ' + (taken ? s.color : 'var(--ink-4)'),
+                    background: taken ? s.color : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {taken && <Icon name="check" size={11} stroke={3} style={{ color: 'var(--bg)' }} />}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                  <span className="muted-2 mono" style={{ fontSize: 9.5 }}>{s.sub}</span>
+                  <span className="mono" style={{ fontSize: 10.5, color: streak > 0 ? s.color : 'var(--ink-4)' }}>
+                    {streak}<span className="muted-2" style={{ fontSize: 9, marginLeft: 2 }}>d streak</span>
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: 2 }}>
+                  {week.map(({ ds, taken: dt }) => (
+                    <div key={ds} title={ds} style={{
+                      flex: 1, height: 5, borderRadius: 2,
+                      background: dt ? s.color : 'var(--surface-3)',
+                      opacity: dt ? 0.9 : 0.45,
+                    }} />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Today's habits ── */}
+      {habitList.filter(h => !SUPPLEMENT_IDS.includes(h.id)).length > 0 && (() => {
+        const visibleHabits = habitList.filter(h => !SUPPLEMENT_IDS.includes(h.id));
+        const doneCount = visibleHabits.filter(h => todayHabits[h.id]).length;
+        return (
+          <div style={{ marginBottom: 12 }}>
+            <div className="section-h" style={{ marginBottom: 7 }}>
+              <span>Today's Habits</span><span className="line" />
+              <span className="muted-2 mono" style={{ fontSize: 10 }}>
+                {doneCount}/{visibleHabits.length} done
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+              {visibleHabits.map(h => {
+                const done = !!todayHabits[h.id];
+                return (
+                  <button key={h.id}
+                    className={'btn ' + (done ? 'primary' : 'ghost')}
+                    style={{ fontSize: 11, padding: '3px 10px', opacity: done ? 1 : 0.65 }}
+                    onClick={() => toggleHabit(h.id)}>
+                    {done ? '✓ ' : ''}{h.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── 28-day workout grid ── */}
       <div className="section-h" style={{ marginBottom: 5 }}>
