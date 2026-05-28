@@ -95,7 +95,7 @@ const Card = ({ id, num, title, right, children, span = 6, hidden, bodyClass = "
       <div className="card" data-hidden={hidden ? "true" : undefined}
         data-collapsed={!dashboardMinimize && collapsed ? "true" : undefined} style={{ flex: 1 }}>
         <div className="card-head">
-          <div className="title"><span className="num">{num}</span>{title}</div>
+          <div className="title">{title}</div>
           <div className="right">
             {(!collapsed || dashboardMinimize) && right}
             <button className="icon-btn card-collapse-btn" onClick={toggle}
@@ -1812,8 +1812,6 @@ const PRACTICE_ROTATION = {
 const PracticeCard = ({ cardProps = {} } = {}) => {
   const inst = "piano";
   const [data, setData] = useState({ piano: null });
-  const [editNotes, setEditNotes] = useState(false);
-  const [notesVal, setNotesVal] = useState("");
   const [sessionMin, setSessionMin] = useState("");
   const [sessionNote, setSessionNote] = useState("");
 
@@ -1841,15 +1839,6 @@ const PracticeCard = ({ cardProps = {} } = {}) => {
   const todayPlan = upcomingPlans.find(p => p.offset === 0);
   const nextPlan = upcomingPlans.find(p => p.offset > 0) || upcomingPlans[0];
   const plannedWeekMin = schedule.reduce((s, p) => s + (p.minutes || 0), 0);
-
-  const saveNotes = async () => {
-    await fetch(`/api/practice/${inst}`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ last_lesson_notes: notesVal })
-    }).catch(() => {});
-    setData(d => ({ ...d, [inst]: { ...d[inst], last_lesson_notes: notesVal } }));
-    setEditNotes(false);
-  };
 
   const logSession = async (min, noteOverride = null) => {
     const m = parseInt(min || sessionMin);
@@ -1938,32 +1927,6 @@ const PracticeCard = ({ cardProps = {} } = {}) => {
             </div>
           ))}
         </div>
-      </div>
-
-      {/* ── Last lesson notes ── */}
-      <div style={{ marginBottom: 14 }}>
-        <div className="section-h" style={{ marginBottom: 6 }}>
-          <span>Last Lesson Notes</span><span className="line" />
-          <button className="btn ghost" style={{ fontSize: 10, padding: "2px 7px" }}
-            onClick={() => { setNotesVal(cur.last_lesson_notes || ""); setEditNotes(n => !n); }}>
-            {editNotes ? "cancel" : "edit"}
-          </button>
-        </div>
-        {editNotes ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            <textarea className="journal-text" value={notesVal} onChange={e => setNotesVal(e.target.value)}
-              style={{ minHeight: 90, fontSize: 12, resize: "vertical" }}
-              placeholder="Write or paste your lesson notes here — teacher feedback, things to work on, etc." />
-            <button className="btn primary" style={{ fontSize: 11, padding: "4px 12px", alignSelf: "flex-end" }}
-              onClick={saveNotes}>Save</button>
-          </div>
-        ) : (
-          <div style={{ background: "var(--surface-2)", border: "1px solid var(--line-soft)", borderRadius: "var(--r)", padding: "9px 11px" }}>
-            <div className="serif" style={{ fontSize: 12.5, color: cur.last_lesson_notes ? "var(--ink-2)" : "var(--ink-4)", whiteSpace: "pre-wrap", fontStyle: cur.last_lesson_notes ? "normal" : "italic" }}>
-              {cur.last_lesson_notes || "No lesson notes yet — click edit to add them."}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* ── Log a session ── */}
