@@ -389,6 +389,47 @@ const App = () => {
   const [now, setNow] = useStateApp(new Date());
   const [toasts, setToasts] = useStateApp([]);
   const [showSheet, setShowSheet] = useStateApp(false);
+  const [sheetDragY, setSheetDragY] = useStateApp(0);
+  const sheetTouchRef = React.useRef({startY:0, startT:0, lastY:0, dragging:false});
+  const sheetScrollRef = React.useRef(null);
+  const onSheetTouchStart = (e) => {
+    const t = e.touches[0];
+    const sc = sheetScrollRef.current;
+    // Only start a dismiss-drag when the scrollable content is at the top.
+    // Otherwise let the user scroll the sheet content normally.
+    const atTop = !sc || sc.scrollTop <= 0;
+    sheetTouchRef.current = {
+      startY: t.clientY, startT: Date.now(),
+      lastY: t.clientY, dragging: atTop,
+    };
+  };
+  const onSheetTouchMove = (e) => {
+    const st = sheetTouchRef.current;
+    if (!st.dragging) return;
+    const y = e.touches[0].clientY;
+    const dy = y - st.startY;
+    st.lastY = y;
+    if (dy > 0) {
+      setSheetDragY(dy);
+    } else {
+      setSheetDragY(0);
+    }
+  };
+  const onSheetTouchEnd = () => {
+    const st = sheetTouchRef.current;
+    if (!st.dragging) return;
+    const dy = st.lastY - st.startY;
+    const dt = Date.now() - st.startT;
+    const velocity = dy / Math.max(dt, 1); // px/ms
+    if (dy > 100 || velocity > 0.6) {
+      setShowSheet(false);
+    }
+    setSheetDragY(0);
+    sheetTouchRef.current.dragging = false;
+  };
+  useEffectApp(() => {
+    if (!showSheet) setSheetDragY(0);
+  }, [showSheet]);
   const [needsOnboarding, setNeedsOnboarding] = useStateApp(null);
   const [showSettings, setShowSettings] = useStateApp(false);
   const [userName, setUserName] = useStateApp(() => localStorage.getItem('mc_name') || 'Parker');
@@ -656,8 +697,26 @@ const App = () => {
       {/* Mobile bottom sheet */}
       {showSheet && (
         <div className="sheet-overlay" onClick={() => setShowSheet(false)}>
-          <div className="sheet" onClick={e => e.stopPropagation()}>
-            <div className="sheet-handle"/>
+          <div className="sheet" onClick={e => e.stopPropagation()}
+            ref={sheetScrollRef}
+            onTouchStart={onSheetTouchStart}
+            onTouchMove={onSheetTouchMove}
+            onTouchEnd={onSheetTouchEnd}
+            onTouchCancel={onSheetTouchEnd}
+            style={{
+              transform: sheetDragY ? `translateY(${sheetDragY}px)` : undefined,
+              transition: sheetDragY ? 'none' : 'transform .2s cubic-bezier(.32,.72,0,1)',
+            }}>
+            <div style={{position:'sticky',top:0,zIndex:2,background:'var(--bg-2)',
+                         margin:'-12px -16px 0',padding:'10px 12px 6px',
+                         display:'flex',alignItems:'center',gap:8}}>
+              <div className="sheet-handle" style={{margin:'0 auto',flex:'0 0 auto'}}/>
+              <button className="btn ghost" aria-label="Close"
+                onClick={() => setShowSheet(false)}
+                style={{position:'absolute',right:10,top:6,padding:'4px 10px',fontSize:16,lineHeight:1}}>
+                ✕
+              </button>
+            </div>
             <div className="sheet-section-label">Go to</div>
             <div className="sheet-nav-grid">
               {SIDEBAR_NAV.map(n => (
