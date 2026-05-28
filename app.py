@@ -2667,7 +2667,20 @@ def get_health():
             local_section = data.get(section, {})
             if not isinstance(local_section, dict):
                 local_section = {}
-            data[section] = {**local_section, **sheet_section}
+            if section in ("habits", "calories"):
+                # Deep merge per-date so per-key values present only in local
+                # (e.g., Creatine, Vitamins) aren't wiped when the Sheet returns
+                # a partial row for the same date. Sheet still wins on overlap.
+                merged = dict(local_section)
+                for date_key, sheet_val in sheet_section.items():
+                    local_val = merged.get(date_key)
+                    if isinstance(local_val, dict) and isinstance(sheet_val, dict):
+                        merged[date_key] = {**local_val, **sheet_val}
+                    else:
+                        merged[date_key] = sheet_val
+                data[section] = merged
+            else:
+                data[section] = {**local_section, **sheet_section}
 
     # Build weight_log: sorted list of {date, weight} objects
     weight_dict = data.get("weight", {})
@@ -2797,6 +2810,18 @@ def post_health_habit():
     habit_name = d["habit"]
     new_val = not day.get(habit_name, False)
     day[habit_name] = new_val
+
+    # Register the habit in habit_list if it isn't there yet, so the Sheet
+    # round-trip works (_health_label_to_habit_id maps Sheet column headers
+    # back to habit ids via habit_list). Without this, Sheet writes succeed
+    # but reads drop the column, breaking persistence on previous days.
+    habit_list = health.setdefault("habit_list", [])
+    if not isinstance(habit_list, list):
+        habit_list = []
+        health["habit_list"] = habit_list
+    if not any(isinstance(h, dict) and h.get("id") == habit_name for h in habit_list):
+        habit_list.append({"id": habit_name, "label": habit_name})
+
     _save(HEALTH_FILE, health)
     _log("health", "habit", f"{habit_name} {'✓' if new_val else '✗'}")
     _health_sheet_update_daily(date, {_health_habit_label(habit_name): new_val})
