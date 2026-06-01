@@ -402,6 +402,34 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
     setSubs(s => s.filter(x => x.id !== sid));
   };
 
+  const [rolling, setRolling] = useState(false);
+  const rolloverMonth = async () => {
+    const [my, mm] = month.split('-').map(Number);
+    const nextLabel = MONTH_NAMES[mm % 12] + ' ' + (mm === 12 ? my + 1 : my);
+    if (!confirm(`Create the ${nextLabel} sheet? Your budget, income and GLS payments carry over; one-off transactions start empty.`)) return;
+    setRolling(true);
+    try {
+      const res = await fetch('/api/finances/rollover/month', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ month }) });
+      const body = await res.json().catch(()=>({}));
+      if (!res.ok) { alert(body.error || `Rollover failed (${res.status})`); return; }
+      if (body.month) setMonth(body.month);
+      alert(`Created the ${body.tab} sheet.`);
+    } finally { setRolling(false); }
+  };
+  const rolloverYear = async () => {
+    const yr = Number(month.split('-')[0]) + 1;
+    if (!confirm(`Create a new ${yr} finances file? A fresh spreadsheet with 12 month tabs is generated from this month's template for you to fill out.`)) return;
+    setRolling(true);
+    try {
+      const res = await fetch('/api/finances/rollover/year', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ month }) });
+      const body = await res.json().catch(()=>({}));
+      if (!res.ok) { alert(body.error || `Year rollover failed (${res.status})`); return; }
+      if (body.url && confirm(`Created "Finances ${body.year}". Open it now?`)) window.open(body.url, '_blank');
+    } finally { setRolling(false); }
+  };
+
   const totalIn  = budget ? budget.income  : txns.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount, 0);
   const totalEx  = budget ? budget.expense : txns.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount), 0);
   const net = totalIn - totalEx;
@@ -438,6 +466,8 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
           <button className="btn" style={{padding:'4px 8px'}} onClick={()=>changeMonth(-1)}>‹</button>
           <button className="btn" style={{padding:'4px 8px'}} onClick={()=>changeMonth(1)}>›</button>
         </div>
+        <button className="btn" disabled={rolling} onClick={rolloverMonth} title="Create next month's sheet from this one"><Icon name="file" size={13}/>New month</button>
+        <button className="btn" disabled={rolling} onClick={rolloverYear} title="Create a new year's finances file to fill out"><Icon name="calendar" size={13}/>New year</button>
         <button className="btn primary" onClick={() => setShowAdd(s=>!s)}><Icon name="plus" size={13}/>Add expense</button>
       </>}
     >

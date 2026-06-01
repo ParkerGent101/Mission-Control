@@ -65,6 +65,9 @@ BRIEF_FILE       = DATA_DIR / "brief.json"
 DB_PATH          = DATA_DIR / "mission_control.db"
 FINANCE_SHEET_ID = os.environ.get("FINANCE_SHEET_ID", "")
 HEALTH_SHEET_ID  = os.environ.get("HEALTH_SHEET_ID", "")
+# Email to share rollover-generated finance files with (so Parker, not just the
+# Cloud Run service account, can open them). Optional.
+FINANCE_OWNER_EMAIL = os.environ.get("FINANCE_OWNER_EMAIL", "")
 
 GCAL_SCOPES    = ['https://www.googleapis.com/auth/calendar.events']
 GCAL_CREDS_FILE = DATA_DIR / "credentials.json"
@@ -869,6 +872,107 @@ def finance_months():
     finances = _load(FINANCE_FILE)
     months = sorted({t["date"][:7] for t in finances if t.get("date")}, reverse=True)
     return jsonify(months)
+
+@app.route("/api/finances/rollover/month", methods=["POST"])
+def rollover_month():
+    """Duplicate a month's tab into the next month, keeping the budget, income and
+    GLS payments the same and clearing only the one-off transaction tables.
+    Body: {"month": "YYYY-MM"} — the source month (defaults to current)."""
+    if not FINANCE_SHEET_ID:
+        return jsonify({"error": "No finance sheet configured"}), 400
+    d = request.json or {}
+    src_month = d.get("month") or datetime.now().strftime("%Y-%m")
+    try:
+        y, m = int(src_month[:4]), int(src_month[5:7])
+    except Exception:
+        return jsonify({"error": "month must be YYYY-MM"}), 400
+    src_tab = MONTH_NAMES_FULL[m - 1]
+    nm, ny = (1, y + 1) if m == 12 else (m + 1, y)
+    dst_tab = MONTH_NAMES_FULL[nm - 1]
+    try:
+        svc = _sheets_svc()
+        if _sheet_id_by_name(svc, FINANCE_SHEET_ID, dst_tab) is not None:
+            return jsonify({"error": f"A '{dst_tab}' tab already exists in your sheet."}), 409
+        src_id = _sheet_id_by_name(svc, FINANCE_SHEET_ID, src_tab)
+        if src_id is None:
+            return jsonify({"error": f"No '{src_tab}' tab found to roll over from."}), 404
+        svc.spreadsheets().batchUpdate(
+            spreadsheetId=FINANCE_SHEET_ID,
+            body={"requests": [{"duplicateSheet": {
+                "sourceSheetId": src_id,
+                "insertSheetIndex": 0,
+                "newSheetName": dst_tab,
+            }}]}
+        ).execute()
+        _clear_detail_tables(svc, FINANCE_SHEET_ID, dst_tab)
+        return jsonify({"ok": True, "tab": dst_tab, "month": f"{ny}-{str(nm).zfill(2)}"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/finances/rollover/year", methods=["POST"])
+def rollover_year():
+    """Create a fresh spreadsheet for the next year, pre-filled with 12 month tabs
+    cloned from the current month template (budget + income + GLS payments kept,
+    transactions cleared) — a new file to fill out for the year.
+    Body: {"month": "YYYY-MM"} — the template month (defaults to current)."""
+    if not FINANCE_SHEET_ID:
+        return jsonify({"error": "No finance sheet configured"}), 400
+    d = request.json or {}
+    src_month = d.get("month") or datetime.now().strftime("%Y-%m")
+    try:
+        y, m = int(src_month[:4]), int(src_month[5:7])
+    except Exception:
+        return jsonify({"error": "month must be YYYY-MM"}), 400
+    new_year = y + 1
+    tmpl_tab = MONTH_NAMES_FULL[m - 1]
+    try:
+        svc = _sheets_svc()
+        tmpl_id = _sheet_id_by_name(svc, FINANCE_SHEET_ID, tmpl_tab)
+        if tmpl_id is None:
+            return jsonify({"error": f"No '{tmpl_tab}' tab to use as the year template."}), 404
+        created = svc.spreadsheets().create(body={
+            "properties": {"title": f"Finances {new_year}"}
+        }, fields="spreadsheetId,sheets.properties").execute()
+        new_id = created["spreadsheetId"]
+        default_sheet_id = created["sheets"][0]["properties"]["sheetId"]
+        requests = []
+        for mn in MONTH_NAMES_FULL:
+            copied = svc.spreadsheets().sheets().copyTo(
+                spreadsheetId=FINANCE_SHEET_ID, sheetId=tmpl_id,
+                body={"destinationSpreadsheetId": new_id}
+            ).execute()
+            requests.append({"updateSheetProperties": {
+                "properties": {"sheetId": copied["sheetId"], "title": mn},
+                "fields": "title",
+            }})
+        # Remove the empty default sheet that create() generated.
+        requests.append({"deleteSheet": {"sheetId": default_sheet_id}})
+        svc.spreadsheets().batchUpdate(spreadsheetId=new_id, body={"requests": requests}).execute()
+        for mn in MONTH_NAMES_FULL:
+            _clear_detail_tables(svc, new_id, mn)
+        # The new file is owned by the ADC identity (service account on Cloud Run);
+        # best-effort share with Parker so he can open it.
+        shared_with = None
+        if FINANCE_OWNER_EMAIL:
+            try:
+                import google.auth
+                from googleapiclient.discovery import build
+                dcreds, _ = google.auth.default(scopes=['https://www.googleapis.com/auth/drive'])
+                drive = build('drive', 'v3', credentials=dcreds)
+                drive.permissions().create(
+                    fileId=new_id, sendNotificationEmail=False,
+                    body={'type': 'user', 'role': 'writer', 'emailAddress': FINANCE_OWNER_EMAIL},
+                ).execute()
+                shared_with = FINANCE_OWNER_EMAIL
+            except Exception:
+                pass
+        return jsonify({
+            "ok": True, "year": new_year, "spreadsheet_id": new_id,
+            "url": f"https://docs.google.com/spreadsheets/d/{new_id}/edit",
+            "shared_with": shared_with,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/reminders", methods=["GET"])
 def get_reminders():
@@ -2121,6 +2225,47 @@ def _format_short_date(iso_date):
         return f"{d.day}-{d.strftime('%b')}"
     except Exception:
         return iso_date
+
+MONTH_NAMES_FULL = ['January','February','March','April','May','June',
+                    'July','August','September','October','November','December']
+
+def _sheet_id_by_name(svc, spreadsheet_id, title):
+    """Return the numeric sheetId of the tab named `title`, or None."""
+    meta = svc.spreadsheets().get(spreadsheetId=spreadsheet_id, fields='sheets.properties').execute()
+    for s in meta.get('sheets', []):
+        if s['properties']['title'].strip().lower() == str(title).strip().lower():
+            return s['properties']['sheetId']
+    return None
+
+def _clear_detail_tables(svc, spreadsheet_id, tab):
+    """Clear the variable transaction rows (Gas/Fun/Grocery) in a month tab while
+    leaving the budget tracker, income and GLS payments intact. Used after a
+    rollover so the new month starts with the same recurring finances but no
+    carried-over one-off transactions."""
+    rows = svc.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id, range=tab
+    ).execute().get('values', [])
+    if not rows:
+        return
+    max_cols = max((len(r) for r in rows), default=1)
+    padded = [r + [''] * (max_cols - len(r)) for r in rows]
+    clears = []
+    for cat in DETAIL_TABLE_KEYWORDS:
+        pos = _find_detail_table(rows, cat)
+        if not pos:
+            continue
+        hr, hc = pos
+        for ri in range(hr + 2, len(padded)):
+            c1 = str(padded[ri][hc]).strip()     if len(padded[ri]) > hc     else ''
+            c2 = str(padded[ri][hc + 1]).strip() if len(padded[ri]) > hc + 1 else ''
+            if 'total' in (c1 + c2).lower():
+                break
+            if c1 or c2:
+                clears.append(f"'{tab}'!{_col_letter(hc)}{ri + 1}:{_col_letter(hc + 1)}{ri + 1}")
+    if clears:
+        svc.spreadsheets().values().batchClear(
+            spreadsheetId=spreadsheet_id, body={'ranges': clears}
+        ).execute()
 
 def _find_budget_section_next_row(rows, canon_target):
     """Find the next insertion row inside a budget-tracker section matching canon_target.
