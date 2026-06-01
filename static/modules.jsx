@@ -2974,6 +2974,17 @@ const RecurringTasksCard = ({ cardProps = {} } = {}) => {
     await fetch(`/api/recurring/${id}`, { method: 'DELETE' }).catch(() => {});
   };
 
+  const resetScope = async (scope) => {
+    const label = scope === 'week' ? 'week' : 'month';
+    if (!confirm(`Start a new ${label}? Completed ${scope === 'week' ? 'weekly' : 'monthly'} routines will reset to do-again.`)) return;
+    const res = await fetch('/api/recurring/reset', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope }),
+    }).then(r => r.json()).catch(() => null);
+    load();
+    if (res && window.__toast) window.__toast(`New ${label} — ${res.cleared} routine${res.cleared === 1 ? '' : 's'} reset`);
+  };
+
   const dueCount = items.filter(i => i.due).length;
 
   const renderColumn = (freq) => {
@@ -3038,9 +3049,13 @@ const RecurringTasksCard = ({ cardProps = {} } = {}) => {
       span={cardProps.span || 12}
       onDashboardMinimize={cardProps.onDashboardMinimize}
       right={
-        <span className="mono muted-2" style={{ fontSize: 11 }}>
-          {loading ? 'loading…' : `${dueCount} due`}
-        </span>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button className="btn" style={{ padding: '4px 8px' }} onClick={() => resetScope('week')} title="Reset weekly (+ daily) routines">New week</button>
+          <button className="btn" style={{ padding: '4px 8px' }} onClick={() => resetScope('month')} title="Reset monthly, weekly & daily routines">New month</button>
+          <span className="mono muted-2" style={{ fontSize: 11 }}>
+            {loading ? 'loading…' : `${dueCount} due`}
+          </span>
+        </div>
       }
       bodyClass="flush"
     >

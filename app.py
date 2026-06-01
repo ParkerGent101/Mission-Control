@@ -720,6 +720,29 @@ def undo_recurring(rid):
             return jsonify({"ok": True})
     return jsonify({"error": "not found"}), 404
 
+@app.route("/api/recurring/reset", methods=["POST"])
+def reset_recurring():
+    """Start a new week or month: clear the completed routines in scope so they
+    become due again. Daily routines already reset on their own each day (same as
+    the health habits), so 'week' covers daily+weekly and 'month' covers all three.
+    Body: {"scope": "week"|"month"}."""
+    scope = (request.json or {}).get("scope", "")
+    freqs = {
+        "week":  {"daily", "weekly"},
+        "month": {"daily", "weekly", "monthly"},
+    }.get(scope)
+    if not freqs:
+        return jsonify({"error": "scope must be 'week' or 'month'"}), 400
+    items = _load(RECURRING_FILE, [])
+    cleared = 0
+    for it in items:
+        if it.get("frequency") in freqs and it.get("last_completed"):
+            it["last_completed"] = None
+            cleared += 1
+    _save(RECURRING_FILE, items)
+    _log("recurring", "reset", scope, str(cleared))
+    return jsonify({"ok": True, "cleared": cleared})
+
 @app.route("/api/recurring/<int:rid>", methods=["DELETE"])
 def delete_recurring(rid):
     items = _load(RECURRING_FILE, [])
