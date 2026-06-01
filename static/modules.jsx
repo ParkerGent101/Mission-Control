@@ -647,6 +647,8 @@ const BandCard = ({ cardProps = {} } = {}) => {
   const [editContactId, setEditContactId] = useState(null);
   const [editContact, setEditContact] = useState({});
   const [newShow, setNewShow] = useState({date:'',venue:'',city:'Fayetteville, AR',tickets:'',notes:''});
+  const [editShowIdx, setEditShowIdx] = useState(null);
+  const [editShow, setEditShow] = useState({date:'',venue:'',city:'',tickets:'',notes:''});
 
   const loadShows = () => {
     return fetch('/api/shows').then(r=>r.json()).then(data => {
@@ -657,7 +659,7 @@ const BandCard = ({ cardProps = {} } = {}) => {
         .filter(s => new Date(s.date+'T12:00:00') >= today)
         .sort((a,b) => new Date(a.date)-new Date(b.date));
       setGigs(upcoming.map(s => ({
-        venue: s.venue, city: s.city, tickets: s.tickets, rawDate: s.date, originalIdx: s.originalIdx,
+        venue: s.venue, city: s.city, tickets: s.tickets, event: s.event, rawDate: s.date, originalIdx: s.originalIdx,
         date: new Date(s.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}),
         days: Math.round((new Date(s.date+'T12:00:00')-today)/86400000),
         status: 'confirmed', notes: s.notes
@@ -709,6 +711,26 @@ const BandCard = ({ cardProps = {} } = {}) => {
     }
     setNewShow({date:'',venue:'',city:'Fayetteville, AR',tickets:'',notes:''});
     setShowAddShow(false);
+    await loadShows();
+    if (window.__toast) window.__toast(data.message);
+  };
+
+  const startEditShow = (g) => {
+    setEditShowIdx(g.originalIdx);
+    setEditShow({date:g.rawDate||'', venue:g.venue||'', city:g.city||'', tickets:g.tickets||'', notes:g.notes||''});
+  };
+
+  const saveEditShow = async () => {
+    if (editShowIdx == null) return;
+    setPushing(true);
+    const res = await fetch(`/api/shows/${editShowIdx}`, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(editShow)});
+    const data = await res.json().catch(()=>({message:'Edit show failed'}));
+    setPushing(false);
+    if (!res.ok) {
+      if (window.__toast) window.__toast(data.message || data.error || 'Edit show failed');
+      return;
+    }
+    setEditShowIdx(null);
     await loadShows();
     if (window.__toast) window.__toast(data.message);
   };
@@ -781,12 +803,32 @@ const BandCard = ({ cardProps = {} } = {}) => {
 
       {/* ── Shows tab ── */}
       {bandTab==='shows' && <>
+      {editShowIdx != null && (
+        <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:10,padding:'10px',background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid color-mix(in oklch,var(--violet) 30%,var(--line))'}}>
+          <div className="muted-2 mono" style={{fontSize:10.5,letterSpacing:'.06em'}}>EDIT SHOW</div>
+          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+            <input className="input" type="date" value={editShow.date} onChange={e=>setEditShow(s=>({...s,date:e.target.value}))} style={{width:140,fontSize:12}}/>
+            <input className="input" placeholder="Venue name" value={editShow.venue} onChange={e=>setEditShow(s=>({...s,venue:e.target.value}))} style={{flex:1,minWidth:120,fontSize:12}}/>
+          </div>
+          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+            <input className="input" placeholder="City, State" value={editShow.city} onChange={e=>setEditShow(s=>({...s,city:e.target.value}))} style={{flex:1,fontSize:12}}/>
+            <input className="input" placeholder="Notes" value={editShow.notes} onChange={e=>setEditShow(s=>({...s,notes:e.target.value}))} style={{flex:1,fontSize:12}}/>
+          </div>
+          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+            <input className="input" type="url" placeholder="Tickets URL (optional)" value={editShow.tickets} onChange={e=>setEditShow(s=>({...s,tickets:e.target.value}))} style={{flex:1,fontSize:12}}/>
+          </div>
+          <div style={{display:'flex',gap:6,justifyContent:'flex-end'}}>
+            <button className="btn primary" onClick={saveEditShow} disabled={pushing} style={{fontSize:11}}>{pushing?'saving…':'Save show'}</button>
+            <button className="btn ghost" onClick={()=>setEditShowIdx(null)} style={{fontSize:11}}>✕</button>
+          </div>
+        </div>
+      )}
       <div className="section-h"><span>Next Show</span><span className="line"/></div>
       {nextGig ? (
         <div style={{
           background:"linear-gradient(135deg,color-mix(in oklch,var(--violet) 14%,var(--surface-2)),var(--surface-2))",
           border:"1px solid color-mix(in oklch,var(--violet) 30%,var(--line))",
-          borderRadius:"var(--r)",padding:10,display:"grid",gridTemplateColumns:"1fr auto auto",gap:8,alignItems:"center",marginBottom:8
+          borderRadius:"var(--r)",padding:10,display:"grid",gridTemplateColumns:"1fr auto auto auto",gap:8,alignItems:"center",marginBottom:8
         }}>
           <div>
             <div className="serif" style={{fontSize:17,lineHeight:1.15}}>{nextGig.venue}</div>
@@ -797,6 +839,8 @@ const BandCard = ({ cardProps = {} } = {}) => {
             <div className="mono" style={{fontSize:26,fontWeight:500}}>{Math.max(0,nextGig.days)}</div>
             <div className="muted-2 mono" style={{fontSize:10,letterSpacing:".08em"}}>DAYS</div>
           </div>
+          <button onClick={()=>startEditShow(nextGig)} title="Edit show" className="btn ghost"
+            style={{fontSize:10.5,padding:'3px 8px'}}>edit</button>
           <button onClick={()=>removeShow(nextGig)} title="Remove show"
             style={{background:'transparent',border:'none',cursor:'pointer',color:'var(--ink-4)',padding:'4px',display:'flex',alignItems:'center',borderRadius:'var(--r-sm)'}}>
             <Icon name="x" size={14}/>
@@ -807,9 +851,10 @@ const BandCard = ({ cardProps = {} } = {}) => {
       )}
 
       {gigs.slice(1,4).map((g,i) => (
-        <div key={i} style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:6,padding:"5px 0",borderBottom:"1px solid var(--line-soft)",alignItems:"center"}}>
+        <div key={i} style={{display:"grid",gridTemplateColumns:"1fr auto auto auto",gap:6,padding:"5px 0",borderBottom:"1px solid var(--line-soft)",alignItems:"center"}}>
           <div><div style={{fontSize:12.5}}>{g.venue}</div><div className="muted mono" style={{fontSize:10.5}}>{g.city} · {g.date}{g.tickets && <> · <a href={g.tickets} target="_blank" rel="noopener noreferrer" style={{color:'var(--violet)',textDecoration:'none'}}>tickets</a></>}</div></div>
           <span className="tag mint">{g.status}</span>
+          <button onClick={()=>startEditShow(g)} title="Edit show" className="btn ghost" style={{fontSize:10,padding:'2px 6px'}}>edit</button>
           <button onClick={()=>removeShow(g)} title="Remove show"
             style={{background:'transparent',border:'none',cursor:'pointer',color:'var(--ink-4)',padding:'2px',display:'flex',alignItems:'center',borderRadius:'var(--r-sm)'}}>
             <Icon name="x" size={12}/>

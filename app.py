@@ -250,6 +250,19 @@ def tool_add_show(date, event, venue, city, tickets="", notes=""):
     )
     return f"Show added: {event} — {venue}, {city} on {date}. {push_result}"
 
+def tool_edit_show(index: int, fields: dict):
+    shows = _load(SHOWS_FILE)
+    if not (0 <= index < len(shows)):
+        return f"No show at index {index}."
+    allowed = {"date", "event", "venue", "city", "tickets", "notes"}
+    for k, v in fields.items():
+        if k in allowed:
+            shows[index][k] = v
+    _save(SHOWS_FILE, shows)
+    s = shows[index]
+    push_result = tool_push_site(f"Edit show: {s.get('event','')} at {s.get('venue','')}")
+    return f"Show updated: {s.get('event','')} — {s.get('venue','')}, {s.get('city','')} on {s.get('date','')}. {push_result}"
+
 def tool_remove_show(index: int):
     shows = _load(SHOWS_FILE)
     if 0 <= index < len(shows):
@@ -587,6 +600,15 @@ def post_show():
     if not d.get("event"):
         return jsonify({"error": "event field is required"}), 400
     message = tool_add_show(d["date"], d["event"], d["venue"], d["city"], d.get("tickets",""), d.get("notes",""))
+    status = 502 if "Push failed:" in message else 200
+    return jsonify({"message": message, "ok": status == 200}), status
+
+@app.route("/api/shows/<int:idx>", methods=["PUT"])
+def put_show(idx):
+    d = request.json or {}
+    message = tool_edit_show(idx, d)
+    if message.startswith("No show"):
+        return jsonify({"message": message, "ok": False}), 404
     status = 502 if "Push failed:" in message else 200
     return jsonify({"message": message, "ok": status == 200}), status
 
