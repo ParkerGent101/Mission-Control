@@ -2,7 +2,7 @@ import os
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from pathlib import Path
 import json
 import sqlite3
@@ -51,6 +51,7 @@ VIDEOS_FILE      = BAND_DIR / "videos.json" if BAND_DIR.exists() else DATA_DIR /
 FINANCE_FILE     = DATA_DIR / "finances.json"
 SUBS_FILE        = DATA_DIR / "subscriptions.json"
 TASKS_FILE       = DATA_DIR / "tasks.json"
+RECURRING_FILE   = DATA_DIR / "recurring_tasks.json"
 REMINDERS_FILE   = DATA_DIR / "reminders.json"
 SAVINGS_FILE     = DATA_DIR / "savings.json"
 CONTENT_FILE     = DATA_DIR / "band_content.json"
@@ -623,6 +624,86 @@ def post_task():
 def done_task(task_id):
     return jsonify({"message": tool_complete_task(task_id)})
 
+# ── Recurring tasks (daily / weekly / monthly chores) ─────────────────────────
+
+RECURRING_FREQS = ("daily", "weekly", "monthly")
+
+def _recurring_is_due(item, today=None):
+    today = today or date.today()
+    last = item.get("last_completed")
+    if not last:
+        return True
+    try:
+        last_d = date.fromisoformat(last)
+    except ValueError:
+        return True
+    freq = item.get("frequency", "weekly")
+    if freq == "daily":
+        return last_d < today
+    if freq == "weekly":
+        return (today - last_d).days >= 7
+    if freq == "monthly":
+        return (last_d.year, last_d.month) != (today.year, today.month)
+    return True
+
+@app.route("/api/recurring", methods=["GET"])
+def get_recurring():
+    items = _load(RECURRING_FILE, [])
+    today = date.today()
+    for it in items:
+        it["due"] = _recurring_is_due(it, today)
+    return jsonify(items)
+
+@app.route("/api/recurring", methods=["POST"])
+def post_recurring():
+    d = request.json or {}
+    title = (d.get("title") or "").strip()
+    freq = d.get("frequency", "weekly")
+    if not title or freq not in RECURRING_FREQS:
+        return jsonify({"error": "title and valid frequency required"}), 400
+    items = _load(RECURRING_FILE, [])
+    new = {
+        "id": (max((i.get("id", 0) for i in items), default=0) + 1),
+        "title": title,
+        "frequency": freq,
+        "last_completed": None,
+        "created": date.today().isoformat(),
+    }
+    items.append(new)
+    _save(RECURRING_FILE, items)
+    _log("recurring", "add", title, freq)
+    return jsonify(new)
+
+@app.route("/api/recurring/<int:rid>/done", methods=["POST"])
+def done_recurring(rid):
+    items = _load(RECURRING_FILE, [])
+    for it in items:
+        if it.get("id") == rid:
+            it["last_completed"] = date.today().isoformat()
+            _save(RECURRING_FILE, items)
+            _log("recurring", "complete", it.get("title", ""), it.get("frequency", ""))
+            return jsonify({"ok": True, "last_completed": it["last_completed"]})
+    return jsonify({"error": "not found"}), 404
+
+@app.route("/api/recurring/<int:rid>/undo", methods=["POST"])
+def undo_recurring(rid):
+    items = _load(RECURRING_FILE, [])
+    for it in items:
+        if it.get("id") == rid:
+            it["last_completed"] = None
+            _save(RECURRING_FILE, items)
+            return jsonify({"ok": True})
+    return jsonify({"error": "not found"}), 404
+
+@app.route("/api/recurring/<int:rid>", methods=["DELETE"])
+def delete_recurring(rid):
+    items = _load(RECURRING_FILE, [])
+    new_items = [i for i in items if i.get("id") != rid]
+    if len(new_items) == len(items):
+        return jsonify({"error": "not found"}), 404
+    _save(RECURRING_FILE, new_items)
+    return jsonify({"ok": True})
+
 @app.route("/api/finances", methods=["GET"])
 def get_finances():
     month = request.args.get("month")
@@ -984,7 +1065,7 @@ def data_reset():
     to_clear = [
         FINANCE_FILE, SUBS_FILE, SAVINGS_FILE, TASKS_FILE, WORK_FILE,
         REMINDERS_FILE, CONTENT_FILE, BAND_CONTACTS_FILE, AGENDA_FILE,
-        HEALTH_FILE, BRIEF_FILE,
+        HEALTH_FILE, BRIEF_FILE, RECURRING_FILE,
     ]
     for f in to_clear:
         p = Path(f)
@@ -2895,6 +2976,30 @@ def post_health_rehab():
     _log("health", "rehab", f"{key} {'✓' if done else '✗'}")
     return jsonify({"ok": True, "key": key, "done": done})
 
+@app.route("/api/health/core", methods=["POST"])
+def post_health_core():
+    """Record whether core training was done for a date. Body: {date?, done?}.
+    Tracked as part of the WORKOUT section, deliberately NOT a habit: it is stored under
+    a separate `core` map and written to a `Core` column on the Daily tab, but is never
+    added to habit_list — so it stays out of the habit grid/streaks. (`_health_sheet_read`
+    skips columns that don't map to a habit_list entry, so this never round-trips as a habit.)"""
+    d = request.json or {}
+    health = _load(HEALTH_FILE)
+    if not isinstance(health, dict):
+        health = {"habits": {}, "weight": {}, "calories": {}}
+    date = d.get("date", datetime.now().strftime("%Y-%m-%d"))
+    core = health.setdefault("core", {})
+    if "done" in d:
+        raw_done = d.get("done")
+        done = raw_done.strip().lower() in ("1", "true", "yes", "on") if isinstance(raw_done, str) else bool(raw_done)
+    else:
+        done = not bool(core.get(date, False))
+    core[date] = done
+    _save(HEALTH_FILE, health)
+    _log("health", "core", f"core {'✓' if done else '✗'}")
+    _health_sheet_update_daily(date, {"Core": done})
+    return jsonify({"ok": True, "done": done})
+
 @app.route("/api/health/config", methods=["POST"])
 def post_health_config():
     d = request.json or {}
@@ -2956,9 +3061,14 @@ def health_food_suggestions():
     """Distinct previously-logged foods with their most-recent macros + usage count.
 
     Powers the food-name autocomplete so repeat items (protein shakes, etc.) prefill numbers.
+    Names listed in food_hidden_suggestions are tagged hidden so the UI can suppress them
+    by default while keeping the original food_log entries intact (preserves history/totals).
+    Pass ?include_hidden=1 to include them in the response (used by the "show hidden" toggle).
     """
     health = _load(HEALTH_FILE)
     log = dict(health.get("food_log", {})) if isinstance(health, dict) else {}
+    hidden = set((health.get("food_hidden_suggestions") or []) if isinstance(health, dict) else [])
+    include_hidden = request.args.get("include_hidden") in ("1", "true", "yes")
     # Merge the Google Sheet "Food" tab (source of truth), same as /api/health, so
     # foods logged via the Sheet also become autocomplete suggestions.
     try:
@@ -2984,8 +3094,38 @@ def health_food_suggestions():
             })
             entry["count"] += 1
             agg[key] = entry
-    out = sorted(agg.values(), key=lambda x: (-x["count"], x["name"].lower()))
+    items = list(agg.values())
+    for entry in items:
+        entry["hidden"] = entry["name"].lower() in hidden
+    if not include_hidden:
+        items = [e for e in items if not e["hidden"]]
+    out = sorted(items, key=lambda x: (-x["count"], x["name"].lower()))
     return jsonify(out)
+
+@app.route("/api/health/food/hide_suggestion", methods=["POST"])
+def health_food_hide_suggestion():
+    """Add or remove a food name from the autocomplete-hidden list.
+
+    Body: { "name": "...", "hide": true|false }
+    The underlying food_log entries are not touched — only the suggestion dropdown.
+    """
+    d = request.json or {}
+    name = (d.get("name") or "").strip().lower()
+    if not name:
+        return jsonify({"ok": False, "error": "name required"}), 400
+    hide = bool(d.get("hide", True))
+    health = _load(HEALTH_FILE)
+    if not isinstance(health, dict):
+        health = {"habits": {}, "weight": {}, "calories": {}, "food_log": {}}
+    hidden = list(health.get("food_hidden_suggestions") or [])
+    hidden_set = {h.lower() for h in hidden}
+    if hide and name not in hidden_set:
+        hidden.append(name)
+    elif not hide and name in hidden_set:
+        hidden = [h for h in hidden if h.lower() != name]
+    health["food_hidden_suggestions"] = hidden
+    _save(HEALTH_FILE, health)
+    return jsonify({"ok": True, "hidden": hidden})
 
 @app.route("/api/health/food", methods=["DELETE"])
 def delete_health_food():

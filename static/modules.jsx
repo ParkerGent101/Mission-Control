@@ -646,7 +646,7 @@ const BandCard = ({ cardProps = {} } = {}) => {
   const [newContact, setNewContact] = useState({name:'',venue:'',city:'',type:'',phone:'',email:'',website:'',status:'not contacted',next_step:'',notes:''});
   const [editContactId, setEditContactId] = useState(null);
   const [editContact, setEditContact] = useState({});
-  const [newShow, setNewShow] = useState({date:'',venue:'',city:'Fayetteville, AR',notes:''});
+  const [newShow, setNewShow] = useState({date:'',venue:'',city:'Fayetteville, AR',tickets:'',notes:''});
 
   const loadShows = () => {
     return fetch('/api/shows').then(r=>r.json()).then(data => {
@@ -657,7 +657,7 @@ const BandCard = ({ cardProps = {} } = {}) => {
         .filter(s => new Date(s.date+'T12:00:00') >= today)
         .sort((a,b) => new Date(a.date)-new Date(b.date));
       setGigs(upcoming.map(s => ({
-        venue: s.venue, city: s.city, rawDate: s.date, originalIdx: s.originalIdx,
+        venue: s.venue, city: s.city, tickets: s.tickets, rawDate: s.date, originalIdx: s.originalIdx,
         date: new Date(s.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}),
         days: Math.round((new Date(s.date+'T12:00:00')-today)/86400000),
         status: 'confirmed', notes: s.notes
@@ -700,14 +700,14 @@ const BandCard = ({ cardProps = {} } = {}) => {
     const added = {...newShow};
     setPushing(true);
     const res = await fetch('/api/shows', {method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({date:added.date,event:'CUA Live',venue:added.venue,city:added.city,notes:added.notes})});
+      body:JSON.stringify({date:added.date,event:'CUA Live',venue:added.venue,city:added.city,tickets:added.tickets,notes:added.notes})});
     const data = await res.json().catch(()=>({message:'Add show failed'}));
     setPushing(false);
     if (!res.ok) {
       if (window.__toast) window.__toast(data.message || data.error || 'Add show failed');
       return;
     }
-    setNewShow({date:'',venue:'',city:'Fayetteville, AR',notes:''});
+    setNewShow({date:'',venue:'',city:'Fayetteville, AR',tickets:'',notes:''});
     setShowAddShow(false);
     await loadShows();
     if (window.__toast) window.__toast(data.message);
@@ -761,6 +761,9 @@ const BandCard = ({ cardProps = {} } = {}) => {
             <input className="input" placeholder="City, State" value={newShow.city} onChange={e=>setNewShow(s=>({...s,city:e.target.value}))} style={{flex:1,fontSize:12}}/>
             <input className="input" placeholder="Notes" value={newShow.notes} onChange={e=>setNewShow(s=>({...s,notes:e.target.value}))} style={{flex:1,fontSize:12}}/>
           </div>
+          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+            <input className="input" type="url" placeholder="Tickets URL (optional)" value={newShow.tickets} onChange={e=>setNewShow(s=>({...s,tickets:e.target.value}))} style={{flex:1,fontSize:12}}/>
+          </div>
           <div style={{display:'flex',gap:6,justifyContent:'flex-end'}}>
             <button className="btn primary" onClick={addShow} style={{fontSize:11}}>Add show</button>
             <button className="btn ghost" onClick={()=>setShowAddShow(false)} style={{fontSize:11}}>✕</button>
@@ -788,6 +791,7 @@ const BandCard = ({ cardProps = {} } = {}) => {
           <div>
             <div className="serif" style={{fontSize:17,lineHeight:1.15}}>{nextGig.venue}</div>
             <div className="muted mono" style={{fontSize:11}}>{nextGig.city} · {nextGig.date}</div>
+            {nextGig.tickets && <a href={nextGig.tickets} target="_blank" rel="noopener noreferrer" className="mono" style={{fontSize:11,color:'var(--violet)',textDecoration:'none'}}>🎟 Tickets</a>}
           </div>
           <div style={{textAlign:"right"}}>
             <div className="mono" style={{fontSize:26,fontWeight:500}}>{Math.max(0,nextGig.days)}</div>
@@ -804,7 +808,7 @@ const BandCard = ({ cardProps = {} } = {}) => {
 
       {gigs.slice(1,4).map((g,i) => (
         <div key={i} style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:6,padding:"5px 0",borderBottom:"1px solid var(--line-soft)",alignItems:"center"}}>
-          <div><div style={{fontSize:12.5}}>{g.venue}</div><div className="muted mono" style={{fontSize:10.5}}>{g.city} · {g.date}</div></div>
+          <div><div style={{fontSize:12.5}}>{g.venue}</div><div className="muted mono" style={{fontSize:10.5}}>{g.city} · {g.date}{g.tickets && <> · <a href={g.tickets} target="_blank" rel="noopener noreferrer" style={{color:'var(--violet)',textDecoration:'none'}}>tickets</a></>}</div></div>
           <span className="tag mint">{g.status}</span>
           <button onClick={()=>removeShow(g)} title="Remove show"
             style={{background:'transparent',border:'none',cursor:'pointer',color:'var(--ink-4)',padding:'2px',display:'flex',alignItems:'center',borderRadius:'var(--r-sm)'}}>
@@ -978,6 +982,7 @@ const HealthCard = ({ cardProps = {} } = {}) => {
     return localDateStr(d);
   })();
   const [rehabDone, setRehabDone]     = useState({});
+  const [coreDone, setCoreDone]       = useState(false);
   const [habitList, setHabitList]     = useState([]);
   const [todayHabits, setTodayHabits] = useState({});
   const [foodLog, setFoodLog]         = useState([]);
@@ -988,6 +993,7 @@ const HealthCard = ({ cardProps = {} } = {}) => {
   const [foodFat, setFoodFat]         = useState('');
   const [foodSug, setFoodSug]         = useState([]);   // previously-logged foods for autocomplete
   const [sugOpen, setSugOpen]         = useState(false);
+  const [sugShowHidden, setSugShowHidden] = useState(false);
   const [water, setWater]             = useState(0);   // oz of water today
   const [waterBottleOz, setWaterBottleOz] = useState(32);
   const [waterGoalOz, setWaterGoalOz]     = useState(128);
@@ -1055,7 +1061,7 @@ const HealthCard = ({ cardProps = {} } = {}) => {
   };
 
   const load = () => {
-    fetch('/api/health/food/suggestions').then(r => r.json()).then(d => setFoodSug(Array.isArray(d) ? d : [])).catch(() => {});
+    reloadSuggestions();
     fetch('/api/health').then(r => r.json()).then(data => {
       setRawHealth(data);
       const wlog = (data.weight_log || []).slice(-12);
@@ -1110,6 +1116,8 @@ const HealthCard = ({ cardProps = {} } = {}) => {
     setWater((rawHealth.water || {})[viewDate] || 0);
     // Elbow rehab: persisted per viewed day
     setRehabDone((rawHealth.rehab || {})[viewDate] || {});
+    // Core (workout section, not a habit): persisted per viewed day
+    setCoreDone(!!(rawHealth.core || {})[viewDate]);
   }, [rawHealth, viewDate]);
 
   useEffect(() => { load(); }, []);
@@ -1172,6 +1180,26 @@ const HealthCard = ({ cardProps = {} } = {}) => {
     setTimeout(load, 300);  // refresh raw data so subsequent ops see the new food
   };
 
+  const reloadSuggestions = (showHidden = sugShowHidden) => {
+    const qs = showHidden ? '?include_hidden=1' : '';
+    fetch('/api/health/food/suggestions' + qs).then(r => r.json())
+      .then(d => setFoodSug(Array.isArray(d) ? d : [])).catch(() => {});
+  };
+
+  const hideSuggestion = (name) => {
+    fetch('/api/health/food/hide_suggestion', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, hide: true }) })
+      .then(() => { window.__toast?.(`"${name}" hidden from search`, 'info'); reloadSuggestions(); })
+      .catch(() => {});
+  };
+
+  const unhideSuggestion = (name) => {
+    fetch('/api/health/food/hide_suggestion', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, hide: false }) })
+      .then(() => { window.__toast?.(`"${name}" restored`, 'success'); reloadSuggestions(true); })
+      .catch(() => {});
+  };
+
   const pickFood = (s) => {
     setFoodName(s.name);
     setFoodCal(s.calories ? String(s.calories) : '');
@@ -1225,6 +1253,14 @@ const HealthCard = ({ cardProps = {} } = {}) => {
     setRehabDone(p => ({ ...p, [key]: done }));
     await fetch('/api/health/rehab', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key, done, date: viewDate }) }).catch(() => {});
+    setTimeout(load, 300);
+  };
+
+  const toggleCore = async () => {
+    const done = !coreDone;
+    setCoreDone(done);
+    await fetch('/api/health/core', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ done, date: viewDate }) }).catch(() => {});
     setTimeout(load, 300);
   };
 
@@ -1302,7 +1338,79 @@ const HealthCard = ({ cardProps = {} } = {}) => {
           <span>Nutrition · Today</span><span className="line" />
         </div>
 
-        {/* Donut + calorie bar */}
+        {/* Search + add row sits ABOVE the donut/calorie display so the suggestions
+            dropdown opens over the chart area (which is OK to obscure briefly)
+            instead of over the calorie bar / food log below. */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10, position: 'relative', zIndex: 5 }}>
+          <div style={{ position: 'relative' }}>
+            <input className="input" placeholder="Search or add food…" value={foodName}
+              onChange={e => { setFoodName(e.target.value); setSugOpen(true); }}
+              onFocus={() => setSugOpen(true)}
+              onBlur={() => setTimeout(() => setSugOpen(false), 200)}
+              style={{ fontSize: 11, padding: '3px 6px', width: '100%' }} />
+            {sugOpen && (foodMatches.length > 0 || sugShowHidden) && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, marginTop: 2,
+                background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 6,
+                maxHeight: 220, overflowY: 'auto', boxShadow: '0 6px 18px rgba(0,0,0,.28)' }}>
+                {foodMatches.map((s, i) => (
+                  <div key={i}
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
+                      padding: '5px 8px', cursor: 'pointer', borderBottom: '1px solid var(--line-soft)',
+                      opacity: s.hidden ? 0.55 : 1 }}
+                    onMouseDown={e => { e.preventDefault(); pickFood(s); }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-3)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    <span style={{ fontSize: 11, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {s.name}
+                      {s.count > 1 && <span className="muted-2 mono" style={{ fontSize: 9, marginLeft: 5 }}>×{s.count}</span>}
+                      {s.hidden && <span className="muted-2 mono" style={{ fontSize: 9, marginLeft: 5 }}>hidden</span>}
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                      <span className="mono" style={{ fontSize: 9.5, color: 'var(--ink-4)', whiteSpace: 'nowrap' }}>{s.calories} kcal · P{s.protein} C{s.carbs} F{s.fat}</span>
+                      {s.hidden ? (
+                        <button className="btn ghost"
+                          title="Restore to search"
+                          onMouseDown={e => { e.preventDefault(); e.stopPropagation(); unhideSuggestion(s.name); }}
+                          style={{ padding: '1px 5px', fontSize: 10, lineHeight: 1 }}>↺</button>
+                      ) : (
+                        <button className="btn ghost"
+                          title="Hide from search (food log entries are kept)"
+                          onMouseDown={e => { e.preventDefault(); e.stopPropagation(); hideSuggestion(s.name); }}
+                          style={{ padding: '1px 5px', fontSize: 10, lineHeight: 1 }}>×</button>
+                      )}
+                    </span>
+                  </div>
+                ))}
+                <div onMouseDown={e => { e.preventDefault(); const next = !sugShowHidden; setSugShowHidden(next); reloadSuggestions(next); }}
+                  style={{ padding: '5px 8px', cursor: 'pointer', textAlign: 'center', background: 'var(--surface-1)' }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-3)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'var(--surface-1)'}>
+                  <span className="muted-2 mono" style={{ fontSize: 10 }}>
+                    {sugShowHidden ? '× hide hidden items' : '+ show hidden items'}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <input className="input" type="number" placeholder="kcal" value={foodCal}
+              onChange={e => setFoodCal(e.target.value)}
+              style={{ fontSize: 11, padding: '3px 6px', flex: '1 1 50px', minWidth: 0 }} />
+            <input className="input" type="number" placeholder="P(g)" value={foodProtein}
+              onChange={e => setFoodProtein(e.target.value)}
+              style={{ fontSize: 11, padding: '3px 6px', flex: '1 1 45px', minWidth: 0 }} />
+            <input className="input" type="number" placeholder="C(g)" value={foodCarbs}
+              onChange={e => setFoodCarbs(e.target.value)}
+              style={{ fontSize: 11, padding: '3px 6px', flex: '1 1 45px', minWidth: 0 }} />
+            <input className="input" type="number" placeholder="F(g)" value={foodFat}
+              onChange={e => setFoodFat(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && logFood()}
+              style={{ fontSize: 11, padding: '3px 6px', flex: '1 1 45px', minWidth: 0 }} />
+            <button className="btn ghost" style={{ padding: '3px 8px', fontSize: 11 }} onClick={logFood}>add</button>
+          </div>
+        </div>
+
+        {/* Donut + calorie bar (positioned BELOW the search row) */}
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 10 }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, flexShrink: 0 }}>
             <DonutChart data={macroData} size={80} />
@@ -1345,48 +1453,6 @@ const HealthCard = ({ cardProps = {} } = {}) => {
                 ))}
               </div>
             )}
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ position: 'relative' }}>
-            <input className="input" placeholder="Item name" value={foodName}
-              onChange={e => { setFoodName(e.target.value); setSugOpen(true); }}
-              onFocus={() => setSugOpen(true)}
-              onBlur={() => setTimeout(() => setSugOpen(false), 150)}
-              style={{ fontSize: 11, padding: '3px 6px', width: '100%' }} />
-            {sugOpen && foodMatches.length > 0 && (
-              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, marginTop: 2,
-                background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 6,
-                maxHeight: 180, overflowY: 'auto', boxShadow: '0 6px 18px rgba(0,0,0,.28)' }}>
-                {foodMatches.map((s, i) => (
-                  <div key={i} onMouseDown={e => { e.preventDefault(); pickFood(s); }}
-                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
-                      padding: '5px 8px', cursor: 'pointer', borderBottom: '1px solid var(--line-soft)' }}
-                    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-3)'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                    <span style={{ fontSize: 11, color: 'var(--ink)' }}>{s.name}</span>
-                    <span className="mono" style={{ fontSize: 9.5, color: 'var(--ink-4)', whiteSpace: 'nowrap' }}>{s.calories} kcal · P{s.protein} C{s.carbs} F{s.fat}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <div style={{ display: 'flex', gap: 4 }}>
-            <input className="input" type="number" placeholder="kcal" value={foodCal}
-              onChange={e => setFoodCal(e.target.value)}
-              style={{ fontSize: 11, padding: '3px 6px', flex: '1 1 50px', minWidth: 0 }} />
-            <input className="input" type="number" placeholder="P(g)" value={foodProtein}
-              onChange={e => setFoodProtein(e.target.value)}
-              style={{ fontSize: 11, padding: '3px 6px', flex: '1 1 45px', minWidth: 0 }} />
-            <input className="input" type="number" placeholder="C(g)" value={foodCarbs}
-              onChange={e => setFoodCarbs(e.target.value)}
-              style={{ fontSize: 11, padding: '3px 6px', flex: '1 1 45px', minWidth: 0 }} />
-            <input className="input" type="number" placeholder="F(g)" value={foodFat}
-              onChange={e => setFoodFat(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && logFood()}
-              style={{ fontSize: 11, padding: '3px 6px', flex: '1 1 45px', minWidth: 0 }} />
-            <button className="btn ghost" style={{ padding: '3px 8px', fontSize: 11 }} onClick={logFood}>add</button>
           </div>
         </div>
       </div>
@@ -1504,6 +1570,14 @@ const HealthCard = ({ cardProps = {} } = {}) => {
           {todayPlan.note && (
             <div className="muted-2 mono" style={{ fontSize: 10, marginTop: 5 }}>↳ {todayPlan.note}</div>
           )}
+          {/* Core tracking — part of the workout, intentionally NOT a habit */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line-soft)' }}>
+            <Checkbox checked={coreDone} onClick={toggleCore} />
+            <span style={{ fontSize: 11, textDecoration: coreDone ? 'line-through' : 'none', color: coreDone ? 'var(--ink-4)' : 'inherit' }}>
+              Core done today
+            </span>
+            <span className="muted-2 mono" style={{ fontSize: 9.5, marginLeft: 'auto' }}>aim 2–3×/wk</span>
+          </div>
         </div>
       )}
 
@@ -2766,8 +2840,157 @@ const TCPGCard = () => {
   );
 };
 
+// =========================================================
+// RECURRING TASKS — daily / weekly / monthly chores
+// Separate from the calendar. Cleared by checking a box; the
+// task reappears after its interval elapses (daily = next day,
+// weekly = 7 days, monthly = next calendar month).
+// =========================================================
+const RECURRING_FREQS = [
+  { id: "daily",   label: "Daily",   color: "var(--accent-2)" },
+  { id: "weekly",  label: "Weekly",  color: "var(--accent)"   },
+  { id: "monthly", label: "Monthly", color: "var(--violet)"   },
+];
+
+const RecurringTasksCard = ({ cardProps = {} } = {}) => {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [newTitle, setNewTitle] = useState("");
+  const [newFreq, setNewFreq] = useState("weekly");
+
+  const load = () => {
+    setLoading(true);
+    fetch('/api/recurring').then(r => r.json()).then(data => {
+      setItems(Array.isArray(data) ? data : []);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  };
+  useEffect(load, []);
+  useRefreshListener(load);
+
+  const addTask = async () => {
+    const title = newTitle.trim();
+    if (!title) return;
+    const res = await fetch('/api/recurring', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, frequency: newFreq }),
+    }).then(r => r.json()).catch(() => null);
+    if (res && res.id) {
+      setItems(xs => [...xs, { ...res, due: true }]);
+      setNewTitle("");
+      if (window.__toast) window.__toast(`${RECURRING_FREQS.find(f=>f.id===newFreq)?.label} task added`);
+    }
+  };
+
+  const markDone = async (id) => {
+    const today = new Date().toISOString().slice(0, 10);
+    setItems(xs => xs.map(x => x.id === id ? { ...x, last_completed: today, due: false } : x));
+    await fetch(`/api/recurring/${id}/done`, { method: 'POST' }).catch(() => {});
+  };
+
+  const undo = async (id) => {
+    setItems(xs => xs.map(x => x.id === id ? { ...x, last_completed: null, due: true } : x));
+    await fetch(`/api/recurring/${id}/undo`, { method: 'POST' }).catch(() => {});
+  };
+
+  const remove = async (id) => {
+    setItems(xs => xs.filter(x => x.id !== id));
+    await fetch(`/api/recurring/${id}`, { method: 'DELETE' }).catch(() => {});
+  };
+
+  const dueCount = items.filter(i => i.due).length;
+
+  const renderColumn = (freq) => {
+    const colItems = items.filter(i => i.frequency === freq.id);
+    const due = colItems.filter(i => i.due);
+    const done = colItems.filter(i => !i.due);
+    return (
+      <div key={freq.id} style={{ padding: "10px 14px", borderRight: "1px solid var(--line-soft)" }}>
+        <div className="row" style={{ justifyContent: "space-between", padding: "0 4px 6px" }}>
+          <span className="muted-2 mono" style={{ fontSize: 10.5, letterSpacing: ".08em", color: freq.color }}>
+            {freq.label.toUpperCase()}
+          </span>
+          <span className="mono muted-2" style={{ fontSize: 10.5 }}>
+            {due.length}{colItems.length ? `/${colItems.length}` : ''}
+          </span>
+        </div>
+
+        {colItems.length === 0 && (
+          <div className="muted-2 mono" style={{ fontSize: 11, padding: '8px 4px' }}>— none —</div>
+        )}
+
+        {due.map(it => (
+          <div key={it.id} style={{
+            display: 'grid', gridTemplateColumns: '22px 1fr auto', gap: 6,
+            alignItems: 'center', padding: '5px 4px'
+          }}>
+            <Checkbox checked={false} onClick={() => markDone(it.id)} />
+            <span style={{ fontSize: 12.5, lineHeight: 1.35 }}>{it.title}</span>
+            <button onClick={() => remove(it.id)} title="Remove"
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer',
+                color: 'var(--ink-4)', padding: '2px', display: 'flex', alignItems: 'center' }}>
+              <Icon name="x" size={12} />
+            </button>
+          </div>
+        ))}
+
+        {done.length > 0 && (
+          <>
+            {due.length > 0 && <div className="hairline" style={{ margin: '6px 0' }} />}
+            {done.map(it => (
+              <div key={it.id} style={{
+                display: 'grid', gridTemplateColumns: '22px 1fr auto', gap: 6,
+                alignItems: 'center', padding: '4px 4px', opacity: 0.55
+              }}>
+                <Checkbox checked={true} onClick={() => undo(it.id)} />
+                <span style={{ fontSize: 12, textDecoration: 'line-through', color: 'var(--ink-3)' }}>{it.title}</span>
+                <button onClick={() => remove(it.id)} title="Remove"
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer',
+                    color: 'var(--ink-4)', padding: '2px', display: 'flex', alignItems: 'center' }}>
+                  <Icon name="x" size={11} />
+                </button>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <Card id="recurring" num="12" title="Routines"
+      span={cardProps.span || 12}
+      onDashboardMinimize={cardProps.onDashboardMinimize}
+      right={
+        <span className="mono muted-2" style={{ fontSize: 11 }}>
+          {loading ? 'loading…' : `${dueCount} due`}
+        </span>
+      }
+      bodyClass="flush"
+    >
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)' }}>
+        {RECURRING_FREQS.map(renderColumn)}
+      </div>
+
+      <div style={{ padding: '10px 14px', borderTop: '1px solid var(--line-soft)',
+        display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+        <select className="input" value={newFreq} onChange={e => setNewFreq(e.target.value)}
+          style={{ fontSize: 12, width: 'auto', minWidth: 110 }}>
+          {RECURRING_FREQS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+        </select>
+        <input className="input" placeholder="Add a routine (e.g. vacuum, WIP report)…"
+          value={newTitle} onChange={e => setNewTitle(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && addTask()}
+          style={{ fontSize: 12, flex: 1, minWidth: 160 }} />
+        <button className="btn primary" onClick={addTask}><Icon name="plus" size={13} /></button>
+      </div>
+    </Card>
+  );
+};
+
 window.MissionModules = {
   AgendaCard, FinanceCard, BandCard, HealthCard, WorkCard,
   TodayHub, ActivityCard, CalendarCard,
-  TCPGCard, PracticeCard
+  TCPGCard, PracticeCard, RecurringTasksCard
 };

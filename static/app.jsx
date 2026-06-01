@@ -337,7 +337,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "density": "balanced",
   "sidebar": "full",
   "modules": {
-    "finance": true, "band": true, "health": true, "tcpg": true, "practice": true
+    "finance": true, "band": true, "health": true, "tcpg": true, "practice": true, "recurring": true
   }
 }/*EDITMODE-END*/;
 
@@ -350,6 +350,7 @@ const SIDEBAR_NAV = [
   { id: "health",    icon: "heart",      label: "Health"    },
   { id: "practice",  icon: "target",     label: "Practice"  },
   { id: "calendar",  icon: "calendar",   label: "Calendar"  },
+  { id: "recurring", icon: "clock",      label: "Routines"  },
 ];
 
 const MOBILE_NAV = [
@@ -364,6 +365,7 @@ const MODULE_LABELS = [
   ["band","Band","music"],
   ["health","Health","heart"],
   ["practice","Practice","target"],
+  ["recurring","Routines","clock"],
 ];
 
 const DASHBOARD_MINIMIZED_KEY = "mc_dashboard_minimized";
@@ -552,6 +554,7 @@ const App = () => {
     { id: "finance",  label: "Finance",          icon: "wallet",     el: <M.FinanceCard cardProps={dashboardCardProps("finance", 7)} /> },
     { id: "band",     label: "Band",             icon: "music",      el: <M.BandCard cardProps={dashboardCardProps("band", 5)} /> },
     { id: "practice", label: "Piano Practice",   icon: "target",     el: <M.PracticeCard cardProps={dashboardCardProps("practice", 6)} /> },
+    { id: "recurring",label: "Routines",         icon: "clock",      el: <M.RecurringTasksCard cardProps={dashboardCardProps("recurring", 12)} /> },
   ];
 
   const visibleDashboardCards = cards.filter(c => t.modules[c.id] !== false && !dashboardMinimized.includes(c.id));
