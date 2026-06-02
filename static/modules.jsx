@@ -330,6 +330,14 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
   const [budget, setBudget] = React.useState(null);
   const [collapsedCats, setCollapsedCats] = useState({});
   const toggleCat = (name) => setCollapsedCats(s => ({...s, [name]: !s[name]}));
+  const [hideStats, setHideStats] = useState(() => {
+    try { return localStorage.getItem('finance-hide-stats') === '1'; } catch { return false; }
+  });
+  const toggleStats = () => setHideStats(s => {
+    const nv = !s;
+    try { localStorage.setItem('finance-hide-stats', nv ? '1' : '0'); } catch {}
+    return nv;
+  });
 
   const loadFinances = (m) => {
     fetch(`/api/finances?month=${m}`).then(r=>r.json()).then(data => {
@@ -468,6 +476,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
         </div>
         <button className="btn" disabled={rolling} onClick={rolloverMonth} title="Create next month's sheet from this one"><Icon name="file" size={13}/>New month</button>
         <button className="btn" disabled={rolling} onClick={rolloverYear} title="Create a new year's finances file to fill out"><Icon name="calendar" size={13}/>New year</button>
+        <button className="btn" onClick={toggleStats} title={hideStats ? "Show income & totals" : "Hide income & totals"}><Icon name={hideStats ? "eye-off" : "eye"} size={13}/>{hideStats ? "Show totals" : "Hide totals"}</button>
         <button className="btn primary" onClick={() => setShowAdd(s=>!s)}><Icon name="plus" size={13}/>Add expense</button>
       </>}
     >
@@ -488,12 +497,18 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
 
       <div className="finance-body">
         <div>
-          <div className="finance-stats">
-            <div className="stat-block"><span className="l">Income</span><span className="v serif" style={{color:"var(--accent-2)"}}>{fmtMoney(totalIn,{cents:false})}</span></div>
-            <div className="stat-block"><span className="l">Spent</span><span className="v serif">{fmtMoney(totalEx,{cents:false})}</span></div>
-            <div className="stat-block"><span className="l">Budget</span><span className="v serif muted">{fmtMoney(totalBudget,{cents:false})}</span></div>
-            <div className="stat-block"><span className="l">Net</span><span className="v serif" style={{color:net>=0?"var(--accent)":"var(--danger)"}}>{fmtMoney(net,{cents:false})}</span></div>
-          </div>
+          {hideStats ? (
+            <div className="finance-stats" style={{opacity:0.55}}>
+              <div className="stat-block"><span className="l">Totals</span><span className="v serif muted">•••• hidden</span></div>
+            </div>
+          ) : (
+            <div className="finance-stats">
+              <div className="stat-block"><span className="l">Income</span><span className="v serif" style={{color:"var(--accent-2)"}}>{fmtMoney(totalIn,{cents:false})}</span></div>
+              <div className="stat-block"><span className="l">Spent</span><span className="v serif">{fmtMoney(totalEx,{cents:false})}</span></div>
+              <div className="stat-block"><span className="l">Budget</span><span className="v serif muted">{fmtMoney(totalBudget,{cents:false})}</span></div>
+              <div className="stat-block"><span className="l">Net</span><span className="v serif" style={{color:net>=0?"var(--accent)":"var(--danger)"}}>{fmtMoney(net,{cents:false})}</span></div>
+            </div>
+          )}
           <div className="section-h" style={{marginTop:12}}><span>Budget vs Actual</span><span className="line"/><span className="muted-2">{totalBudget > 0 ? Math.round((totalEx/totalBudget)*100) + '% of budget' : 'no budget set'}</span></div>
           <div>
             {categories.map((c,i) => {

@@ -30,6 +30,8 @@ const Icon = ({ name, size = 16, stroke = 1.6, ...rest }) => {
     case "send":        return (<svg {...common}><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>);
     case "image":       return (<svg {...common}><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>);
     case "file":        return (<svg {...common}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>);
+    case "eye":         return (<svg {...common}><path d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3"/></svg>);
+    case "eye-off":     return (<svg {...common}><path d="M10.6 6.2A9.8 9.8 0 0 1 12 6c7 0 10.5 6 10.5 6a18 18 0 0 1-2.7 3.3M6.2 7.4A18 18 0 0 0 1.5 12S5 18 12 18a9.8 9.8 0 0 0 4-.8M9.9 9.9a3 3 0 0 0 4.2 4.2M1.5 1.5l21 21"/></svg>);
     case "download":    return (<svg {...common}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>);
     case "dumbbell":    return (<svg {...common}><path d="M6 4v16M2 8v8M18 4v16M22 8v8M6 12h12"/></svg>);
     case "droplet":     return (<svg {...common}><path d="M12 2.7s5 5.5 5 10.3a5 5 0 1 1-10 0c0-4.8 5-10.3 5-10.3z"/></svg>);
