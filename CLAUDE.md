@@ -26,7 +26,7 @@ Parker's personal AI command center — a unified dashboard for his IT Manager, 
 
 ## Key files
 - `app.py` — All Flask routes, Claude agent loop, 22 tools, Google integrations, GCS helpers
-- `static/modules.jsx` — 11 React module cards (~54KB): Agenda, Finance, Band, Health, Work, Study, Reading, Gaming, Holidays, Journal, Calendar
+- `static/modules.jsx` — React module cards (~54KB): Agenda, Finance, Band, Health (Study is now a Health habit, not its own module), Work, Calendar, Practice, TCPG
 - `static/app.jsx` — App shell, sidebar navigation, command parser
 - `templates/index.html` — Full CSS (oklch vars, IBM Plex, grid system)
 - `data/*.json` — Persistent storage (31 JSON files)
