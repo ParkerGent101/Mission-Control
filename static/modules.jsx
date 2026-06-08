@@ -344,6 +344,11 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
   const [budget, setBudget] = React.useState(null);
   const [collapsedCats, setCollapsedCats] = useState({});
   const toggleCat = (name) => setCollapsedCats(s => ({...s, [name]: !s[name]}));
+  // Mobile: Overview / Transactions / Subscriptions become horizontally swipeable panes.
+  const swipeRef = React.useRef(null);
+  const [pane, setPane] = useState(0);
+  const goPane = (i) => { const el = swipeRef.current; if (el) el.scrollTo({ left: i * el.clientWidth, behavior: 'smooth' }); setPane(i); };
+  const onSwipeScroll = () => { const el = swipeRef.current; if (!el) return; const i = Math.round(el.scrollLeft / Math.max(1, el.clientWidth)); setPane(p => p === i ? p : i); };
   const [hideStats, setHideStats] = useState(() => {
     try { return localStorage.getItem('finance-hide-stats') === '1'; } catch { return false; }
   });
@@ -510,6 +515,8 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
         </div>
       )}
 
+      <div className="fin-swipe" ref={swipeRef} onScroll={onSwipeScroll}>
+        <div className="fin-pane fin-pane-overview">
       <div className="finance-body">
         <div>
           {hideStats ? (
@@ -555,8 +562,8 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
           )}
         </div>
       </div>
-
-      <div className="finance-detail">
+        </div>
+        <div className="fin-pane fin-pane-txns">
         <div>
           <div className="section-h"><span>Transactions</span><span className="line"/><span className="muted-2" style={{fontSize:10.5}}>{txns.filter(t=>t.amount<0).length} expenses</span></div>
           {txns.length === 0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 0'}}>No transactions this month.</div>}
@@ -660,6 +667,8 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
           })()}
           </div>
         </div>
+        </div>
+        <div className="fin-pane fin-pane-subs">
         <div>
           <div className="section-h">
             <span>Subscriptions</span><span className="line"/>
@@ -691,6 +700,14 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
             </div>
           ))}
         </div>
+        </div>
+      </div>
+      <div className="fin-tabs">
+        {['Overview','Transactions','Subscriptions'].map((l,i)=>(
+          <span key={i} onClick={()=>goPane(i)} style={{cursor:'pointer',paddingBottom:3,
+            color: pane===i?'var(--accent)':'var(--ink-4)',
+            borderBottom: pane===i?'2px solid var(--accent)':'2px solid transparent'}}>{l}</span>
+        ))}
       </div>
     </Card>
   );

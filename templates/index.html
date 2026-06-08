@@ -1099,6 +1099,52 @@
     align-items: start;
   }
 
+  /* ─── Finance swipe panes ───────────────────── */
+  /* Desktop: reproduce the original layout — Overview full-width on top,
+     Transactions (1.4fr) and Subscriptions (1fr) side-by-side below. */
+  .fin-tabs { display: none; }
+  @media (min-width: 769px) {
+    .fin-swipe {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      column-gap: 18px;
+      row-gap: 14px;
+      align-items: start;
+    }
+    .fin-pane-overview { grid-column: 1 / -1; }
+    .fin-pane-txns { grid-column: 1; }
+    .fin-pane-subs { grid-column: 2; }
+  }
+  /* Mobile: horizontal scroll-snap carousel with tab indicators. */
+  @media (max-width: 768px) {
+    .fin-swipe {
+      display: flex;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      -webkit-overflow-scrolling: touch;
+      margin: 0 -12px;
+      scrollbar-width: none;
+    }
+    .fin-swipe::-webkit-scrollbar { display: none; }
+    .fin-pane {
+      flex: 0 0 100%;
+      scroll-snap-align: start;
+      padding: 0 12px;
+      min-width: 0;
+      box-sizing: border-box;
+    }
+    .fin-tabs {
+      display: flex;
+      gap: 18px;
+      justify-content: center;
+      margin: 12px 0 0;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+  }
+
   /* ─── Toast notifications ───────────────────── */
   .toast {
     padding: 8px 14px;
