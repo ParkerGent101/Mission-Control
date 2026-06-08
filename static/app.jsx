@@ -744,8 +744,8 @@ const App = () => {
               <button className="btn" style={{flex:1}} onClick={() => { setCmdOpen(true); setShowSheet(false); }}>
                 <Icon name="search" size={13}/>Search ⌘K
               </button>
-              <button className="btn" style={{flex:1}} onClick={() => { window.postMessage({type:"__activate_edit_mode"},"*"); setShowSheet(false); }}>
-                <Icon name="settings" size={13}/>Full settings
+              <button className="btn" style={{flex:1}} onClick={() => { setShowSettings(true); setShowSheet(false); }}>
+                <Icon name="settings" size={13}/>Settings
               </button>
             </div>
           </div>

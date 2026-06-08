@@ -276,7 +276,7 @@ const FIN_CATS = [
   { name: "Housing",       budget: 987,  color: "var(--info)" },
   { name: "Utilities",     budget: 450,  color: "var(--violet)" },
   { name: "Subscriptions", budget: 125,  color: "var(--accent-2)" },
-  { name: "Food / Grocer", budget: 400,  color: "var(--accent)" },
+  { name: "Food / Grocery", budget: 400,  color: "var(--accent)" },
   { name: "Fun",           budget: 500,  color: "var(--danger)" },
   { name: "Gas",           budget: 300,  color: "oklch(0.7 0.13 200)" },
   { name: "Shopping",      budget: 0,    color: "oklch(0.72 0.12 160)" },
@@ -286,31 +286,46 @@ const FIN_CATS = [
 ];
 const FIN_CAT_NAMES = FIN_CATS.map(c => c.name);
 const FIN_CAT_COLOR = Object.fromEntries(FIN_CATS.map(c => [c.name, c.color]));
-const normFinCat = (raw) => {
-  if (!raw) return "Other";
-  const key = String(raw).trim();
+const normFinCat = (raw, fallback = "") => {
   const map = {
     Housing: "Housing", Utilities: "Utilities", Subscriptions: "Subscriptions",
-    "Food / Grocer": "Food / Grocer", Fun: "Fun", Gas: "Gas",
+    "Food / Grocery": "Food / Grocery", "Food / Grocer": "Food / Grocery", Fun: "Fun", Gas: "Gas",
     Shopping: "Shopping", Band: "Band", Loans: "Loans", Other: "Other",
     // Sheet typos / variants → canonical
     Utilites: "Utilities", Utilties: "Utilities",
     "Water, Sewer, Trash": "Utilities", Electricity: "Utilities", Internet: "Utilities",
-    Water: "Utilities", Sewer: "Utilities", Trash: "Utilities",
-    Food: "Food / Grocer", Groceries: "Food / Grocer", Grocer: "Food / Grocer",
+    Water: "Utilities", Sewer: "Utilities", Trash: "Utilities", Phone: "Utilities",
+    Food: "Food / Grocery", Groceries: "Food / Grocery", Grocery: "Food / Grocery", Grocer: "Food / Grocery",
     Restaurants: "Fun", Dining: "Fun",
     Streaming: "Subscriptions", Subscription: "Subscriptions",
     Transportation: "Gas", Auto: "Gas", Fuel: "Gas",
-    Rent: "Housing", Mortgage: "Housing",
+    Rent: "Housing", Mortgage: "Housing", "Renters Insurance": "Housing",
     Loan: "Loans",
     // lowercase fallbacks
     housing: "Housing", utilities: "Utilities", subscriptions: "Subscriptions",
-    food: "Food / Grocer", dining: "Fun", transport: "Gas",
+    food: "Food / Grocery", grocery: "Food / Grocery", grocer: "Food / Grocery", dining: "Fun", transport: "Gas",
     shopping: "Shopping", band: "Band", loans: "Loans",
     gaming: "Fun", entertainment: "Fun", health: "Other", personal: "Other",
     IT: "Other", coding: "Other", gift: "Other", tax_refund: "Other", freelance: "Other",
   };
-  return map[key] || map[key.toLowerCase()] || "Other";
+  const substr = [
+    ["renters insurance", "Housing"], ["rent", "Housing"], ["mortgage", "Housing"],
+    ["internet", "Utilities"], ["electric", "Utilities"], ["water", "Utilities"],
+    ["sewer", "Utilities"], ["trash", "Utilities"], ["phone", "Utilities"],
+    ["grocery", "Food / Grocery"], ["grocer", "Food / Grocery"],
+  ];
+  const resolve = (value) => {
+    const key = String(value || "").trim();
+    if (!key) return "";
+    const exact = map[key] || map[key.toLowerCase()];
+    if (exact) return exact;
+    const lower = key.toLowerCase();
+    const found = substr.find(([needle]) => lower.includes(needle));
+    return found ? found[1] : "";
+  };
+  const primary = resolve(raw);
+  if (primary && primary !== "Other") return primary;
+  return resolve(fallback) || primary || "Other";
 };
 
 const FinanceCard = ({ cardProps = {} } = {}) => {
@@ -320,7 +335,6 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
   const now = new Date();
   const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`);
   const [txns, setTxns] = useState([]);
-  const [savings, setSavings] = useState([]);
   const [subs, setSubs] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
   const [showAddSub, setShowAddSub] = useState(false);
@@ -343,18 +357,18 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
     fetch(`/api/finances?month=${m}`).then(r=>r.json()).then(data => {
       setTxns((Array.isArray(data) ? data : []).map(t => ({
         merchant: t.description,
-        cat: catOverrides.current[t.id] ?? normFinCat(t.category),
+        cat: catOverrides.current[t.id] ?? normFinCat(t.category, t.description),
         amount: t.type === 'expense' ? -t.amount : t.amount,
         date: t.date ? new Date(t.date + 'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '',
         color: t.type === 'income' ? 'var(--accent-2)' : 'var(--ink-4)',
         pending: false, id: t.id, source: t.source,
-        sheet_tab: t.sheet_tab, sheet_row: t.sheet_row, sheet_col: t.sheet_col
+        sheet_tab: t.sheet_tab, sheet_row: t.sheet_row, sheet_col: t.sheet_col,
+        sheet_cols: t.sheet_cols, sheet_kind: t.sheet_kind
       })));
     }).catch(()=>{});
     fetch(`/api/finances/budget?month=${m}`).then(r=>r.json()).then(data => {
       if (!data.error) setBudget(data);
     }).catch(()=>{});
-    fetch('/api/savings').then(r=>r.json()).then(setSavings).catch(()=>{});
   };
 
   useEffect(() => { loadFinances(month); }, [month]);
@@ -463,8 +477,6 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
 
   const totalBudget = categories.reduce((s,c)=>s+(c.budget||c.budgeted||0), 0);
 
-  const acctMap = {};
-  savings.forEach(s => { if (!acctMap[s.account] || s.date > acctMap[s.account].date) acctMap[s.account] = s; });
   const donutData = categories.filter(c=>c.actual>0).map(c=>({value:c.actual, color:c.color, label:c.name}));
 
   return (
@@ -587,7 +599,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
                           <div className="merchant">{t.merchant}</div>
                           <div className="meta">{t.date}</div>
                         </div>
-                        {t.amount < 0 && t.source !== 'sheet'
+                        {t.amount < 0
                           ? <select
                               value={nc}
                               onChange={e => {
@@ -596,8 +608,15 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
                                 setTxns(ts => ts.map(x => x.id===t.id ? {...x, cat: newCat} : x));
                                 fetch(`/api/finances/${t.id}`, {
                                   method:'PATCH', headers:{'Content-Type':'application/json'},
-                                  body: JSON.stringify({category: newCat})
-                                }).catch(()=>{});
+                                  body: JSON.stringify({
+                                    category: newCat,
+                                    sheet_tab: t.sheet_tab, sheet_row: t.sheet_row,
+                                    sheet_col: t.sheet_col, sheet_cols: t.sheet_cols,
+                                    sheet_kind: t.sheet_kind
+                                  })
+                                }).then(res => {
+                                  if (!res.ok) { delete catOverrides.current[t.id]; loadFinances(month); }
+                                }).catch(()=>{ delete catOverrides.current[t.id]; loadFinances(month); });
                               }}
                               style={{fontSize:10,padding:'2px 4px',height:22,width:116,
                                 background:'var(--surface-2)',border:'1px solid var(--line)',
@@ -618,6 +637,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
                             if (t.source === 'sheet') {
                               if (t.sheet_tab == null || t.sheet_row == null || t.sheet_col == null) return;
                               const qs = new URLSearchParams({tab: t.sheet_tab, row: t.sheet_row, col: t.sheet_col});
+                              if (t.sheet_cols) qs.set("cols", t.sheet_cols);
                               const res = await fetch(`/api/finances/sheet?${qs}`,{method:"DELETE"});
                               if (!res.ok) { alert("Could not delete from Google Sheet — check OAuth scope."); return; }
                             } else {
@@ -638,17 +658,10 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
           </div>
         </div>
         <div>
-          <div className="section-h"><span>Savings</span><span className="line"/></div>
-          {Object.values(acctMap).map((s,i) => (
-            <div key={i} className="txn" style={{gridTemplateColumns:"1fr auto",padding:"6px 4px"}}>
-              <div><div className="merchant">{s.account}</div><div className="meta">updated {s.date}</div></div>
-              <span className="amount" style={{color:"var(--accent-2)"}}>{fmtMoney(s.balance,{cents:false})}</span>
-            </div>
-          ))}
-          <div className="section-h" style={{marginTop:12}}>
+          <div className="section-h">
             <span>Subscriptions</span><span className="line"/>
             <span className="muted-2 num" style={{fontSize:10.5}}>{fmtMoney(subTotal)}/mo</span>
-            <button className="btn ghost" style={{padding:'2px 6px',fontSize:10.5}} onClick={()=>setShowAddSub(s=>!s)}>+</button>
+            <button className="btn" style={{padding:'4px 10px',fontSize:11}} onClick={()=>setShowAddSub(s=>!s)}><Icon name="plus" size={12}/>Add</button>
           </div>
           {showAddSub && (
             <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:8,padding:'8px',background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid var(--line)'}}>
@@ -664,11 +677,14 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
               </div>
             </div>
           )}
+          {subs.length === 0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 4px'}}>No subscriptions yet — tap “Add”.</div>}
           {subs.map((s,i) => (
-            <div key={s.id||i} className="txn" style={{gridTemplateColumns:"1fr auto auto",padding:"5px 4px"}}>
+            <div key={s.id||i} className="txn" style={{gridTemplateColumns:"1fr auto auto",alignItems:"center",padding:"5px 4px"}}>
               <div><div className="merchant">{s.name}</div><div className="meta">{s.acct} · due {s.due}</div></div>
               <span className="amount muted">{fmtMoney(s.amt)}</span>
-              <span style={{cursor:"pointer",color:"var(--ink-4)",padding:"0 4px",fontSize:13,lineHeight:1}} onClick={()=>deleteSub(s.id)}>×</span>
+              <button className="btn ghost" aria-label={`Remove ${s.name}`} title={`Remove ${s.name}`}
+                onClick={()=>{ if (confirm(`Remove subscription “${s.name}”?`)) deleteSub(s.id); }}
+                style={{minWidth:34,minHeight:34,padding:0,fontSize:16,lineHeight:1,color:"var(--ink-3)"}}>×</button>
             </div>
           ))}
         </div>
@@ -814,7 +830,7 @@ const BandCard = ({ cardProps = {} } = {}) => {
       right={<>
         <span className="tag violet mobile-hide">{gigs.length} gigs</span>
         <button className="btn" onClick={()=>setShowAddShow(s=>!s)}><Icon name="plus" size={13}/>Show</button>
-        <button className="btn primary mobile-hide" onClick={pushSite} disabled={pushing}>{pushing?'pushing…':'Push live'}</button>
+        <button className="btn primary" onClick={pushSite} disabled={pushing}>{pushing?'pushing…':'Push live'}</button>
       </>}
     >
       {showAddShow && (

@@ -805,37 +805,29 @@ def post_finance():
     desc, amt = d.get("description", ""), float(d.get("amount", 0))
     txn_type, cat = d.get("type", "expense"), d.get("category", "Fun")
     cat = _canonical_finance_category(cat)
-    if FINANCE_SHEET_ID and txn_type == "expense" and cat in DETAIL_TABLE_KEYWORDS:
+    if FINANCE_SHEET_ID and txn_type == "expense":
         try:
             svc = _sheets_svc()
             tab = _month_tab(date[:7])
             rows = svc.spreadsheets().values().get(
                 spreadsheetId=FINANCE_SHEET_ID, range=tab
             ).execute().get('values', [])
-            pos = _find_detail_table(rows, cat)
-            if not pos:
-                return jsonify({"error": f"No '{cat}' table found in sheet tab '{tab}'."}), 400
-            header_row, header_col = pos
-            target_row = _find_next_empty_table_row(rows, header_row, header_col)
-            # Refuse to overwrite the 'Total' row.
-            check = rows[target_row] if target_row < len(rows) else []
-            c1 = check[header_col].strip()     if len(check) > header_col     else ''
-            c2 = check[header_col + 1].strip() if len(check) > header_col + 1 else ''
-            if 'total' in (c1 + c2).lower():
-                return jsonify({"error": f"'{cat}' table is full — add more empty rows before the Total row."}), 400
-            # Fun = [description, amount]; Gas/Grocer = [date, amount]
-            col1 = desc if cat == 'Fun' else _format_short_date(date)
-            a1 = f"'{tab}'!{_col_letter(header_col)}{target_row + 1}:{_col_letter(header_col + 1)}{target_row + 1}"
-            svc.spreadsheets().values().update(
-                spreadsheetId=FINANCE_SHEET_ID, range=a1,
-                valueInputOption='USER_ENTERED',
-                body={'values': [[col1, amt]]}
-            ).execute()
-            return jsonify({"ok": True, "sheet_tab": tab, "sheet_row": target_row, "sheet_col": header_col})
+            if cat in DETAIL_TABLE_KEYWORDS:
+                written = _write_detail_transaction(svc, FINANCE_SHEET_ID, tab, rows, cat, desc, amt, date)
+                if not written:
+                    return jsonify({"error": f"No '{cat}' table found in sheet tab '{tab}'."}), 400
+                target_row, target_col = written
+                return jsonify({"ok": True, "sheet_tab": tab, "sheet_row": target_row, "sheet_col": target_col, "sheet_cols": 2, "sheet_kind": "detail"})
+            if cat in BUDGET_TRANSACTION_CATEGORIES:
+                written = _write_budget_transaction(svc, FINANCE_SHEET_ID, tab, rows, cat, desc, amt)
+                if not written:
+                    return jsonify({"error": f"No empty '{cat}' budget row found in sheet tab '{tab}'."}), 400
+                target_row, target_col = written
+                return jsonify({"ok": True, "sheet_tab": tab, "sheet_row": target_row, "sheet_col": target_col, "sheet_cols": 1, "sheet_kind": "budget"})
+            allowed = ", ".join(["Housing", "Utilities", "Food / Grocery", "Fun", "Gas"])
+            return jsonify({"error": f"'{cat}' isn't a transaction-tracked category. Use {allowed}."}), 400
         except Exception as e:
             return jsonify({"error": str(e)}), 500
-    if FINANCE_SHEET_ID and txn_type == "expense":
-        return jsonify({"error": f"'{cat}' isn't a transaction-tracked category. Use the 'Add Subscription' form for subs; for Housing/Utilities/Loans/etc. edit the budget tracker in your Sheet directly."}), 400
     tool_add_transaction(desc, amt, txn_type, cat, date)
     return jsonify({"ok": True})
 
@@ -857,16 +849,14 @@ def delete_finance_sheet():
     try:
         row = int(request.args.get("row", ""))
         col = int(request.args.get("col", ""))
+        cols = int(request.args.get("cols", "2"))
     except (TypeError, ValueError):
-        return jsonify({"error": "row and col must be integers"}), 400
-    if not tab or row < 0 or col < 0:
+        return jsonify({"error": "row, col and cols must be integers"}), 400
+    if not tab or row < 0 or col < 0 or cols < 1:
         return jsonify({"error": "tab, row, col are required"}), 400
     try:
         svc = _sheets_svc()
-        a1 = f"'{tab}'!{_col_letter(col)}{row + 1}:{_col_letter(col + 1)}{row + 1}"
-        svc.spreadsheets().values().clear(
-            spreadsheetId=FINANCE_SHEET_ID, range=a1, body={}
-        ).execute()
+        _clear_sheet_values(svc, FINANCE_SHEET_ID, tab, row, col, cols)
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -875,7 +865,7 @@ def delete_finance_sheet():
 def patch_finance(tid):
     d = request.json or {}
     if FINANCE_SHEET_ID:
-        return jsonify({"error": "Edit the Google Sheet directly to update transactions"}), 400
+        return _patch_finance_sheet(d)
     finances = _load(FINANCE_FILE)
     txn = next((t for t in finances if t.get("id") == tid), None)
     if not txn:
@@ -2135,10 +2125,34 @@ def _col_letter(n):
         n = n // 26 - 1
     return s
 
+def _parse_money(value):
+    try:
+        return float(str(value).replace('$', '').replace(',', '').strip() or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+def _finance_budget_columns(rows):
+    hdr_row_idx = 0
+    for i, row in enumerate(rows[:5]):
+        row_lower = ' '.join(str(c) for c in row).lower()
+        if 'budget' in row_lower or 'actual amount' in row_lower:
+            hdr_row_idx = i
+            break
+    hdr = [str(c).lower().strip() for c in rows[hdr_row_idx]] if rows else []
+    desc_col = next((i for i, h in enumerate(hdr) if 'description' in h or h == 'name'), 1)
+    due_col = next((i for i, h in enumerate(hdr) if 'due' in h), 3)
+    actual_col = next((i for i, h in enumerate(hdr) if 'actual' in h), 5)
+    return hdr_row_idx, desc_col, due_col, actual_col
+
 DETAIL_TABLE_KEYWORDS = {
     'Gas':           ['gas total', 'gas totals'],
     'Fun':           ['fun total', 'fun totals'],
-    'Food / Grocer': ['grocery trip', 'groceries total', 'grocery'],
+    'Food / Grocery': ['grocery trip', 'groceries total', 'grocery'],
+}
+BUDGET_TRANSACTION_CATEGORIES = {'Housing', 'Utilities'}
+FINANCE_CATEGORY_NAMES = {
+    'Housing', 'Utilities', 'Subscriptions', 'Food / Grocery', 'Fun',
+    'Gas', 'Shopping', 'Band', 'Loans', 'Other',
 }
 
 # Canonical budget category map. Lookup is lowercase, exact-match first then substring.
@@ -2150,6 +2164,7 @@ _CANON_CAT_EXACT = {
     'water': 'Utilities', 'sewer': 'Utilities', 'trash': 'Utilities',
     'electric': 'Utilities', 'electricity': 'Utilities', 'power': 'Utilities',
     'internet': 'Utilities', 'wifi': 'Utilities', 'wi-fi': 'Utilities', 'cable': 'Utilities',
+    'phone': 'Utilities',
     'heating': 'Utilities', 'cooling': 'Utilities',
     'water, sewer, trash': 'Utilities',
     'subscriptions': 'Subscriptions', 'subscription': 'Subscriptions', 'streaming': 'Subscriptions',
@@ -2160,8 +2175,9 @@ _CANON_CAT_EXACT = {
     'patreon': 'Subscriptions', 'github': 'Subscriptions', 'chatgpt': 'Subscriptions',
     'claude': 'Subscriptions', 'notion': 'Subscriptions', 'adobe': 'Subscriptions',
     'icloud': 'Subscriptions', 'microsoft 365': 'Subscriptions', 'office 365': 'Subscriptions',
-    'food': 'Food / Grocer', 'food / grocer': 'Food / Grocer', 'grocer': 'Food / Grocer',
-    'groceries': 'Food / Grocer', 'grocery': 'Food / Grocer',
+    'food': 'Food / Grocery', 'food / grocery': 'Food / Grocery', 'food / grocer': 'Food / Grocery',
+    'food/grocery': 'Food / Grocery', 'food/grocer': 'Food / Grocery',
+    'grocer': 'Food / Grocery', 'groceries': 'Food / Grocery', 'grocery': 'Food / Grocery',
     'fun': 'Fun', 'dining': 'Fun', 'restaurants': 'Fun',
     'gaming': 'Fun', 'entertainment': 'Fun',
     'gas': 'Gas', 'fuel': 'Gas', 'transportation': 'Gas', 'transport': 'Gas', 'auto': 'Gas',
@@ -2175,9 +2191,9 @@ _CANON_SUBSTR = [
     ('apple', 'Subscriptions'), ('hbo', 'Subscriptions'),
     ('internet', 'Utilities'), ('electric', 'Utilities'), ('water', 'Utilities'),
     ('cable', 'Utilities'), ('power', 'Utilities'), ('sewer', 'Utilities'),
-    ('trash', 'Utilities'),
-    ('rent', 'Housing'), ('mortgage', 'Housing'),
-    ('grocer', 'Food / Grocer'),
+    ('trash', 'Utilities'), ('phone', 'Utilities'),
+    ('renters insurance', 'Housing'), ('rent', 'Housing'), ('mortgage', 'Housing'),
+    ('grocery', 'Food / Grocery'), ('grocer', 'Food / Grocery'),
 ]
 
 def _canon_cat(raw):
@@ -2196,20 +2212,31 @@ def _canonical_finance_category(raw):
     aliases = {
         'auto': 'Gas',
         'dining': 'Fun',
+        'electric': 'Utilities',
+        'electricity': 'Utilities',
         'entertainment': 'Fun',
-        'food': 'Food / Grocer',
-        'food / grocer': 'Food / Grocer',
-        'food/grocer': 'Food / Grocer',
+        'food': 'Food / Grocery',
+        'food / grocery': 'Food / Grocery',
+        'food / grocer': 'Food / Grocery',
+        'food/grocery': 'Food / Grocery',
+        'food/grocer': 'Food / Grocery',
         'fuel': 'Gas',
         'fun': 'Fun',
         'gaming': 'Fun',
         'gas': 'Gas',
-        'groceries': 'Food / Grocer',
-        'grocery': 'Food / Grocer',
-        'grocer': 'Food / Grocer',
+        'groceries': 'Food / Grocery',
+        'grocery': 'Food / Grocery',
+        'grocer': 'Food / Grocery',
+        'housing': 'Housing',
+        'internet': 'Utilities',
+        'mortgage': 'Housing',
+        'phone': 'Utilities',
+        'rent': 'Housing',
         'restaurants': 'Fun',
         'transport': 'Gas',
         'transportation': 'Gas',
+        'utilities': 'Utilities',
+        'water': 'Utilities',
     }
     return aliases.get(key.lower(), key or 'Fun')
 
@@ -2248,6 +2275,107 @@ def _format_short_date(iso_date):
         return f"{d.day}-{d.strftime('%b')}"
     except Exception:
         return iso_date
+
+def _write_detail_transaction(svc, spreadsheet_id, tab, rows, cat, desc, amt, date):
+    pos = _find_detail_table(rows, cat)
+    if not pos:
+        return None
+    header_row, header_col = pos
+    target_row = _find_next_empty_table_row(rows, header_row, header_col)
+    check = rows[target_row] if target_row < len(rows) else []
+    c1 = check[header_col].strip()     if len(check) > header_col     else ''
+    c2 = check[header_col + 1].strip() if len(check) > header_col + 1 else ''
+    if 'total' in (c1 + c2).lower():
+        raise ValueError(f"'{cat}' table is full - add more empty rows before the Total row.")
+    col1 = desc if cat == 'Fun' else _format_short_date(date)
+    a1 = f"'{tab}'!{_col_letter(header_col)}{target_row + 1}:{_col_letter(header_col + 1)}{target_row + 1}"
+    svc.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id, range=a1,
+        valueInputOption='USER_ENTERED',
+        body={'values': [[col1, amt]]}
+    ).execute()
+    return target_row, header_col
+
+def _write_budget_transaction(svc, spreadsheet_id, tab, rows, cat, desc, amt):
+    target_row = _find_budget_section_next_row(rows, cat)
+    if target_row is None:
+        return None
+    _, desc_col, _, actual_col = _finance_budget_columns(rows)
+    data = [
+        {'range': f"'{tab}'!{_col_letter(desc_col)}{target_row + 1}", 'values': [[desc or cat]]},
+        {'range': f"'{tab}'!{_col_letter(actual_col)}{target_row + 1}", 'values': [[amt]]},
+    ]
+    svc.spreadsheets().values().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={'valueInputOption': 'USER_ENTERED', 'data': data}
+    ).execute()
+    return target_row, actual_col
+
+def _clear_sheet_values(svc, spreadsheet_id, tab, row, col, cols):
+    end_col = col + max(1, cols) - 1
+    a1 = f"'{tab}'!{_col_letter(col)}{row + 1}:{_col_letter(end_col)}{row + 1}"
+    svc.spreadsheets().values().clear(
+        spreadsheetId=spreadsheet_id, range=a1, body={}
+    ).execute()
+
+def _patch_finance_sheet(d):
+    tab = str(d.get("sheet_tab") or "").strip()
+    try:
+        row = int(d.get("sheet_row"))
+        col = int(d.get("sheet_col"))
+        cols = int(d.get("sheet_cols") or 2)
+    except (TypeError, ValueError):
+        return jsonify({"error": "sheet_tab, sheet_row and sheet_col are required"}), 400
+    if not tab or row < 0 or col < 0 or cols < 1:
+        return jsonify({"error": "sheet_tab, sheet_row and sheet_col are required"}), 400
+
+    cat = _canonical_finance_category(d.get("category"))
+    if cat not in DETAIL_TABLE_KEYWORDS and cat not in BUDGET_TRANSACTION_CATEGORIES:
+        allowed = ", ".join(["Housing", "Utilities", "Food / Grocery", "Fun", "Gas"])
+        return jsonify({"error": f"'{cat}' isn't a transaction-tracked category. Use {allowed}."}), 400
+
+    try:
+        svc = _sheets_svc()
+        rows = svc.spreadsheets().values().get(
+            spreadsheetId=FINANCE_SHEET_ID, range=tab
+        ).execute().get('values', [])
+        max_cols = max((len(r) for r in rows), default=col + cols)
+        padded = [r + [''] * (max_cols - len(r)) for r in rows]
+        old_row = padded[row] if row < len(padded) else []
+        kind = d.get("sheet_kind") or ("budget" if cols == 1 else "detail")
+        if kind == "budget" or cols == 1:
+            _, desc_col, _, _ = _finance_budget_columns(padded)
+            old_desc = old_row[desc_col].strip() if len(old_row) > desc_col else ''
+            old_amt = _parse_money(old_row[col] if len(old_row) > col else 0)
+            old_cat = _canon_cat((old_row[0] if old_row else '') or old_desc)
+        else:
+            old_desc = old_row[col].strip() if len(old_row) > col else ''
+            old_amt = _parse_money(old_row[col + 1] if len(old_row) > col + 1 else 0)
+            old_cat = ''
+        desc = str(d.get("description") or old_desc or cat).strip()
+        amt = _parse_money(d.get("amount")) if "amount" in d else old_amt
+        date_val = d.get("date") or datetime.now().strftime("%Y-%m-%d")
+
+        if kind == "budget" and old_cat == cat:
+            return jsonify({"ok": True})
+        if cat in BUDGET_TRANSACTION_CATEGORIES:
+            written = _write_budget_transaction(svc, FINANCE_SHEET_ID, tab, rows, cat, desc, amt)
+            target_cols = 1
+            if not written:
+                return jsonify({"error": f"No empty '{cat}' budget row found in sheet tab '{tab}'."}), 400
+        else:
+            written = _write_detail_transaction(svc, FINANCE_SHEET_ID, tab, rows, cat, desc, amt, date_val)
+            target_cols = 2
+            if not written:
+                return jsonify({"error": f"No '{cat}' table found in sheet tab '{tab}'."}), 400
+        target_row, target_col = written
+        if target_row != row or target_col != col or target_cols != cols:
+            _clear_sheet_values(svc, FINANCE_SHEET_ID, tab, row, col, cols)
+        return jsonify({"ok": True})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 MONTH_NAMES_FULL = ['January','February','March','April','May','June',
                     'July','August','September','October','November','December']
@@ -2326,8 +2454,37 @@ def _find_budget_section_next_row(rows, canon_target):
             return None
     return None
 
+def _parse_budget_transaction_rows(rows, tab=""):
+    if not rows:
+        return []
+    max_cols = max((len(r) for r in rows), default=1)
+    padded = [r + [''] * (max_cols - len(r)) for r in rows]
+    hdr_row_idx, desc_col, _, actual_col = _finance_budget_columns(padded)
+    transactions = []
+    current_cat = ''
+    for ri in range(hdr_row_idx + 1, len(padded)):
+        row = padded[ri]
+        row_lower = ' '.join(str(c) for c in row[:8]).lower()
+        if any(kw in row_lower for kw in ['anticipated', 'actual total', 'roommate', 'savings total']):
+            break
+        cat_val = str(row[0]).strip() if len(row) > 0 else ''
+        desc_val = str(row[desc_col]).strip() if len(row) > desc_col else ''
+        if cat_val and not any(ch.isdigit() for ch in cat_val):
+            current_cat = cat_val
+        canon = _canon_cat(cat_val or desc_val or current_cat)
+        if canon not in BUDGET_TRANSACTION_CATEGORIES:
+            continue
+        actual = _parse_money(row[actual_col] if len(row) > actual_col else 0)
+        if actual <= 0:
+            continue
+        transactions.append({'description': desc_val or cat_val or canon, 'date': '',
+                              'amount': abs(actual), 'category': canon, 'type': 'expense',
+                              'sheet_tab': tab, 'sheet_row': ri, 'sheet_col': actual_col,
+                              'sheet_cols': 1, 'sheet_kind': 'budget'})
+    return transactions
+
 def _parse_transaction_rows(rows, tab=""):
-    """Parse individual transactions from detail tables (Gas, Fun, Grocery Trip Totals).
+    """Parse individual transactions from detail tables and Housing/Utilities budget rows.
     Each returned txn carries sheet_tab/sheet_row/sheet_col so the frontend can delete
     by clearing the source cells in the Google Sheet."""
     if not rows:
@@ -2342,7 +2499,7 @@ def _parse_transaction_rows(rows, tab=""):
         header_row = header_col = None
         for ri, row in enumerate(rows):
             for ci, cell in enumerate(row):
-                if any(kw in cell.lower() for kw in keywords):
+                if any(kw in str(cell).lower() for kw in keywords):
                     header_row, header_col = ri, ci
                     break
             if header_row is not None:
@@ -2353,8 +2510,8 @@ def _parse_transaction_rows(rows, tab=""):
         blanks_in_a_row = 0
         for ri in range(header_row + 2, len(rows)):
             row    = rows[ri]
-            cell1  = row[header_col].strip()     if len(row) > header_col     else ''
-            cell2  = row[header_col + 1].strip() if len(row) > header_col + 1 else ''
+            cell1  = str(row[header_col]).strip()     if len(row) > header_col     else ''
+            cell2  = str(row[header_col + 1]).strip() if len(row) > header_col + 1 else ''
             if 'total' in (cell1 + cell2).lower():
                 break
             if not cell1 and not cell2:
@@ -2363,8 +2520,7 @@ def _parse_transaction_rows(rows, tab=""):
                     break
                 continue
             blanks_in_a_row = 0
-            try: amt = float(cell2.replace('$','').replace(',','') or 0)
-            except: amt = 0.0
+            amt = _parse_money(cell2)
             if amt <= 0:
                 continue
             desc, date_val = cell1, ''
@@ -2373,8 +2529,10 @@ def _parse_transaction_rows(rows, tab=""):
                 date_val, desc = cell1, cat
             transactions.append({'description': desc, 'date': date_val,
                                   'amount': abs(amt), 'category': cat, 'type': 'expense',
-                                  'sheet_tab': tab, 'sheet_row': ri, 'sheet_col': header_col})
+                                  'sheet_tab': tab, 'sheet_row': ri, 'sheet_col': header_col,
+                                  'sheet_cols': 2, 'sheet_kind': 'detail'})
 
+    transactions.extend(_parse_budget_transaction_rows(rows, tab))
     return [{'id': i + 1, 'source': 'sheet', **t} for i, t in enumerate(transactions)]
 
 def _office_file_error(e):
@@ -2564,9 +2722,15 @@ def drive_sync_finances():
             txn_type = d.get("type", "expense").strip().lower()
             if txn_type not in ("income", "expense"):
                 txn_type = "expense"
+            raw_cat = d.get("category", "personal").strip() or "personal"
+            category = _canonical_finance_category(raw_cat)
+            if raw_cat.lower() in ("", "personal", "other"):
+                inferred = _canon_cat(desc)
+                if inferred in FINANCE_CATEGORY_NAMES:
+                    category = inferred
             rebuilt.append({"id": idx, "date": date, "description": desc,
                              "amount": amt, "type": txn_type,
-                             "category": d.get("category", "personal").strip() or "personal"})
+                             "category": category})
         _save(FINANCE_FILE, rebuilt)
         return jsonify({"ok": True, "count": len(rebuilt)})
     except Exception as e:
