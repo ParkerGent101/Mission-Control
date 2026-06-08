@@ -420,8 +420,11 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
   };
 
   const deleteSub = async (sid) => {
-    await fetch(`/api/finances/subscriptions/${sid}`, { method:'DELETE' });
     setSubs(s => s.filter(x => x.id !== sid));
+    const res = await fetch(`/api/finances/subscriptions/${sid}`, { method:'DELETE' }).then(r=>r.json()).catch(()=>({}));
+    if (res.sheet_status && !['cleared','not_configured','not_found'].includes(res.sheet_status)) {
+      alert(`Removed from the app, but the Sheet update failed (${res.sheet_status}). It may reappear on next sync.`);
+    }
   };
 
   const [rolling, setRolling] = useState(false);

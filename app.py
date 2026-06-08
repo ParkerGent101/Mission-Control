@@ -1069,9 +1069,40 @@ def post_subscription():
 @app.route("/api/finances/subscriptions/<int:sid>", methods=["DELETE"])
 def delete_subscription(sid):
     subs = _load(SUBS_FILE)
-    subs = [s for s in subs if s["id"] != sid]
+    target = next((s for s in subs if s.get("id") == sid), None)
+    subs = [s for s in subs if s.get("id") != sid]
     _save(SUBS_FILE, subs)
-    return jsonify({"ok": True})
+
+    sheet_status = "not_configured"
+    sheet_error = None
+    if FINANCE_SHEET_ID and target:
+        sheet_status = "error"
+        try:
+            svc = _sheets_svc()
+            tab = _month_tab(datetime.now().strftime("%Y-%m"))
+            rows = svc.spreadsheets().values().get(
+                spreadsheetId=FINANCE_SHEET_ID, range=tab
+            ).execute().get('values', [])
+            row_idx = _find_subscription_sheet_row(rows, target.get("name", ""))
+            if row_idx is None:
+                sheet_status = "not_found"
+            else:
+                # Layout: B=description, C=account, D=due, E=budgeted, F=actual.
+                # Clearing leaves a blank row the add path can reuse as the next slot.
+                a1 = f"'{tab}'!B{row_idx + 1}:F{row_idx + 1}"
+                svc.spreadsheets().values().update(
+                    spreadsheetId=FINANCE_SHEET_ID, range=a1,
+                    valueInputOption='USER_ENTERED',
+                    body={'values': [['', '', '', '', '']]}
+                ).execute()
+                sheet_status = "cleared"
+        except Exception as e:
+            sheet_error = str(e)
+
+    resp = {"ok": True, "sheet_status": sheet_status}
+    if sheet_error:
+        resp["sheet_error"] = sheet_error
+    return jsonify(resp)
 
 # ── Band Content Queue ─────────────────────────────────────────────────────────
 
@@ -2452,6 +2483,44 @@ def _find_budget_section_next_row(rows, canon_target):
                 return ri
         elif section_start is not None:
             return None
+    return None
+
+def _find_subscription_sheet_row(rows, name):
+    """Find the 0-based row index within the Subscriptions budget section whose
+    description (col B) matches `name` (case-insensitive). Returns None if not found.
+    Mirrors _find_budget_section_next_row's section-scanning so add/delete stay in sync."""
+    if not rows or not name:
+        return None
+    max_cols = max((len(r) for r in rows), default=1)
+    padded = [r + [''] * (max_cols - len(r)) for r in rows]
+
+    hdr_row_idx = 0
+    for i, row in enumerate(padded[:5]):
+        rl = ' '.join(row).lower()
+        if 'budget' in rl or 'actual amount' in rl:
+            hdr_row_idx = i
+            break
+
+    section_start = None
+    current_cat = ''
+    target = name.strip().lower()
+    for ri in range(hdr_row_idx + 1, len(padded)):
+        row = padded[ri]
+        rl = ' '.join(row[:8]).lower()
+        if any(kw in rl for kw in ['anticipated', 'actual total', 'roommate', 'savings total']):
+            break
+        cat_val = row[0].strip() if len(row) > 0 else ''
+        desc_val = row[1].strip() if len(row) > 1 else ''
+        if cat_val and not any(ch.isdigit() for ch in cat_val):
+            current_cat = cat_val
+        row_canon = _canon_cat(cat_val or desc_val or current_cat)
+        if row_canon == 'Subscriptions':
+            if section_start is None:
+                section_start = ri
+            if desc_val.strip().lower() == target:
+                return ri
+        elif section_start is not None:
+            break
     return None
 
 def _parse_budget_transaction_rows(rows, tab=""):
