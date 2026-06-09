@@ -436,7 +436,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
   const rolloverMonth = async () => {
     const [my, mm] = month.split('-').map(Number);
     const nextLabel = MONTH_NAMES[mm % 12] + ' ' + (mm === 12 ? my + 1 : my);
-    if (!confirm(`Create the ${nextLabel} sheet? Your budget, income and GLS payments carry over; one-off transactions start empty.`)) return;
+    if (!confirm(`Create the ${nextLabel} sheet? Your budgeted amounts, income and GLS payments carry over; actual spending and one-off transactions start empty for you to fill in.`)) return;
     setRolling(true);
     try {
       const res = await fetch('/api/finances/rollover/month', { method:'POST', headers:{'Content-Type':'application/json'},

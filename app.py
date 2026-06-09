@@ -918,6 +918,7 @@ def rollover_month():
             }}]}
         ).execute()
         _clear_detail_tables(svc, FINANCE_SHEET_ID, dst_tab)
+        _clear_budget_actuals(svc, FINANCE_SHEET_ID, dst_tab)
         return jsonify({"ok": True, "tab": dst_tab, "month": f"{ny}-{str(nm).zfill(2)}"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -963,6 +964,7 @@ def rollover_year():
         svc.spreadsheets().batchUpdate(spreadsheetId=new_id, body={"requests": requests}).execute()
         for mn in MONTH_NAMES_FULL:
             _clear_detail_tables(svc, new_id, mn)
+            _clear_budget_actuals(svc, new_id, mn)
         # The new file is owned by the ADC identity (service account on Cloud Run);
         # best-effort share with Parker so he can open it.
         shared_with = None
@@ -2444,6 +2446,36 @@ def _clear_detail_tables(svc, spreadsheet_id, tab):
                 break
             if c1 or c2:
                 clears.append(f"'{tab}'!{_col_letter(hc)}{ri + 1}:{_col_letter(hc + 1)}{ri + 1}")
+    if clears:
+        svc.spreadsheets().values().batchClear(
+            spreadsheetId=spreadsheet_id, body={'ranges': clears}
+        ).execute()
+
+def _clear_budget_actuals(svc, spreadsheet_id, tab):
+    """After a rollover, empty the 'actual' column of the budget tracker so the new
+    month starts with budgeted amounts only — actuals fill in as transactions happen.
+    Reads with FORMULA rendering and skips any formula cell (e.g. =SUM of a detail
+    table) so existing linkage is preserved; only static carried-over values are cleared."""
+    rows = svc.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id, range=tab, valueRenderOption='FORMULA'
+    ).execute().get('values', [])
+    if not rows:
+        return
+    max_cols = max((len(r) for r in rows), default=1)
+    padded = [r + [''] * (max_cols - len(r)) for r in rows]
+    hdr_row_idx, _, _, actual_col = _finance_budget_columns(padded)
+    clears = []
+    for ri in range(hdr_row_idx + 1, len(padded)):
+        row = padded[ri]
+        rl = ' '.join(str(c) for c in row[:8]).lower()
+        if any(kw in rl for kw in ['anticipated', 'actual total', 'roommate', 'savings total']):
+            break
+        if len(row) <= actual_col:
+            continue
+        val = str(row[actual_col]).strip()
+        if not val or val.startswith('='):   # blank already, or a formula to preserve
+            continue
+        clears.append(f"'{tab}'!{_col_letter(actual_col)}{ri + 1}")
     if clears:
         svc.spreadsheets().values().batchClear(
             spreadsheetId=spreadsheet_id, body={'ranges': clears}
