@@ -731,6 +731,20 @@ const BandCard = ({ cardProps = {} } = {}) => {
   const [editShowIdx, setEditShowIdx] = useState(null);
   const [editShow, setEditShow] = useState({date:'',venue:'',city:'',tickets:'',notes:''});
 
+  // Mobile: swipe left/right to move between the Shows / Setlists / Venues tabs.
+  const BAND_TABS = ['shows','setlists','venues'];
+  const bandTouch = React.useRef(null);
+  const onBandTouchStart = (e) => { const t = e.touches[0]; bandTouch.current = { x: t.clientX, y: t.clientY }; };
+  const onBandTouchEnd = (e) => {
+    const s = bandTouch.current; if (!s) return; bandTouch.current = null;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - s.x, dy = t.clientY - s.y;
+    if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;  // ignore vertical scrolls / taps
+    const i = BAND_TABS.indexOf(bandTab);
+    const ni = dx < 0 ? Math.min(BAND_TABS.length - 1, i + 1) : Math.max(0, i - 1);
+    if (ni !== i) setBandTab(BAND_TABS[ni]);
+  };
+
   const loadShows = () => {
     return fetch('/api/shows').then(r=>r.json()).then(data => {
       const today = new Date();
@@ -875,12 +889,15 @@ const BandCard = ({ cardProps = {} } = {}) => {
       )}
       {/* ── Tab bar ── */}
       <div style={{display:'flex',gap:2,marginBottom:10,borderBottom:'1px solid var(--line-soft)',paddingBottom:6}}>
-        {['shows','setlists','venues'].map(t => (
+        {BAND_TABS.map(t => (
           <button key={t} className={'btn'+(bandTab===t?' primary':' ghost')}
             style={{fontSize:10.5,padding:'3px 10px',textTransform:'capitalize'}}
             onClick={()=>setBandTab(t)}>{t}</button>
         ))}
       </div>
+
+      {/* Swipe left/right (touch) to switch tabs */}
+      <div onTouchStart={onBandTouchStart} onTouchEnd={onBandTouchEnd}>
 
       {/* ── Shows tab ── */}
       {bandTab==='shows' && <>
@@ -1075,6 +1092,7 @@ const BandCard = ({ cardProps = {} } = {}) => {
         );
       })}
       </>}
+      </div>
     </Card>
   );
 };
