@@ -25,9 +25,6 @@ const MODULE_LIST = [
   { id: "band",     label: "Band",              icon: "music" },
   { id: "health",   label: "Health & Fitness",  icon: "heart" },
   { id: "work",     label: "Work",              icon: "briefcase" },
-  { id: "reading",  label: "Reading",           icon: "book" },
-  { id: "holidays", label: "Holidays / Travel", icon: "plane" },
-  { id: "journal",  label: "Journal",           icon: "feather" },
   { id: "activity", label: "Activity Log",      icon: "clock" },
   { id: "calendar", label: "Calendar",          icon: "calendar" },
 ];
@@ -433,7 +430,7 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
       {[
         { icon: "heart",      name: "Apple Health / Google Fit", desc: "Sync workouts, steps, weight and vitals automatically" },
         { icon: "briefcase",  name: "Slack / Teams",             desc: "Surface messages, DMs, and action items" },
-        { icon: "book",       name: "Notion / Obsidian",         desc: "Import pages as tasks or journal entries" },
+        { icon: "book",       name: "Notion / Obsidian",         desc: "Import pages as tasks or notes" },
         { icon: "trending-up", name: "Strava / Garmin",          desc: "Sync run and ride data to Health module" },
       ].map(item => (
         <div key={item.name} className="st-integ-card" style={{ marginTop: 8, opacity: .45 }}>
@@ -476,7 +473,7 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
       <SectionHead style={{ marginTop: 24 }}>Danger Zone</SectionHead>
       <div className="st-danger-zone">
         <FieldRow label="Reset All Data"
-          desc="Permanently delete all module data — transactions, tasks, health logs, journal, etc. This cannot be undone."
+          desc="Permanently delete all module data — transactions, tasks, health logs, etc. This cannot be undone."
           style={{ borderBottom: resetConfirm ? '1px solid color-mix(in oklch, var(--danger) 20%, var(--line))' : 'none' }}>
           <button
             className="btn"
@@ -541,7 +538,6 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
           ["gig at X on date", "→ Add show"],
           ["remind me to…",    "→ Set reminder"],
           ["weigh Xlb",        "→ Log weight"],
-          ["journal: …",       "→ Save journal entry"],
         ].map(([trigger, action]) => (
           <div key={trigger} style={{ display: 'flex', gap: 12, padding: '6px 0', borderBottom: '1px solid var(--line-soft)' }}>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent)', minWidth: 140, flexShrink: 0 }}>{trigger}</span>

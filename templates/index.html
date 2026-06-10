@@ -548,7 +548,6 @@
 
     /* Input bigger on mobile — prevents iOS zoom */
     .input, textarea.input { font-size: 16px; }
-    .journal-text { font-size: 16px; }
     .media-cover { font-size: 9px; }
     *::-webkit-scrollbar { width: 4px; height: 4px; }
   }
@@ -822,14 +821,6 @@
     color: var(--ink-2);
     overflow: hidden;
   }
-
-  .journal-text {
-    width: 100%; min-height: 80px;
-    background: transparent; border: none; outline: none; resize: none;
-    color: var(--ink); font-family: var(--font-serif); font-size: 14.5px;
-    line-height: 1.55;
-  }
-  .journal-text::placeholder { color: var(--ink-4); font-style: italic; }
 
   .stat-block { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .stat-block .v { font-family: var(--font-mono); font-feature-settings: "tnum" 1; font-size: 18px; color: var(--ink); }

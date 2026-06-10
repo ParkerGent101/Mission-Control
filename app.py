@@ -539,14 +539,12 @@ SMART ROUTING:
 • "gig/show at X on [date]" → add_show
 • "remind me" / "don't forget" → add_reminder
 • "add to today" / "schedule at [time]" → add_agenda_item
-• "read page X" / "on page X" → log_reading_page
 • "weigh Xlb" / "weight is X" → log_weight
 • "ate X cal" / "burned X cal" → log_calories
-• "journal:" / "note to self:" → add_journal_entry
 • "GLS task:" / "work task:" / "code task:" → add_work_task
 
 RESPONSE FORMAT — always reply with ONLY this JSON (no markdown, no extra text):
-{{"module":"agenda|finance|band|health|work|reading|holidays|journal|none","action":"added|logged|updated|scheduled|found|noted","summary":"one-line description of what was done","reply":"brief conversational reply (1-2 sentences max)"}}""".format(today=datetime.now().strftime("%B %d, %Y"))
+{{"module":"agenda|finance|band|health|work|none","action":"added|logged|updated|scheduled|found|noted","summary":"one-line description of what was done","reply":"brief conversational reply (1-2 sentences max)"}}""".format(today=datetime.now().strftime("%B %d, %Y"))
 
 client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
@@ -2212,7 +2210,7 @@ _CANON_CAT_EXACT = {
     'food/grocery': 'Food / Grocery', 'food/grocer': 'Food / Grocery',
     'grocer': 'Food / Grocery', 'groceries': 'Food / Grocery', 'grocery': 'Food / Grocery',
     'fun': 'Fun', 'dining': 'Fun', 'restaurants': 'Fun',
-    'gaming': 'Fun', 'entertainment': 'Fun',
+    'entertainment': 'Fun',
     'gas': 'Gas', 'fuel': 'Gas', 'transportation': 'Gas', 'transport': 'Gas', 'auto': 'Gas',
     'shopping': 'Shopping',
     'band': 'Band',
@@ -2255,7 +2253,6 @@ def _canonical_finance_category(raw):
         'food/grocer': 'Food / Grocery',
         'fuel': 'Gas',
         'fun': 'Fun',
-        'gaming': 'Fun',
         'gas': 'Gas',
         'groceries': 'Food / Grocery',
         'grocery': 'Food / Grocery',

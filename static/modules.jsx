@@ -114,7 +114,7 @@ const Card = ({ id, num, title, right, children, span = 6, hidden, bodyClass = "
 // =========================================================
 // TODAY / AGENDA
 // =========================================================
-const TAG_COLOR = { Work:"info", IT:"info", Cal:"mint", Read:"amber", Journal:"mint", band:"violet", Personal:"mint", default:"" };
+const TAG_COLOR = { Work:"info", IT:"info", Cal:"mint", band:"violet", Personal:"mint", default:"" };
 
 const AgendaCard = () => {
   const [items, setItems] = useState([]);
@@ -305,7 +305,7 @@ const normFinCat = (raw, fallback = "") => {
     housing: "Housing", utilities: "Utilities", subscriptions: "Subscriptions",
     food: "Food / Grocery", grocery: "Food / Grocery", grocer: "Food / Grocery", dining: "Fun", transport: "Gas",
     shopping: "Shopping", band: "Band", loans: "Loans",
-    gaming: "Fun", entertainment: "Fun", health: "Other", personal: "Other",
+    entertainment: "Fun", health: "Other", personal: "Other",
     IT: "Other", coding: "Other", gift: "Other", tax_refund: "Other", freelance: "Other",
   };
   const substr = [
@@ -2176,7 +2176,7 @@ const PracticeCard = ({ cardProps = {} } = {}) => {
   );
 };
 
-const MODULE_LIST = ["agenda","finance","band","health","work","reading","holidays","journal"];
+const MODULE_LIST = ["agenda","finance","band","health","work"];
 
 // ── Activity Log ─────────────────────────────────────────────────────────────
 const MODULE_META = {
@@ -2184,8 +2184,6 @@ const MODULE_META = {
   finance: { icon:"wallet",     color:"var(--accent-2)" },
   work:    { icon:"briefcase",  color:"var(--accent)"   },
   health:  { icon:"heart",      color:"var(--danger)"   },
-  reading: { icon:"book",       color:"var(--accent)"   },
-  journal: { icon:"feather",    color:"var(--accent-2)" },
   band:    { icon:"music",      color:"var(--accent)"   },
 };
 
