@@ -352,6 +352,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
   const [showAddSub, setShowAddSub] = useState(false);
   const [desc, setDesc] = useState(""); const [amt, setAmt] = useState(""); const [type, setType] = useState("expense"); const [cat, setCat] = useState("Housing");
   const [subName, setSubName] = useState(""); const [subAcct, setSubAcct] = useState(""); const [subAmt, setSubAmt] = useState(""); const [subDue, setSubDue] = useState("");
+  const [subEditId, setSubEditId] = useState(null);   // id of subscription being edited (reuses the add form)
   const catOverrides = React.useRef({});
   const [budget, setBudget] = React.useState(null);
   const [collapsedCats, setCollapsedCats] = useState({});
@@ -422,18 +423,32 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
 
   const addSub = async () => {
     if (!subName || !subAmt) return;
-    const res = await fetch('/api/finances/subscriptions', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ name: subName, acct: subAcct, amt: parseFloat(subAmt), due: subDue }) }).then(r=>r.json());
-    if (res.sheet_status && res.sheet_status !== 'written' && res.sheet_status !== 'not_configured') {
-      const msg = res.sheet_status === 'section_full'
-        ? "Saved locally — the Subscriptions section in your Sheet has no empty rows. Add a blank row and re-sync."
-        : `Saved locally — Sheet write failed (${res.sheet_status}).`;
-      alert(msg);
-    }
-    setSubs(s => [...s, { id: res.id, name: subName, acct: subAcct, amt: parseFloat(subAmt), due: subDue }]);
+    const editing = subEditId != null;
+    const payload = { name: subName, acct: subAcct, amt: parseFloat(subAmt), due: subDue };
+    try {
+      const r = await fetch(editing ? `/api/finances/subscriptions/${subEditId}` : '/api/finances/subscriptions',
+        { method: editing ? 'PATCH' : 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      if (!r.ok) throw 0;
+      const res = await r.json();
+      const okStatuses = ['written','updated','not_configured','cleared'];
+      if (res.sheet_status && !okStatuses.includes(res.sheet_status)) {
+        const msg = res.sheet_status === 'section_full'
+          ? "Saved locally — the Subscriptions section in your Sheet has no empty rows. Add a blank row and re-sync."
+          : `Saved locally — Sheet write failed (${res.sheet_status}).`;
+        alert(msg);
+      }
+      if (editing) setSubs(s => s.map(x => x.id===subEditId ? { ...x, ...payload } : x));
+      else setSubs(s => [...s, { id: res.id, ...payload }]);
+    } catch { toastErr("Couldn’t save subscription — try again."); return; }
     setSubName(''); setSubAcct(''); setSubAmt(''); setSubDue('');
-    setShowAddSub(false);
+    setSubEditId(null); setShowAddSub(false);
     loadFinances(month);
+  };
+
+  const startEditSub = (s) => {
+    setSubEditId(s.id);
+    setSubName(s.name||''); setSubAcct(s.acct||''); setSubAmt(String(s.amt||'')); setSubDue(s.due||'');
+    setShowAddSub(true);
   };
 
   const deleteSub = async (sid) => {
@@ -442,6 +457,55 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
     if (res.sheet_status && !['cleared','not_configured','not_found'].includes(res.sheet_status)) {
       alert(`Removed from the app, but the Sheet update failed (${res.sheet_status}). It may reappear on next sync.`);
     }
+  };
+
+  // Edit an existing expense transaction (amount / description); category stays the same.
+  const editTxn = async (t, changes) => {
+    const newCat = catOverrides.current[t.id] ?? normFinCat(t.cat, t.merchant);
+    const prev = txns;
+    setTxns(ts => ts.map(x => x.id===t.id ? {
+      ...x,
+      amount: changes.amount!==undefined ? -Math.abs(changes.amount) : x.amount,
+      merchant: changes.description!==undefined ? changes.description : x.merchant,
+    } : x));
+    try {
+      const res = await fetch(`/api/finances/${t.id}`, {
+        method:'PATCH', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          category: newCat,
+          description: changes.description!==undefined ? changes.description : t.merchant,
+          ...(changes.amount!==undefined ? { amount: changes.amount } : {}),
+          sheet_tab: t.sheet_tab, sheet_row: t.sheet_row,
+          sheet_col: t.sheet_col, sheet_cols: t.sheet_cols, sheet_kind: t.sheet_kind,
+        })
+      });
+      if (!res.ok) throw 0;
+      loadFinances(month);
+    } catch { toastErr("Couldn’t save that change — reverting."); setTxns(prev); }
+  };
+  const promptEditAmount = (t) => {
+    const v = prompt("Amount ($):", Math.abs(t.amount).toFixed(2));
+    if (v == null) return;
+    const n = parseFloat(v);
+    if (isNaN(n) || n < 0) { toastErr("Enter a valid amount."); return; }
+    editTxn(t, { amount: n });
+  };
+  const promptEditDesc = (t) => {
+    const v = prompt("Description:", t.merchant || "");
+    if (v == null) return;
+    editTxn(t, { description: v.trim() });
+  };
+
+  // Edit a category's monthly budgeted amount (writes column E in the Sheet).
+  const editBudget = (c) => {
+    const v = prompt(`Monthly budget for ${c.name} ($):`, String(c.budget || c.budgeted || 0));
+    if (v == null) return;
+    const n = parseFloat(v);
+    if (isNaN(n) || n < 0) { toastErr("Enter a valid amount."); return; }
+    fetch('/api/finances/budget', { method:'PATCH', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ month, category: c.name, budgeted: n }) })
+      .then(async r => { if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.error || 'failed'); } loadFinances(month); })
+      .catch(err => toastErr(err.message ? `Couldn’t update budget — ${err.message}` : "Couldn’t update budget."));
   };
 
   const [rolling, setRolling] = useState(false);
@@ -552,7 +616,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
                 <div key={i} className="bar-row">
                   <div className="cat"><span className="swatch" style={{background:c.color}}/><span className="cat-name">{c.name}</span></div>
                   <div className="amt">{fmtMoney(c.actual)}</div>
-                  <div className="amt muted-2">/ {fmtMoney(c.budget,{cents:false})}</div>
+                  <div className="amt muted-2" onClick={()=>editBudget(c)} title="Edit budget" style={{cursor:'pointer'}}>/ {fmtMoney(c.budget,{cents:false})}</div>
                   <div className="pct" style={{color:over?"var(--danger)":"var(--ink-3)"}}>{Math.round(pct)}%</div>
                   <div className="mini-bar"><div className="fill" style={{width:Math.min(100,pct)+"%",background:over?"var(--danger)":c.color}}/></div>
                 </div>
@@ -618,7 +682,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
                       <div key={t.id||i} className="txn" style={{gridTemplateColumns:"10px 1fr auto auto auto",gap:6,alignItems:'center',paddingLeft:18}}>
                         <span className="cat-dot" style={{background:t.amount>0?"var(--accent-2)":FIN_CAT_COLOR[nc]||"var(--ink-4)"}}/>
                         <div>
-                          <div className="merchant">{t.merchant}</div>
+                          <div className="merchant" {...(t.amount<0 ? {onClick:()=>promptEditDesc(t), title:"Edit description", style:{cursor:'pointer'}} : {})}>{t.merchant}</div>
                           <div className="meta">{t.date}</div>
                         </div>
                         {t.amount < 0
@@ -651,7 +715,8 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
                               {t.amount > 0 ? 'income' : normFinCat(t.cat)}
                             </span>
                         }
-                        <span className="amount" style={{color:t.amount>0?"var(--accent-2)":"var(--ink)"}}>
+                        <span className="amount" style={{color:t.amount>0?"var(--accent-2)":"var(--ink)", cursor:t.amount<0?'pointer':'default'}}
+                          {...(t.amount<0 ? {onClick:()=>promptEditAmount(t), title:"Edit amount"} : {})}>
                           {t.amount>0?"+":""}{fmtMoney(Math.abs(t.amount))}
                         </span>
                         <span style={{cursor:"pointer",color:"var(--ink-4)",padding:"0 2px",lineHeight:1}} title="Remove"
@@ -685,10 +750,11 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
           <div className="section-h">
             <span>Subscriptions</span><span className="line"/>
             <span className="muted-2 num" style={{fontSize:10.5}}>{fmtMoney(subTotal)}/mo</span>
-            <button className="btn" style={{padding:'4px 10px',fontSize:11}} onClick={()=>setShowAddSub(s=>!s)}><Icon name="plus" size={12}/>Add</button>
+            <button className="btn" style={{padding:'4px 10px',fontSize:11}} onClick={()=>{ if(showAddSub){ setShowAddSub(false); setSubEditId(null); } else { setSubEditId(null); setSubName(''); setSubAcct(''); setSubAmt(''); setSubDue(''); setShowAddSub(true); } }}><Icon name="plus" size={12}/>Add</button>
           </div>
           {showAddSub && (
             <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:8,padding:'8px',background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid var(--line)'}}>
+              {subEditId!=null && <div className="muted-2 mono" style={{fontSize:10,letterSpacing:'.06em'}}>EDIT SUBSCRIPTION</div>}
               <input className="input" placeholder="Name (e.g. Netflix)" value={subName} onChange={e=>setSubName(e.target.value)} style={{fontSize:12}}/>
               <div style={{display:'flex',gap:6}}>
                 <input className="input" placeholder="Account" value={subAcct} onChange={e=>setSubAcct(e.target.value)} style={{flex:1,fontSize:12}}/>
@@ -696,16 +762,18 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
               </div>
               <div style={{display:'flex',gap:6}}>
                 <input className="input" placeholder="Due (e.g. 15th)" value={subDue} onChange={e=>setSubDue(e.target.value)} style={{flex:1,fontSize:12}}/>
-                <button className="btn primary" onClick={addSub} style={{fontSize:11}}>Add</button>
-                <button className="btn ghost" onClick={()=>setShowAddSub(false)} style={{fontSize:11}}>✕</button>
+                <button className="btn primary" onClick={addSub} style={{fontSize:11}}>{subEditId!=null?'Save':'Add'}</button>
+                <button className="btn ghost" onClick={()=>{ setShowAddSub(false); setSubEditId(null); setSubName(''); setSubAcct(''); setSubAmt(''); setSubDue(''); }} style={{fontSize:11}}>✕</button>
               </div>
             </div>
           )}
           {subs.length === 0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 4px'}}>No subscriptions yet — tap “Add”.</div>}
           {subs.map((s,i) => (
-            <div key={s.id||i} className="txn" style={{gridTemplateColumns:"1fr auto auto",alignItems:"center",padding:"5px 4px"}}>
+            <div key={s.id||i} className="txn" style={{gridTemplateColumns:"1fr auto auto auto",alignItems:"center",padding:"5px 4px"}}>
               <div><div className="merchant">{s.name}</div><div className="meta">{s.acct} · due {s.due}</div></div>
               <span className="amount muted">{fmtMoney(s.amt)}</span>
+              <button className="btn ghost" aria-label={`Edit ${s.name}`} title={`Edit ${s.name}`} onClick={()=>startEditSub(s)}
+                style={{minWidth:34,minHeight:34,padding:0,fontSize:13,lineHeight:1,color:"var(--ink-3)"}}>✎</button>
               <button className="btn ghost" aria-label={`Remove ${s.name}`} title={`Remove ${s.name}`}
                 onClick={()=>{ if (confirm(`Remove subscription “${s.name}”?`)) deleteSub(s.id); }}
                 style={{minWidth:34,minHeight:34,padding:0,fontSize:16,lineHeight:1,color:"var(--ink-3)"}}>×</button>

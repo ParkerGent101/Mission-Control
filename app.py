@@ -796,6 +796,70 @@ def get_finances_budget():
         "categories": [{"name": k, "actual": v, "budgeted": 0} for k, v in cats.items()]
     })
 
+@app.route("/api/finances/budget", methods=["PATCH"])
+def patch_finances_budget():
+    """Edit a category's budgeted amount (column E) in the month's budget tracker.
+    Body: {month: 'YYYY-MM', category: 'Housing', budgeted: 1050}. Writes the new
+    value to the category's single budget row; refuses if the category is split
+    across multiple budget rows (edit those directly in the Sheet)."""
+    if not FINANCE_SHEET_ID:
+        return jsonify({"error": "No finance sheet configured"}), 400
+    d = request.json or {}
+    category = _canon_cat(d.get("category") or "")
+    if not category:
+        return jsonify({"error": "category required"}), 400
+    try:
+        budgeted = float(str(d.get("budgeted")).replace('$', '').replace(',', '') or 0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "budgeted must be a number"}), 400
+    month = d.get("month") or datetime.now().strftime("%Y-%m")
+    try:
+        svc = _sheets_svc()
+        tab = _month_tab(month)
+        rows = svc.spreadsheets().values().get(
+            spreadsheetId=FINANCE_SHEET_ID, range=tab
+        ).execute().get('values', [])
+        max_cols = max((len(r) for r in rows), default=1)
+        padded = [r + [''] * (max_cols - len(r)) for r in rows]
+        hdr_row_idx, _, _, _ = _finance_budget_columns(padded)
+        hdr = [str(c).lower().strip() for c in padded[hdr_row_idx]]
+        budget_col = next((i for i, h in enumerate(hdr) if 'budget' in h), 4)
+        matches = []      # all rows for this category
+        budget_rows = []  # rows that already carry a budgeted value
+        current_cat = ''
+        for ri in range(hdr_row_idx + 1, len(padded)):
+            row = padded[ri]
+            rl = ' '.join(row[:8]).lower()
+            if any(kw in rl for kw in ['anticipated', 'actual total', 'roommate', 'savings total']):
+                break
+            cat_val = row[0].strip() if len(row) > 0 else ''
+            if cat_val and not any(ch.isdigit() for ch in cat_val):
+                current_cat = cat_val
+            desc_val = row[1].strip() if len(row) > 1 else ''
+            if _canon_cat(cat_val or desc_val or current_cat) != category:
+                continue
+            matches.append(ri)
+            budg_str = row[budget_col].strip() if len(row) > budget_col else ''
+            try:
+                if float(budg_str.replace('$', '').replace(',', '') or 0) > 0:
+                    budget_rows.append(ri)
+            except ValueError:
+                pass
+        if not matches:
+            return jsonify({"error": f"No '{category}' budget row found in '{tab}'."}), 404
+        if len(budget_rows) > 1:
+            return jsonify({"error": f"'{category}' is split across multiple rows in '{tab}'. Edit those directly in the Sheet."}), 409
+        target_row = budget_rows[0] if budget_rows else matches[0]
+        svc.spreadsheets().values().update(
+            spreadsheetId=FINANCE_SHEET_ID,
+            range=f"'{tab}'!{_col_letter(budget_col)}{target_row + 1}",
+            valueInputOption='USER_ENTERED',
+            body={'values': [[budgeted]]}
+        ).execute()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/finances", methods=["POST"])
 def post_finance():
     d = request.json
@@ -1062,6 +1126,51 @@ def post_subscription():
         except Exception as e:
             sheet_error = str(e)
     resp = {"id": sid, "sheet_status": sheet_status}
+    if sheet_error:
+        resp["sheet_error"] = sheet_error
+    return jsonify(resp)
+
+@app.route("/api/finances/subscriptions/<int:sid>", methods=["PATCH"])
+def patch_subscription(sid):
+    d = request.json or {}
+    subs = _load(SUBS_FILE)
+    sub = next((s for s in subs if s.get("id") == sid), None)
+    if not sub:
+        return jsonify({"error": "Not found"}), 404
+    old_name = sub.get("name", "")
+    sub["name"] = d.get("name", sub.get("name", ""))
+    sub["acct"] = d.get("acct", sub.get("acct", ""))
+    sub["amt"]  = float(d.get("amt", sub.get("amt", 0)) or 0)
+    sub["due"]  = d.get("due", sub.get("due", ""))
+    _save(SUBS_FILE, subs)
+
+    sheet_status = "not_configured"
+    sheet_error = None
+    if FINANCE_SHEET_ID:
+        sheet_status = "error"
+        try:
+            svc = _sheets_svc()
+            tab = _month_tab(datetime.now().strftime("%Y-%m"))
+            rows = svc.spreadsheets().values().get(
+                spreadsheetId=FINANCE_SHEET_ID, range=tab
+            ).execute().get('values', [])
+            # Locate the row by the OLD name (it may be renamed); fall back to the new name.
+            row_idx = _find_subscription_sheet_row(rows, old_name)
+            if row_idx is None:
+                row_idx = _find_subscription_sheet_row(rows, sub["name"])
+            if row_idx is None:
+                sheet_status = "not_found"
+            else:
+                a1 = f"'{tab}'!B{row_idx + 1}:E{row_idx + 1}"
+                svc.spreadsheets().values().update(
+                    spreadsheetId=FINANCE_SHEET_ID, range=a1,
+                    valueInputOption='USER_ENTERED',
+                    body={'values': [[sub["name"], sub["acct"], sub["due"], sub["amt"]]]}
+                ).execute()
+                sheet_status = "updated"
+        except Exception as e:
+            sheet_error = str(e)
+    resp = {"ok": True, "sheet_status": sheet_status}
     if sheet_error:
         resp["sheet_error"] = sheet_error
     return jsonify(resp)
@@ -2466,6 +2575,15 @@ def _patch_finance_sheet(d):
         date_val = d.get("date") or datetime.now().strftime("%Y-%m-%d")
 
         if kind == "budget" and old_cat == cat:
+            # Category unchanged — update description/amount in place (col = actual cell).
+            _, desc_col, _, _ = _finance_budget_columns(padded)
+            svc.spreadsheets().values().batchUpdate(
+                spreadsheetId=FINANCE_SHEET_ID,
+                body={'valueInputOption': 'USER_ENTERED', 'data': [
+                    {'range': f"'{tab}'!{_col_letter(desc_col)}{row + 1}", 'values': [[desc]]},
+                    {'range': f"'{tab}'!{_col_letter(col)}{row + 1}", 'values': [[amt]]},
+                ]}
+            ).execute()
             return jsonify({"ok": True})
         if cat in BUDGET_TRANSACTION_CATEGORIES:
             written = _write_budget_transaction(svc, FINANCE_SHEET_ID, tab, rows, cat, desc, amt)
