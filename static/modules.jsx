@@ -13,6 +13,10 @@ const useRefreshListener = (loadFn) => {
   }, []);
 };
 
+// Show a red error toast when a save fails (reuses window.__toast from app.jsx).
+const toastErr = (m = "Couldn’t save — check your connection and try again") =>
+  (window.__toast ? window.__toast(m, "error") : console.error(m));
+
 const fmtMoney = (n, opts = {}) => {
   const sign = n < 0 ? "-" : "";
   const v = Math.abs(n);
@@ -155,12 +159,17 @@ const AgendaCard = () => {
 
   const toggle = (id) => {
     setItems(xs => xs.filter(x => x.id !== id));
-    fetch(`/api/agenda/${id}/toggle`, { method: 'POST' }).catch(() => {});
+    fetch(`/api/agenda/${id}/toggle`, { method: 'POST' })
+      .then(r => { if (!r.ok) throw 0; })
+      .catch(() => { toastErr("Couldn’t update that item — reloading."); loadAgenda(); });
   };
 
   const snoozeReminder = async (rid) => {
-    await fetch(`/api/reminders/${rid}/snooze`, { method:'POST' }).catch(()=>{});
     setReminders(rs => rs.filter(r => r.id !== rid));
+    try {
+      const r = await fetch(`/api/reminders/${rid}/snooze`, { method:'POST' });
+      if (!r.ok) throw 0;
+    } catch { toastErr("Couldn’t snooze that reminder — reloading."); loadAgenda(); }
   };
 
   const calNet  = calories.consumed - calories.burned;
@@ -177,9 +186,12 @@ const AgendaCard = () => {
           const label = prompt("Add agenda item:");
           if (!label) return;
           const time = prompt("Time (HH:MM):", "09:00") || "09:00";
-          const res = await fetch('/api/agenda', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({label, time, tag:"Personal", color:"mint", date:today}) });
-          const d = await res.json();
-          setItems(xs => [...xs, { id: d.id, time, label, tag: "Personal", color: "mint", done: false, date: today }]);
+          try {
+            const res = await fetch('/api/agenda', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({label, time, tag:"Personal", color:"mint", date:today}) });
+            if (!res.ok) throw 0;
+            const d = await res.json();
+            setItems(xs => [...xs, { id: d.id, time, label, tag: "Personal", color: "mint", done: false, date: today }]);
+          } catch { toastErr("Couldn’t add that item — try again."); }
         }}><Icon name="plus" size={13}/>Add</button>
       </>}
       bodyClass="flush"
@@ -763,6 +775,7 @@ const BandCard = ({ cardProps = {} } = {}) => {
   };
 
   const removeShow = async (g) => {
+    if (!confirm(`Remove "${g.venue}" on ${g.date}? This also updates comingupaces.net.`)) return;
     setPushing(true);
     try {
       const res = await fetch(`/api/shows/${g.originalIdx}`, {method:'DELETE'});
@@ -832,28 +845,44 @@ const BandCard = ({ cardProps = {} } = {}) => {
 
   const addContact = async () => {
     if (!newContact.venue) return;
-    const res = await fetch('/api/band/contacts', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(newContact)}).then(r=>r.json());
-    setContacts(cs => [...cs, {...newContact, id:res.id}]);
-    setNewContact({name:'',venue:'',city:'',type:'',phone:'',email:'',website:'',status:'not contacted',next_step:'',notes:''});
-    setShowAddContact(false);
+    try {
+      const res = await fetch('/api/band/contacts', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(newContact)});
+      if (!res.ok) throw 0;
+      const d = await res.json();
+      setContacts(cs => [...cs, {...newContact, id:d.id}]);
+      setNewContact({name:'',venue:'',city:'',type:'',phone:'',email:'',website:'',status:'not contacted',next_step:'',notes:''});
+      setShowAddContact(false);
+    } catch { toastErr("Couldn’t add that venue — try again."); }
   };
 
   const saveContact = async () => {
-    await fetch(`/api/band/contacts/${editContactId}`, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(editContact)});
+    const prev = contacts;
     setContacts(cs => cs.map(x => x.id===editContactId ? {...x, ...editContact} : x));
-    setEditContactId(null);
-    setEditContact({});
+    setEditContactId(null); setEditContact({});
+    try {
+      const r = await fetch(`/api/band/contacts/${editContactId}`, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(editContact)});
+      if (!r.ok) throw 0;
+    } catch { toastErr("Couldn’t save that venue — reverting."); setContacts(prev); }
   };
 
   const markContacted = async (c) => {
     const today = new Date().toISOString().slice(0,10);
-    await fetch(`/api/band/contacts/${c.id}`, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({last:today,status:'follow up'})});
+    const prev = contacts;
     setContacts(cs => cs.map(x => x.id===c.id ? {...x, last:today, status:'follow up'} : x));
+    try {
+      const r = await fetch(`/api/band/contacts/${c.id}`, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({last:today,status:'follow up'})});
+      if (!r.ok) throw 0;
+    } catch { toastErr("Couldn’t update that venue — reverting."); setContacts(prev); }
   };
 
   const deleteContact = async (id) => {
-    await fetch(`/api/band/contacts/${id}`, {method:'DELETE'});
+    if (!confirm("Remove this venue / contact?")) return;
+    const prev = contacts;
     setContacts(cs => cs.filter(x => x.id !== id));
+    try {
+      const r = await fetch(`/api/band/contacts/${id}`, {method:'DELETE'});
+      if (!r.ok) throw 0;
+    } catch { toastErr("Couldn’t remove that venue — reverting."); setContacts(prev); }
   };
 
   const nextGig = gigs[0];
@@ -1293,8 +1322,9 @@ const HealthCard = ({ cardProps = {} } = {}) => {
     const w = parseFloat(newWeight);
     if (!w || w < 80 || w > 500) return;
     await fetch('/api/health/weight', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ weight: w, date: viewDate }) }).catch(() => {});
-    window.__toast?.(`Weight ${w} lb logged for ${viewDate}`, 'success');
+      body: JSON.stringify({ weight: w, date: viewDate }) })
+      .then(r => { if (!r.ok) throw 0; window.__toast?.(`Weight ${w} lb logged for ${viewDate}`, 'success'); })
+      .catch(() => toastErr("Couldn’t save weight — try again."));
     setNewWeight(''); load();
   };
 
@@ -1302,8 +1332,9 @@ const HealthCard = ({ cardProps = {} } = {}) => {
     const h = parseFloat(newHeight);
     if (!h || h < 48 || h > 96) return;
     await fetch('/api/health/config', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ height_in: h }) }).catch(() => {});
-    window.__toast?.('Height saved', 'success');
+      body: JSON.stringify({ height_in: h }) })
+      .then(r => { if (!r.ok) throw 0; window.__toast?.('Height saved', 'success'); })
+      .catch(() => toastErr("Couldn’t save height — try again."));
     setEditHeight(false); load();
   };
 
@@ -1320,7 +1351,9 @@ const HealthCard = ({ cardProps = {} } = {}) => {
     setFoodName(''); setFoodCal(''); setFoodProtein(''); setFoodCarbs(''); setFoodFat('');
     window.__toast?.(`${item.name} logged`, 'success');
     fetch('/api/health/food', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...item, date: viewDate }) }).catch(() => load());
+      body: JSON.stringify({ ...item, date: viewDate }) })
+      .then(r => { if (!r.ok) throw 0; })
+      .catch(() => { toastErr("Couldn’t log that food — reloading."); load(); });
     setTimeout(load, 300);  // refresh raw data so subsequent ops see the new food
   };
 
@@ -1356,7 +1389,9 @@ const HealthCard = ({ cardProps = {} } = {}) => {
   const deleteFood = (idx) => {
     setFoodLog(prev => prev.filter((_, i) => i !== idx));
     fetch('/api/health/food', { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ index: idx, date: viewDate }) }).catch(() => {});
+      body: JSON.stringify({ index: idx, date: viewDate }) })
+      .then(r => { if (!r.ok) throw 0; })
+      .catch(() => { toastErr("Couldn’t remove that food — reloading."); });
     setTimeout(load, 300);
   };
 
@@ -1364,7 +1399,9 @@ const HealthCard = ({ cardProps = {} } = {}) => {
     const v = Math.max(0, Math.round(oz));
     setWater(v);
     await fetch('/api/health/water', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ oz: v, date: viewDate }) }).catch(() => {});
+      body: JSON.stringify({ oz: v, date: viewDate }) })
+      .then(r => { if (!r.ok) throw 0; })
+      .catch(() => toastErr("Couldn’t save water — reloading."));
     setTimeout(load, 300);  // re-pull so Sheet-synced value is reflected
   };
 
@@ -1376,16 +1413,19 @@ const HealthCard = ({ cardProps = {} } = {}) => {
     setWaterBottleInput(String(bottleOz));
     setWaterGoalInput(String(goalOz));
     await fetch('/api/health/config', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ water_bottle_oz: bottleOz, water_goal_oz: goalOz }) }).catch(() => {});
+      body: JSON.stringify({ water_bottle_oz: bottleOz, water_goal_oz: goalOz }) })
+      .then(r => { if (!r.ok) throw 0; window.__toast?.('Water settings saved', 'success'); })
+      .catch(() => toastErr("Couldn’t save water settings — try again."));
     setEditWater(false);
-    window.__toast?.('Water settings saved', 'success');
   };
 
   const toggleHabit = async (habitId) => {
     const newVal = !todayHabits[habitId];
     setTodayHabits(h => ({ ...h, [habitId]: newVal }));
     await fetch('/api/health/habit', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ habit: habitId, date: viewDate }) }).catch(() => {});
+      body: JSON.stringify({ habit: habitId, date: viewDate }) })
+      .then(r => { if (!r.ok) throw 0; })
+      .catch(() => toastErr("Couldn’t update that habit — reloading."));
     load();
   };
 
@@ -1396,7 +1436,9 @@ const HealthCard = ({ cardProps = {} } = {}) => {
     const done = !rehabDone[key];
     setRehabDone(p => ({ ...p, [key]: done }));
     await fetch('/api/health/rehab', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, done, date: viewDate }) }).catch(() => {});
+      body: JSON.stringify({ key, done, date: viewDate }) })
+      .then(r => { if (!r.ok) throw 0; })
+      .catch(() => toastErr("Couldn’t update that exercise — reloading."));
     setTimeout(load, 300);
   };
 
@@ -1404,7 +1446,9 @@ const HealthCard = ({ cardProps = {} } = {}) => {
     const done = !coreDone;
     setCoreDone(done);
     await fetch('/api/health/core', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ done, date: viewDate }) }).catch(() => {});
+      body: JSON.stringify({ done, date: viewDate }) })
+      .then(r => { if (!r.ok) throw 0; })
+      .catch(() => toastErr("Couldn’t update core — reloading."));
     setTimeout(load, 300);
   };
 
@@ -1890,13 +1934,22 @@ const WorkCard = () => {
   useRefreshListener(loadWork);
 
   const markDone = async (id) => {
-    await fetch(`/api/work/${id}/done`, {method:'POST'}).catch(()=>{});
+    const prev = allTasks;
     setAllTasks(xs => xs.filter(x => x.id !== id));
-    if (window.__toast) window.__toast('Task done ✓');
+    try {
+      const r = await fetch(`/api/work/${id}/done`, {method:'POST'});
+      if (!r.ok) throw 0;
+      if (window.__toast) window.__toast('Task done ✓');
+    } catch { toastErr("Couldn’t complete that task — reverting."); setAllTasks(prev); }
   };
   const deleteTask = async (id) => {
-    await fetch(`/api/work/${id}`, {method:'DELETE'}).catch(()=>{});
+    if (!confirm("Delete this task?")) return;
+    const prev = allTasks;
     setAllTasks(xs => xs.filter(x => x.id !== id));
+    try {
+      const r = await fetch(`/api/work/${id}`, {method:'DELETE'});
+      if (!r.ok) throw 0;
+    } catch { toastErr("Couldn’t delete that task — reverting."); setAllTasks(prev); }
   };
   const addTask = async (e) => {
     if (e.key !== 'Enter' || !newTask.trim()) return;
@@ -1905,8 +1958,12 @@ const WorkCard = () => {
     const label = newTask.replace(/P[0-3]/,'').trim();
     const body = {title:label, priority:priority==='P0'?'high':priority==='P1'?'normal':'low', project:newTaskProject||''};
     if (newTaskDue) body.due_date = newTaskDue;
-    const res = await fetch('/api/work', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})
-      .then(r=>r.json()).catch(()=>({id:Date.now()}));
+    let res;
+    try {
+      const r = await fetch('/api/work', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+      if (!r.ok) throw 0;
+      res = await r.json();
+    } catch { toastErr("Couldn’t add that task — try again."); return; }
     setAllTasks(xs=>[...xs, {id:res.id||Date.now(), label, priority, project:newTaskProject||'', done:false, due_date:newTaskDue||null}]);
     setNewTask(''); setNewTaskDue('');
     if (window.__toast) window.__toast('Task added');
@@ -2486,15 +2543,26 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
     setSaving(true);
     const editing = !!form.id;
     const url = editing ? `/api/calendar/events/manual/${form.id}` : '/api/calendar/events/manual';
-    const res = await fetch(url, {method: editing?'PATCH':'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({category:form.category,title:form.title,date:form.date,time:form.time,end_time:form.end_time,meta:form.meta,highlight:form.highlight,recurring:form.recurring,weekdays:form.weekdays})});
+    let res;
+    try {
+      res = await fetch(url, {method: editing?'PATCH':'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({category:form.category,title:form.title,date:form.date,time:form.time,end_time:form.end_time,meta:form.meta,highlight:form.highlight,recurring:form.recurring,weekdays:form.weekdays})});
+    } catch { setSaving(false); toastErr(editing?'Couldn’t save event — try again.':'Couldn’t add event — try again.'); return; }
     setSaving(false);
-    if (!res.ok) { if (window.__toast) window.__toast(editing?'Save failed':'Add event failed'); return; }
+    if (!res.ok) { toastErr(editing?'Couldn’t save event — try again.':'Couldn’t add event — try again.'); return; }
     setForm(blankForm);
     load();
     if (window.__toast) window.__toast(editing?'Event updated':'Event added');
   };
-  const delEvent = async (id) => { if(!id) return; await fetch(`/api/calendar/events/manual/${id}`, {method:'DELETE'}); load(); };
+  const delEvent = async (id) => {
+    if (!id) return;
+    if (!confirm("Delete this calendar event?")) return;
+    try {
+      const r = await fetch(`/api/calendar/events/manual/${id}`, {method:'DELETE'});
+      if (!r.ok) throw 0;
+    } catch { toastErr("Couldn’t delete that event — try again."); }
+    load();
+  };
   const toggleHighlight = async (e) => {
     if (!e.id) return;
     const cur = manual.find(x=>x.id===e.id);
@@ -3013,11 +3081,16 @@ const RecurringTasksCard = ({ cardProps = {} } = {}) => {
   const addTask = async () => {
     const title = newTitle.trim();
     if (!title) return;
-    const res = await fetch('/api/recurring', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, frequency: newFreq }),
-    }).then(r => r.json()).catch(() => null);
+    let res = null;
+    try {
+      const r = await fetch('/api/recurring', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, frequency: newFreq }),
+      });
+      if (!r.ok) throw 0;
+      res = await r.json();
+    } catch { toastErr("Couldn’t add that routine — try again."); return; }
     if (res && res.id) {
       setItems(xs => [...xs, { ...res, due: true }]);
       setNewTitle("");
@@ -3028,17 +3101,25 @@ const RecurringTasksCard = ({ cardProps = {} } = {}) => {
   const markDone = async (id) => {
     const today = new Date().toISOString().slice(0, 10);
     setItems(xs => xs.map(x => x.id === id ? { ...x, last_completed: today, due: false } : x));
-    await fetch(`/api/recurring/${id}/done`, { method: 'POST' }).catch(() => {});
+    await fetch(`/api/recurring/${id}/done`, { method: 'POST' })
+      .then(r => { if (!r.ok) throw 0; })
+      .catch(() => { toastErr("Couldn’t update that routine — reloading."); load(); });
   };
 
   const undo = async (id) => {
     setItems(xs => xs.map(x => x.id === id ? { ...x, last_completed: null, due: true } : x));
-    await fetch(`/api/recurring/${id}/undo`, { method: 'POST' }).catch(() => {});
+    await fetch(`/api/recurring/${id}/undo`, { method: 'POST' })
+      .then(r => { if (!r.ok) throw 0; })
+      .catch(() => { toastErr("Couldn’t update that routine — reloading."); load(); });
   };
 
   const remove = async (id) => {
+    if (!confirm("Remove this routine?")) return;
+    const prev = items;
     setItems(xs => xs.filter(x => x.id !== id));
-    await fetch(`/api/recurring/${id}`, { method: 'DELETE' }).catch(() => {});
+    await fetch(`/api/recurring/${id}`, { method: 'DELETE' })
+      .then(r => { if (!r.ok) throw 0; })
+      .catch(() => { toastErr("Couldn’t remove that routine — reverting."); setItems(prev); });
   };
 
   const resetScope = async (scope) => {
