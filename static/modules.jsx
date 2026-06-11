@@ -885,6 +885,27 @@ const BandCard = ({ cardProps = {} } = {}) => {
     } catch { toastErr("Couldn’t remove that venue — reverting."); setContacts(prev); }
   };
 
+  // ── Setlists / songs CRUD ──
+  const [songDraft, setSongDraft] = useState({});   // keyed input text: 'repertoire' | 'future' | 'sl:<name>'
+  const [newSetlist, setNewSetlist] = useState('');
+  const draftVal = (k) => songDraft[k] || '';
+  const setDraft = (k, v) => setSongDraft(d => ({ ...d, [k]: v }));
+  const reloadSongs = () => fetch('/api/band/songs').then(r=>r.json()).then(setSongs).catch(()=>{});
+  const songReq = async (url, method, body) => {
+    try {
+      const r = await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      if (!r.ok) throw 0;
+      setSongs(await r.json());
+    } catch { toastErr("Couldn’t update songs — reloading."); reloadSongs(); }
+  };
+  const addListSong = (key, url) => { const v = draftVal(key).trim(); if (!v) return; songReq(url, 'POST', { song: v }); setDraft(key, ''); };
+  const removeListSong = (url, song) => songReq(url, 'DELETE', { song });
+  const addSetlistSong = (name) => { const k = 'sl:'+name, v = draftVal(k).trim(); if (!v) return; songReq('/api/band/songs/setlist/song','POST',{ setlist:name, song:v }); setDraft(k, ''); };
+  const removeSetlistSong = (name, song) => songReq('/api/band/songs/setlist/song','DELETE',{ setlist:name, song });
+  const createSetlist = () => { const v = newSetlist.trim(); if (!v) return; songReq('/api/band/songs/setlist','POST',{ name:v }); setNewSetlist(''); };
+  const renameSetlist = (name) => { const nn = prompt('Rename setlist:', name); if (!nn || !nn.trim() || nn.trim()===name) return; songReq('/api/band/songs/setlist','PATCH',{ name, new_name:nn.trim() }); };
+  const deleteSetlist = (name) => { if (!confirm(`Delete setlist "${name}"?`)) return; songReq('/api/band/songs/setlist','DELETE',{ name }); };
+
   const nextGig = gigs[0];
   const overdue = contacts.filter(c=>c.status==='follow up'||c.status==='not contacted').length;
 
@@ -993,35 +1014,68 @@ const BandCard = ({ cardProps = {} } = {}) => {
 
       {/* ── Setlists tab ── */}
       {bandTab==='setlists' && <>
+        <div style={{display:'flex',gap:6,marginBottom:10}}>
+          <input className="input" placeholder="New setlist name…" value={newSetlist}
+            onChange={e=>setNewSetlist(e.target.value)} onKeyDown={e=>e.key==='Enter'&&createSetlist()}
+            style={{flex:1,fontSize:12}}/>
+          <button className="btn" onClick={createSetlist} style={{fontSize:11}}><Icon name="plus" size={12}/>Setlist</button>
+        </div>
         {(songs.setlists||[]).map((sl,i) => (
           <div key={i} style={{marginBottom:14}}>
             <div className="section-h">
               <span style={{fontWeight:600}}>{sl.name}</span><span className="line"/>
               <span className="muted-2 mono" style={{fontSize:10}}>{sl.songs.length} songs · ~{Math.round(sl.songs.length * 5)} min</span>
+              <button className="btn ghost" title="Rename setlist" style={{padding:'2px 6px',fontSize:11}} onClick={()=>renameSetlist(sl.name)}>✎</button>
+              <button className="btn ghost" title="Delete setlist" style={{padding:'2px 6px',fontSize:12,color:'var(--ink-4)'}} onClick={()=>deleteSetlist(sl.name)}>×</button>
             </div>
             <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'2px 12px'}}>
               {sl.songs.map((s,j) => (
-                <div key={j} style={{fontSize:11.5,padding:'2px 0',borderBottom:'1px solid var(--line-soft)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                  {j+1}. {s}
+                <div key={j} style={{display:'flex',alignItems:'center',gap:4,fontSize:11.5,padding:'2px 0',borderBottom:'1px solid var(--line-soft)'}}>
+                  <span style={{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{j+1}. {s}</span>
+                  <span onClick={()=>removeSetlistSong(sl.name, s)} title="Remove" style={{cursor:'pointer',color:'var(--ink-4)',padding:'0 3px',fontSize:13,lineHeight:1}}>×</span>
                 </div>
               ))}
+            </div>
+            <div style={{display:'flex',gap:6,marginTop:6}}>
+              <input className="input" placeholder={`Add song to "${sl.name}"…`} value={draftVal('sl:'+sl.name)}
+                onChange={e=>setDraft('sl:'+sl.name, e.target.value)} onKeyDown={e=>e.key==='Enter'&&addSetlistSong(sl.name)}
+                style={{flex:1,fontSize:11}}/>
+              <button className="btn ghost" onClick={()=>addSetlistSong(sl.name)} style={{fontSize:11}}>+</button>
             </div>
           </div>
         ))}
         <div className="section-h"><span>All Songs Ever Played</span><span className="line"/>
           <span className="muted-2 mono" style={{fontSize:10}}>{(songs.repertoire||[]).length} songs</span>
         </div>
+        <div style={{display:'flex',gap:6,margin:'6px 0'}}>
+          <input className="input" placeholder="Add song to repertoire…" value={draftVal('repertoire')}
+            onChange={e=>setDraft('repertoire', e.target.value)} onKeyDown={e=>e.key==='Enter'&&addListSong('repertoire','/api/band/songs/repertoire')}
+            style={{flex:1,fontSize:11}}/>
+          <button className="btn ghost" onClick={()=>addListSong('repertoire','/api/band/songs/repertoire')} style={{fontSize:11}}>+</button>
+        </div>
         <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'2px 12px',marginBottom:14}}>
           {(songs.repertoire||[]).map((s,i) => (
-            <div key={i} style={{fontSize:11,padding:'2px 0',borderBottom:'1px solid var(--line-soft)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{i+1}. {s}</div>
+            <div key={i} style={{display:'flex',alignItems:'center',gap:4,fontSize:11,padding:'2px 0',borderBottom:'1px solid var(--line-soft)'}}>
+              <span style={{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{i+1}. {s}</span>
+              <span onClick={()=>removeListSong('/api/band/songs/repertoire', s)} title="Remove" style={{cursor:'pointer',color:'var(--ink-4)',padding:'0 3px',fontSize:12,lineHeight:1}}>×</span>
+            </div>
           ))}
         </div>
         <div className="section-h"><span>Learn / Next Up</span><span className="line"/>
           <span className="muted-2 mono" style={{fontSize:10}}>{(songs.future_songs||[]).length} songs</span>
         </div>
+        <div style={{display:'flex',gap:6,margin:'6px 0'}}>
+          <input className="input" placeholder="Add song to learn…" value={draftVal('future')}
+            onChange={e=>setDraft('future', e.target.value)} onKeyDown={e=>e.key==='Enter'&&addListSong('future','/api/band/songs/future')}
+            style={{flex:1,fontSize:11}}/>
+          <button className="btn ghost" onClick={()=>addListSong('future','/api/band/songs/future')} style={{fontSize:11}}>+</button>
+        </div>
         <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'2px 12px'}}>
           {(songs.future_songs||[]).map((s,i) => (
-            <div key={i} style={{fontSize:11,padding:'2px 0',borderBottom:'1px solid var(--line-soft)',color:'var(--ink-3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{i+1}. {s}</div>
+            <div key={i} style={{display:'flex',alignItems:'center',gap:4,fontSize:11,padding:'2px 0',borderBottom:'1px solid var(--line-soft)',color:'var(--ink-3)'}}>
+              <span style={{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{i+1}. {s}</span>
+              <span onClick={()=>removeListSong('/api/band/songs/future', s)} title="Remove" style={{cursor:'pointer',color:'var(--ink-4)',padding:'0 3px',fontSize:12,lineHeight:1}}>×</span>
+            </div>
           ))}
         </div>
       </>}

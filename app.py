@@ -1106,9 +1106,88 @@ def delete_subscription(sid):
 
 # ── Band Content Queue ─────────────────────────────────────────────────────────
 
+def _load_songs():
+    data = _load(SONGS_FILE, {"setlists": [], "repertoire": [], "future_songs": [], "organized_by_key": []})
+    data.setdefault("setlists", [])
+    data.setdefault("repertoire", [])
+    data.setdefault("future_songs", [])
+    data.setdefault("organized_by_key", [])
+    return data
+
 @app.route("/api/band/songs", methods=["GET"])
 def get_songs():
-    return jsonify(_load(SONGS_FILE, {"setlists": [], "repertoire": [], "future_songs": [], "organized_by_key": []}))
+    return jsonify(_load_songs())
+
+@app.route("/api/band/songs/repertoire", methods=["POST", "DELETE"])
+def edit_repertoire():
+    song = (request.json or {}).get("song", "").strip()
+    if not song:
+        return jsonify({"error": "song required"}), 400
+    data = _load_songs()
+    if request.method == "POST":
+        if song not in data["repertoire"]:
+            data["repertoire"].append(song)
+    else:
+        data["repertoire"] = [s for s in data["repertoire"] if s != song]
+    _save(SONGS_FILE, data)
+    return jsonify(data)
+
+@app.route("/api/band/songs/future", methods=["POST", "DELETE"])
+def edit_future_songs():
+    song = (request.json or {}).get("song", "").strip()
+    if not song:
+        return jsonify({"error": "song required"}), 400
+    data = _load_songs()
+    if request.method == "POST":
+        if song not in data["future_songs"]:
+            data["future_songs"].append(song)
+    else:
+        data["future_songs"] = [s for s in data["future_songs"] if s != song]
+    _save(SONGS_FILE, data)
+    return jsonify(data)
+
+@app.route("/api/band/songs/setlist", methods=["POST", "DELETE", "PATCH"])
+def edit_setlist():
+    d = request.json or {}
+    name = (d.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    data = _load_songs()
+    if request.method == "POST":
+        if not any(sl.get("name") == name for sl in data["setlists"]):
+            data["setlists"].append({"name": name, "songs": []})
+    elif request.method == "DELETE":
+        data["setlists"] = [sl for sl in data["setlists"] if sl.get("name") != name]
+    else:  # PATCH = rename
+        new_name = (d.get("new_name") or "").strip()
+        if not new_name:
+            return jsonify({"error": "new_name required"}), 400
+        for sl in data["setlists"]:
+            if sl.get("name") == name:
+                sl["name"] = new_name
+    _save(SONGS_FILE, data)
+    return jsonify(data)
+
+@app.route("/api/band/songs/setlist/song", methods=["POST", "DELETE"])
+def edit_setlist_song():
+    d = request.json or {}
+    setlist = (d.get("setlist") or "").strip()
+    song = (d.get("song") or "").strip()
+    if not setlist or not song:
+        return jsonify({"error": "setlist and song required"}), 400
+    data = _load_songs()
+    sl = next((x for x in data["setlists"] if x.get("name") == setlist), None)
+    if sl is None:
+        return jsonify({"error": "setlist not found"}), 404
+    sl.setdefault("songs", [])
+    if request.method == "POST":
+        sl["songs"].append(song)
+    else:
+        # remove first matching occurrence
+        if song in sl["songs"]:
+            sl["songs"].remove(song)
+    _save(SONGS_FILE, data)
+    return jsonify(data)
 
 @app.route("/api/band/content", methods=["GET"])
 def get_content():
