@@ -1371,31 +1371,33 @@ const HealthCard = ({ cardProps = {} } = {}) => {
       setWaterBottleInput(String(bottleOz));
       setWaterGoalInput(String(goalOz));
 
-      const habitsLog = data.habits || {};
-      setStreak(calcStreak(habitsLog));
-
       const prog = data.workout_program || null;
       setProgram(prog);
-
-      // Workout is fetched separately via useEffect on workoutOffset (see below)
-      // Weight / habits / food / calories are derived from rawHealth + viewDate in a separate effect
-
-      const today = new Date();
-      const grid = [];
-      for (let i = 27; i >= 0; i--) {
-        const d = new Date(today); d.setDate(today.getDate() - i);
-        const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-        const worked = (habitsLog[ds] || {})['lift'] || (habitsLog[ds] || {})['cardio'];
-        grid.push({ ds, worked, isFuture: d > today, dow: d.toLocaleDateString('en-US', { weekday: 'short' }) });
-      }
-      setDots(grid);
       setHabitList(data.habit_list || []);
+
+      // Workout is fetched separately via useEffect on workoutOffset (see below).
+      // Streak, the 28-day grid, and per-day state (weight/habits/food/water) are all
+      // derived from rawHealth in the effect below — so optimistic habit toggles update
+      // them instantly without waiting on (and being clobbered by) a full /api/health refetch.
     }).catch(() => {});
   };
 
-  // Re-derive per-day state (weight / habits / food / calories) when day or data changes
+  // Re-derive per-day state (weight / habits / food / calories) when day or data changes.
+  // Also derives streak + the 28-day grid from rawHealth so optimistic toggles reflect instantly.
   useEffect(() => {
     if (!rawHealth) return;
+    const habitsLog = rawHealth.habits || {};
+    setStreak(calcStreak(habitsLog));
+    // 28-day lift/cardio history grid
+    const gridToday = new Date();
+    const grid = [];
+    for (let i = 27; i >= 0; i--) {
+      const d = new Date(gridToday); d.setDate(gridToday.getDate() - i);
+      const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      const worked = (habitsLog[ds] || {})['lift'] || (habitsLog[ds] || {})['cardio'];
+      grid.push({ ds, worked, isFuture: d > gridToday, dow: d.toLocaleDateString('en-US', { weekday: 'short' }) });
+    }
+    setDots(grid);
     // Weight: use viewDate's entry if present, else most recent entry on or before viewDate
     const weights = rawHealth.weight || {};
     const dates = Object.keys(weights).sort();
@@ -1541,14 +1543,31 @@ const HealthCard = ({ cardProps = {} } = {}) => {
     setEditWater(false);
   };
 
+  // Optimistic toggle. We patch rawHealth (the single source the streak, 28-day grid,
+  // supplement streaks/bars and per-day state all derive from) so the whole card updates
+  // in one frame, then send the write with the explicit target value (no server-side
+  // toggle race). On failure we roll the patch back — no full refetch that would clobber
+  // the optimistic state and cause the old "lights up → flicker → deselects" bug.
   const toggleHabit = async (habitId) => {
     const newVal = !todayHabits[habitId];
-    setTodayHabits(h => ({ ...h, [habitId]: newVal }));
-    await fetch('/api/health/habit', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ habit: habitId, date: viewDate }) })
-      .then(r => { if (!r.ok) throw 0; })
-      .catch(() => toastErr("Couldn’t update that habit — reloading."));
-    load();
+    const apply = (val) => {
+      setTodayHabits(h => ({ ...h, [habitId]: val }));
+      setRawHealth(rh => {
+        if (!rh) return rh;
+        const habits = { ...(rh.habits || {}) };
+        habits[viewDate] = { ...(habits[viewDate] || {}), [habitId]: val };
+        return { ...rh, habits };
+      });
+    };
+    apply(newVal);
+    try {
+      const r = await fetch('/api/health/habit', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ habit: habitId, date: viewDate, value: newVal }) });
+      if (!r.ok) throw 0;
+    } catch {
+      apply(!newVal);
+      toastErr("Couldn’t update that habit — try again.");
+    }
   };
 
   const rehabKey = (ex, index) => ex.id || ex.name || String(index);
@@ -2461,6 +2480,15 @@ const ActivityCard = () => {
   );
 };
 
+// Roman numerals for the dashboard schedule — gives the "mission objectives" (PRIMUS/SECUNDUS) feel.
+const toRoman = (n) => {
+  if (!n || n < 1) return '';
+  const map = [[1000,'M'],[900,'CM'],[500,'D'],[400,'CD'],[100,'C'],[90,'XC'],[50,'L'],[40,'XL'],[10,'X'],[9,'IX'],[5,'V'],[4,'IV'],[1,'I']];
+  let r = '', x = n;
+  for (const [v, s] of map) { while (x >= v) { r += s; x -= v; } }
+  return r;
+};
+
 // ── Today Hub ────────────────────────────────────────────────────────────────
 const TodayHub = () => {
   const [data, setData] = React.useState(null);
@@ -2482,11 +2510,18 @@ const TodayHub = () => {
   const doneCount = habitList.filter(h => habitsToday[h.id]).length;
 
   const toggleHabit = async (hid) => {
-    await fetch('/api/health/habit', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({habit: hid, date: today})
-    }).catch(() => {});
-    setData(d => ({...d, habits: {...d.habits, today: {...d.habits.today, [hid]: !habitsToday[hid]}}}));
+    const newVal = !habitsToday[hid];
+    // Optimistic first so the checkbox responds on the tap, not after the round-trip.
+    setData(d => ({...d, habits: {...d.habits, today: {...d.habits.today, [hid]: newVal}}}));
+    try {
+      const r = await fetch('/api/health/habit', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({habit: hid, date: today, value: newVal})
+      });
+      if (!r.ok) throw 0;
+    } catch {
+      setData(d => ({...d, habits: {...d.habits, today: {...d.habits.today, [hid]: !newVal}}}));
+    }
   };
 
   return (
@@ -2501,8 +2536,9 @@ const TodayHub = () => {
           <div className="section-h"><span>Schedule</span><span className="line"/></div>
           {agenda.length === 0
             ? <div className="muted" style={{fontSize:12,padding:'6px 0'}}>Nothing scheduled today</div>
-            : agenda.map(item => (
+            : agenda.map((item, i) => (
               <div key={item.id} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0',borderBottom:'1px solid var(--line-soft)'}}>
+                <span className="mono" style={{fontSize:9.5,minWidth:26,flexShrink:0,textAlign:'right',letterSpacing:'0.06em',color:'var(--accent)',opacity:0.85}}>{toRoman(i+1)}</span>
                 <span className="mono muted-2" style={{fontSize:10.5,width:34,flexShrink:0}}>{item.time}</span>
                 <span style={{flex:1,fontSize:12}}>{item.label}</span>
                 {item.tag && <span className="tag">{item.tag}</span>}

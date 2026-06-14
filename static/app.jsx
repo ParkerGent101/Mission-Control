@@ -560,8 +560,9 @@ const App = () => {
   const visibleDashboardCards = cards.filter(c => t.modules[c.id] !== false && !dashboardMinimized.includes(c.id));
   const minimizedDashboardCards = cards.filter(c => t.modules[c.id] !== false && dashboardMinimized.includes(c.id));
 
+  // Dashboard shows no title — just the date line below. Other pages keep their section label.
   const pageTitle = active === "dashboard"
-    ? `Good ${now.getHours() < 12 ? "morning" : now.getHours() < 17 ? "afternoon" : "evening"}, ${userName}.`
+    ? null
     : SIDEBAR_NAV.find(n => n.id === active)?.label || "Mission Control";
 
   return (
@@ -572,7 +573,7 @@ const App = () => {
           <span className="brand-mark"/>
           <span className="brand-name">MISSION CONTROL</span>
           <span className="mobile-section-label">
-            {active === 'dashboard' ? `${now.getHours() < 12 ? 'Morning' : now.getHours() < 17 ? 'Afternoon' : 'Evening'}, ${userName}` : (SIDEBAR_NAV.find(n => n.id === active)?.label || 'Mission Control')}
+            {active === 'dashboard' ? 'Mission Control' : (SIDEBAR_NAV.find(n => n.id === active)?.label || 'Mission Control')}
           </span>
         </div>
         <div className="topbar-center">
@@ -630,7 +631,7 @@ const App = () => {
       {/* Main */}
       <main>
         <div className="page-head">
-          <h1>{pageTitle}</h1>
+          {pageTitle && <h1>{pageTitle}</h1>}
           <span className="date">{date} — week {weekNum} of {now.getFullYear()}</span>
           <div className="spacer"/>
         </div>
@@ -751,8 +752,6 @@ const App = () => {
           </div>
         </div>
       )}
-
-      <TalkBar onNavigate={setActive}/>
 
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onAction={onAction} />
 

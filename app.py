@@ -3538,7 +3538,13 @@ def post_health_habit():
     habits = health.setdefault("habits", {})
     day = habits.setdefault(date, {})
     habit_name = d["habit"]
-    new_val = not day.get(habit_name, False)
+    # Honor an explicit desired value when the client sends one (optimistic UI sends the
+    # exact target state), so a slow request or a double-tap can't desync client and server.
+    # Fall back to a server-side toggle for older callers / the agent tools.
+    if d.get("value") is not None:
+        new_val = bool(d["value"])
+    else:
+        new_val = not day.get(habit_name, False)
     day[habit_name] = new_val
 
     # Register the habit in habit_list if it isn't there yet, so the Sheet
@@ -4131,5 +4137,10 @@ if __name__ == "__main__":
         print("ERROR: Set ANTHROPIC_API_KEY in .env")
         sys.exit(1)
     port = int(os.environ.get("PORT", 5000))
+    # Local staging only (Cloud Run uses gunicorn and never runs this block):
+    # hot-reload templates from disk so index.html/login.html edits show on refresh
+    # without a server restart.
+    app.config["TEMPLATES_AUTO_RELOAD"] = True
+    app.jinja_env.auto_reload = True
     print(f"Mission Control -> http://localhost:{port}")
     app.run(debug=False, port=port, host="0.0.0.0")

@@ -7,11 +7,11 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Mission Control" />
-<meta name="theme-color" content="#1e1a16" />
+<meta name="theme-color" content="#14171d" />
 <title>Mission Control</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Serif:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Serif:wght@400;500;600&family=Cinzel:wght@500;600;700&family=Cinzel+Decorative:wght@400;700;900&family=UnifrakturCook:wght@700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg:        oklch(0.165 0.008 70);
@@ -1282,6 +1282,244 @@
     .today-grid { grid-template-columns: 1fr; }
     .finance-body { grid-template-columns: 1fr !important; }
   }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     RETRO SKIN — "Gothic-Industrial"  (PS2 console HUD × Warhammer 40k)
+     A self-contained override layer appended after the base styles. It re-skins
+     the whole app: gunmetal palette, imperial-gold + verdigris trim, gothic
+     display headers (Cinzel) over a monospace HUD readout (Share Tech Mono),
+     and a full-screen CRT scanline + vignette pass. Delete this entire block
+     (and remove Cinzel/Share+Tech+Mono from the font <link>) to revert.
+     ═══════════════════════════════════════════════════════════════════════ */
+  :root {
+    /* Dark olive-green "cogitator" base (hue ~146) — near-black with a green cast */
+    --bg:        oklch(0.155 0.014 146);
+    --bg-2:      oklch(0.190 0.016 146);
+    --surface:   oklch(0.220 0.018 146);
+    --surface-2: oklch(0.260 0.020 146);
+    --surface-3: oklch(0.300 0.022 146);
+    --line:      oklch(0.380 0.030 146);
+    --line-soft: oklch(0.285 0.020 146);
+    /* Warm bone/parchment ink stays legible; muted labels take a faint phosphor tint */
+    --ink:       oklch(0.935 0.022 92);
+    --ink-2:     oklch(0.800 0.022 96);
+    --ink-3:     oklch(0.630 0.022 120);
+    --ink-4:     oklch(0.505 0.022 128);
+    --accent:    oklch(0.810 0.140 90);    /* imperial gold (kept) */
+    --accent-2:  oklch(0.820 0.175 142);   /* bright phosphor lime — the cogitator readout green */
+    --warn:      oklch(0.775 0.150 72);
+    --danger:    oklch(0.600 0.190 25);    /* blood red */
+    --info:      oklch(0.710 0.100 232);
+    --violet:    oklch(0.705 0.120 296);
+    --font-sans: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+    --font-mono: 'Share Tech Mono', 'IBM Plex Mono', ui-monospace, monospace;
+    --font-serif:'Cinzel', 'IBM Plex Serif', ui-serif, serif;
+    --font-display:'Cinzel Decorative', 'Cinzel', ui-serif, serif;   /* ornate imperial caps */
+    --font-black:'UnifrakturCook', 'Cinzel Decorative', serif;       /* gothic blackletter */
+    /* Angular, mechanical corners */
+    --r-sm: 2px;
+    --r:    3px;
+    --r-lg: 4px;
+    --gold:        oklch(0.810 0.140 90);
+    --gold-bright: oklch(0.890 0.150 92);
+    --gold-deep:   oklch(0.640 0.130 78);
+    --bone:        oklch(0.930 0.040 92);
+    --blood:       oklch(0.490 0.190 27);
+    --gold-soft: color-mix(in oklch, var(--accent) 48%, var(--line));
+  }
+
+  /* Slightly tighter, more "console terminal" base rhythm */
+  body { letter-spacing: 0.01em; }
+
+  /* CRT scanlines — full-screen, above everything, never intercept input */
+  body::before {
+    content: ""; position: fixed; inset: 0; z-index: 9000; pointer-events: none;
+    background:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+      repeating-linear-gradient(to bottom,
+        rgba(0,0,0,0.30) 0px, rgba(0,0,0,0.30) 1px,
+        transparent 1px, transparent 3px);
+    background-size: 120px 120px, auto;
+    opacity: 0.6;
+    mix-blend-mode: multiply;
+  }
+  /* Candlelit top-glow + deep grimdark vignette at the edges */
+  body::after {
+    content: ""; position: fixed; inset: 0; z-index: 8999; pointer-events: none;
+    background:
+      radial-gradient(62% 42% at 50% -8%, color-mix(in oklch, var(--accent-2) 15%, transparent), transparent 70%),
+      radial-gradient(135% 125% at 50% 44%, transparent 44%, color-mix(in oklch, #000 87%, var(--accent-2)) 100%);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    /* Very slow phosphor breathe — subtle, not a strobe */
+    body::after { animation: crtBreathe 7s ease-in-out infinite; }
+    @keyframes crtBreathe { 0%,100% { opacity: 1; } 50% { opacity: 0.86; } }
+  }
+
+  /* Work area: steel field with gold + verdigris corner wash */
+  main {
+    background:
+      radial-gradient(1000px 560px at 100% -10%, color-mix(in oklch, var(--accent) 9%, transparent), transparent 60%),
+      radial-gradient(900px 520px at -8% 105%, color-mix(in oklch, var(--accent-2) 11%, transparent), transparent 60%),
+      var(--bg);
+  }
+
+  /* ── Topbar / brand: imperial banner with gold + blood trim ── */
+  .topbar {
+    border-bottom: 1px solid var(--gold-soft);
+    box-shadow: 0 1px 0 color-mix(in oklch, var(--blood) 60%, #000), 0 3px 8px rgba(0,0,0,0.5);
+  }
+  .brand { letter-spacing: 0.12em; text-transform: uppercase; font-size: 13px; }
+  .brand-name {
+    font-family: var(--font-black);
+    font-weight: 700; font-size: 16px; letter-spacing: 0.01em;
+    color: var(--accent);
+    text-shadow: 0 0 13px color-mix(in oklch, var(--accent) 45%, transparent);
+  }
+  .brand-mark {
+    background: radial-gradient(circle at 50% 38%, var(--gold-bright), var(--gold-deep) 64%, #140e00 100%);
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 75%, transparent),
+                0 0 16px color-mix(in oklch, var(--accent) 60%, transparent);
+  }
+
+  /* ── Sidebar: active item gets a gold edge bar ── */
+  .sb-section { letter-spacing: 0.16em; }
+  .sb-item.active {
+    background: linear-gradient(90deg, color-mix(in oklch, var(--accent) 14%, var(--surface-2)), var(--surface-2));
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  .sb-item.active .sb-icon { color: var(--accent); }
+
+  /* ── Headings: ornate imperial inscription ── */
+  .page-head h1 {
+    font-family: var(--font-display);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 900;
+    color: var(--bone);
+    text-shadow: 0 0 26px color-mix(in oklch, var(--accent) 34%, transparent), 0 2px 0 #000;
+    border-bottom: 2px solid var(--gold-soft);
+    padding-bottom: 6px;
+  }
+  /* Small uppercase labels stay stencil-mono (legible engraving) */
+  .section-h, .st-section-head, .cmd-group-label, .sheet-section-label, .stat-block .l, .sb-section {
+    font-family: var(--font-mono);
+    letter-spacing: 0.16em;
+    color: color-mix(in oklch, var(--accent-2) 68%, var(--ink-3));
+  }
+  /* Section headers get a gold Imperial sigil */
+  .section-h::before {
+    content: "\2720"; color: var(--accent); opacity: 0.8;
+    font-family: var(--font-serif); font-size: 12px; line-height: 1;
+  }
+  .ob-title, .st-head-title { font-family: var(--font-display); }
+
+  /* ── Cards: bolted, gilded armour plating ── */
+  .card {
+    background:
+      radial-gradient(circle at 7px 7px, var(--gold-bright) 0 1.3px, #0c0900 1.4px 2.3px, transparent 2.5px),
+      radial-gradient(circle at calc(100% - 7px) 7px, var(--gold-bright) 0 1.3px, #0c0900 1.4px 2.3px, transparent 2.5px),
+      radial-gradient(circle at 7px calc(100% - 7px), var(--gold-bright) 0 1.3px, #0c0900 1.4px 2.3px, transparent 2.5px),
+      radial-gradient(circle at calc(100% - 7px) calc(100% - 7px), var(--gold-bright) 0 1.3px, #0c0900 1.4px 2.3px, transparent 2.5px),
+      linear-gradient(180deg, color-mix(in oklch, var(--surface) 84%, #000), var(--surface));
+    background-repeat: no-repeat;
+    border: 1px solid var(--gold-soft);
+    box-shadow: inset 0 1px 0 color-mix(in oklch, var(--accent) 14%, transparent),
+                0 2px 0 rgba(0,0,0,0.5),
+                0 10px 28px rgba(0,0,0,0.42);
+    position: relative;
+  }
+  .card::before {     /* bright gold rail across the top edge */
+    content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px; z-index: 1;
+    background: linear-gradient(90deg, transparent, var(--gold) 20%, var(--gold-bright) 50%, var(--gold) 80%, transparent);
+    box-shadow: 0 0 8px color-mix(in oklch, var(--accent) 55%, transparent);
+    pointer-events: none;
+  }
+  .card::after {      /* inner gilded frame line (double-border effect) */
+    content: ""; position: absolute; inset: 4px; pointer-events: none; border-radius: 2px;
+    border: 1px solid color-mix(in oklch, var(--accent) 28%, transparent);
+  }
+  .card-head {
+    background: linear-gradient(180deg,
+       color-mix(in oklch, var(--surface-3) 86%, var(--accent-2)) 0%,
+       var(--surface-2) 55%,
+       color-mix(in oklch, var(--surface) 78%, #000) 100%);
+    border-bottom: 1px solid var(--gold-soft);
+    box-shadow: inset 0 1px 0 color-mix(in oklch, #fff 9%, transparent),
+                inset 0 -1px 0 rgba(0,0,0,0.55),
+                0 1px 0 color-mix(in oklch, var(--blood) 32%, transparent);
+  }
+  .card-head .title {
+    font-family: var(--font-serif); font-weight: 600; letter-spacing: 0.16em;
+    color: var(--accent-2);
+    text-shadow: 0 0 12px color-mix(in oklch, var(--accent-2) 45%, transparent);
+  }
+  .card-head .title::before {
+    content: "\2720"; margin-right: 9px; color: var(--accent); opacity: 0.9;
+    font-family: var(--font-serif);
+  }
+  .card-head .title .num { color: color-mix(in oklch, var(--accent) 62%, var(--ink-4)); }
+  .section-h .line { background: linear-gradient(90deg, var(--gold-soft), transparent); opacity: 0.7; }
+
+  /* ── Buttons: beveled metal, gold primary with glow, tactile press ── */
+  .btn {
+    font-family: var(--font-mono);
+    letter-spacing: 0.03em;
+    background: linear-gradient(180deg, var(--surface-3), var(--surface-2));
+    box-shadow: inset 0 1px 0 color-mix(in oklch, #fff 6%, transparent), 0 1px 0 rgba(0,0,0,0.45);
+    transition: background .08s ease, box-shadow .08s ease, transform .04s ease, border-color .08s ease, color .08s ease;
+  }
+  .btn:hover { background: linear-gradient(180deg, var(--surface-3), var(--surface-3)); border-color: var(--gold-soft); }
+  .btn:active { transform: translateY(1px); box-shadow: inset 0 1px 3px rgba(0,0,0,0.5); }
+  .btn.ghost { background: transparent; box-shadow: none; }
+  .btn.primary {
+    background: linear-gradient(180deg,
+       color-mix(in oklch, var(--accent) 32%, var(--surface-2)),
+       color-mix(in oklch, var(--accent) 16%, var(--surface-2)));
+    border-color: color-mix(in oklch, var(--accent) 55%, var(--line));
+    color: oklch(0.985 0.03 95);
+    box-shadow: inset 0 1px 0 color-mix(in oklch, var(--accent) 35%, transparent),
+                0 0 13px color-mix(in oklch, var(--accent) 38%, transparent);
+  }
+  .btn.primary:hover { background: linear-gradient(180deg,
+       color-mix(in oklch, var(--accent) 42%, var(--surface-2)),
+       color-mix(in oklch, var(--accent) 24%, var(--surface-2))); }
+
+  /* ── Status dots / pills glow like console LEDs ── */
+  .pill { font-family: var(--font-mono); }
+  .dot { box-shadow: 0 0 7px color-mix(in oklch, var(--accent-2) 70%, transparent); }
+
+  /* ── Inputs: recessed terminal fields ── */
+  .input, textarea.input {
+    background: color-mix(in oklch, var(--surface-2) 80%, #000);
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.4);
+  }
+  .input:focus, textarea.input:focus {
+    border-color: color-mix(in oklch, var(--accent) 60%, var(--line));
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.4), 0 0 0 1px color-mix(in oklch, var(--accent) 25%, transparent);
+  }
+
+  /* ── Progress + habit cells: verdigris phosphor ── */
+  .progress { box-shadow: inset 0 1px 2px rgba(0,0,0,0.5); }
+  .progress .bar { box-shadow: 0 0 8px color-mix(in oklch, var(--accent-2) 55%, transparent); }
+  .habit-cell.done { box-shadow: inset 0 0 8px color-mix(in oklch, var(--accent-2) 30%, transparent); }
+
+  /* ── Command palette + modals: heavy console housing ── */
+  .cmd-panel, .ob-panel, .st-panel {
+    border-color: var(--gold-soft);
+    box-shadow: 0 30px 90px rgba(0,0,0,0.6), inset 0 1px 0 color-mix(in oklch, var(--accent) 10%, transparent);
+  }
+
+  /* ── Talk bar: lit console tray ── */
+  .talk-bar { border-color: var(--gold-soft); box-shadow: 0 6px 30px rgba(0,0,0,0.55),
+              inset 0 1px 0 color-mix(in oklch, var(--accent) 12%, transparent); }
+
+  /* ── Scrollbar: machined rail ── */
+  *::-webkit-scrollbar-thumb { background: var(--line); border: 2px solid var(--bg); border-radius: 2px; }
+  *::-webkit-scrollbar-thumb:hover { background: var(--gold-soft); }
+
+  /* Keep the scanline/vignette overlays out of the mobile flow too */
+  @media (max-width: 768px) { body::after { background: radial-gradient(140% 130% at 50% 46%, transparent 60%, rgba(0,0,0,0.5) 100%); } }
 </style>
 </head>
 <body>
