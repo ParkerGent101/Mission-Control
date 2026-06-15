@@ -94,5 +94,69 @@
     "tag": "band",
     "done": false,
     "date": "2026-05-18"
+  },
+  {
+    "id": 15,
+    "time": "08:30",
+    "label": "Patch Tuesday review — workstation fleet",
+    "tag": "IT",
+    "done": true,
+    "date": "2026-06-14"
+  },
+  {
+    "id": 16,
+    "time": "11:00",
+    "label": "SharePoint permissions cleanup — Finance site",
+    "tag": "IT",
+    "done": false,
+    "date": "2026-06-14"
+  },
+  {
+    "id": 17,
+    "time": "15:00",
+    "label": "Learn solo — \"Comfortably Numb\" outro",
+    "tag": "band",
+    "done": false,
+    "date": "2026-06-14"
+  },
+  {
+    "id": 18,
+    "time": "19:30",
+    "label": "CISM study — Domain 3: Security Program",
+    "tag": "study",
+    "done": false,
+    "date": "2026-06-14"
+  },
+  {
+    "id": 19,
+    "time": "09:00",
+    "label": "ELCR proposal — finish Mapbox section",
+    "tag": "coding",
+    "done": false,
+    "date": "2026-06-15"
+  },
+  {
+    "id": 20,
+    "time": "13:00",
+    "label": "Vendor call — MDM license renewal",
+    "tag": "IT",
+    "done": false,
+    "date": "2026-06-16"
+  },
+  {
+    "id": 21,
+    "time": "19:00",
+    "label": "Band Practice — full set run",
+    "tag": "band",
+    "done": false,
+    "date": "2026-06-17"
+  },
+  {
+    "id": 22,
+    "time": "18:00",
+    "label": "Gig load-in — JJ's Grill, Fayetteville",
+    "tag": "band",
+    "done": false,
+    "date": "2026-06-20"
   }
 ]

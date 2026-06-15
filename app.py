@@ -114,6 +114,9 @@ POP_CULTURE_EVENTS = [
 PLAID_CLIENT_ID = os.environ.get("PLAID_CLIENT_ID", "")
 PLAID_SECRET    = os.environ.get("PLAID_SECRET", "")
 PLAID_ENV       = os.environ.get("PLAID_ENV", "sandbox")
+# Required for OAuth banks (Fidelity, Chase, etc.): the exact HTTPS URL registered as an
+# allowed redirect URI in the Plaid dashboard. Leave unset for simple credential banks.
+PLAID_REDIRECT_URI = os.environ.get("PLAID_REDIRECT_URI", "")
 
 def _load(path, default=None):
     p = Path(path)
@@ -786,15 +789,11 @@ def get_finances_budget():
     txns = [t for t in finances if t.get("date", "").startswith(fin_month)]
     income  = sum(float(t.get("amount", 0)) for t in txns if t.get("type") == "income")
     expense = sum(float(t.get("amount", 0)) for t in txns if t.get("type") == "expense")
-    cats = {}
-    for t in txns:
-        if t.get("type") == "expense":
-            c = t.get("category", "Other")
-            cats[c] = cats.get(c, 0) + float(t.get("amount", 0))
-    return jsonify({
-        "income": income, "expense": expense,
-        "categories": [{"name": k, "actual": v, "budgeted": 0} for k, v in cats.items()]
-    })
+    # Local fallback (Sheet unavailable): we have transactions but no per-category
+    # budgeted amounts to report — those live in the Sheet (_parse_budget_rows).
+    # Return empty categories so the Finance card uses its built-in default budgets
+    # (FIN_CATS) and derives actuals from the transactions + subscriptions itself.
+    return jsonify({"income": income, "expense": expense, "categories": []})
 
 @app.route("/api/finances/budget", methods=["PATCH"])
 def patch_finances_budget():
@@ -1481,9 +1480,9 @@ def _plaid_client():
     try:
         import plaid
         from plaid.api import plaid_api
+        # plaid-python 39 removed the "development" environment — only Sandbox/Production exist.
         env_map = {
             "sandbox":     plaid.Environment.Sandbox,
-            "development": plaid.Environment.Development,
             "production":  plaid.Environment.Production,
         }
         cfg = plaid.Configuration(
@@ -1510,13 +1509,17 @@ def plaid_link_token():
         from plaid.model.country_code import CountryCode
         ob = _load(ONBOARDING_FILE, {})
         user_name = ob.get("name", "user")
-        req = LinkTokenCreateRequest(
+        req_kwargs = dict(
             products=[Products("transactions")],
             client_name="Mission Control",
             country_codes=[CountryCode("US")],
             language="en",
             user=LinkTokenCreateRequestUser(client_user_id="mc-user", legal_name=user_name),
         )
+        # OAuth institutions require a registered redirect URI; only send it when configured.
+        if PLAID_REDIRECT_URI:
+            req_kwargs["redirect_uri"] = PLAID_REDIRECT_URI
+        req = LinkTokenCreateRequest(**req_kwargs)
         resp = client.link_token_create(req)
         return jsonify({"link_token": resp["link_token"]})
     except Exception as e:
@@ -1596,6 +1599,124 @@ def plaid_categorize():
     config["category_map"] = {**config.get("category_map", {}), **categories}
     _save(PLAID_CONFIG_FILE, config)
     return jsonify({"ok": True, "saved": len(categories)})
+
+def _plaid_to_finance_category(plaid_cats, name=""):
+    """Map a Plaid transaction's category/merchant onto a Sheet-tracked finance
+    category. Defaults to 'Fun' (always Sheet-writable) so nothing is un-importable."""
+    blob = " ".join(str(c).lower() for c in (plaid_cats or [])) + " " + str(name or "").lower()
+    if any(k in blob for k in ("gas station", "gas", "fuel")):                                  return "Gas"
+    if any(k in blob for k in ("supermarket", "groceries", "grocery", "food store")):           return "Food / Grocery"
+    if any(k in blob for k in ("rent", "mortgage")):                                            return "Housing"
+    if any(k in blob for k in ("internet", "cable", "electric", "water", "utilit", "telephone")): return "Utilities"
+    if any(k in blob for k in ("restaurant", "fast food", "coffee", "dining", "food and drink", "bar", "pub")): return "Fun"
+    if any(k in blob for k in ("entertainment", "recreation", "movie", "music", "game")):       return "Fun"
+    return "Fun"
+
+def _record_expense(date, desc, amt, cat):
+    """Write one expense to the finance Sheet (detail or budget table) or the local
+    JSON fallback. Returns (ok: bool, detail: str|dict). Mirrors POST /api/finances."""
+    cat = _canonical_finance_category(cat)
+    if FINANCE_SHEET_ID:
+        svc = _sheets_svc()
+        tab = _month_tab(date[:7])
+        rows = svc.spreadsheets().values().get(
+            spreadsheetId=FINANCE_SHEET_ID, range=tab).execute().get('values', [])
+        if cat in DETAIL_TABLE_KEYWORDS:
+            if _write_detail_transaction(svc, FINANCE_SHEET_ID, tab, rows, cat, desc, amt, date):
+                return True, {"tab": tab, "kind": "detail"}
+            return False, f"No '{cat}' table in tab '{tab}'"
+        if cat in BUDGET_TRANSACTION_CATEGORIES:
+            if _write_budget_transaction(svc, FINANCE_SHEET_ID, tab, rows, cat, desc, amt):
+                return True, {"tab": tab, "kind": "budget"}
+            return False, f"No empty '{cat}' budget row in tab '{tab}'"
+        return False, f"'{cat}' isn't a Sheet-tracked category"
+    tool_add_transaction(desc, amt, "expense", cat, date)
+    return True, {"kind": "local"}
+
+@app.route("/api/plaid/sync", methods=["GET"])
+def plaid_sync():
+    """Pull recent expenses from every connected Plaid item, auto-categorize, and
+    return a de-duplicated review queue. Does NOT write anything to the Sheet."""
+    config = _load(PLAID_CONFIG_FILE, {"items": []})
+    items = config.get("items", [])
+    if not items:
+        return jsonify({"error": "No Plaid accounts connected"}), 400
+    plaid_c, err = _plaid_client()
+    if err:
+        return jsonify({"error": err}), 500
+    seen = set(config.get("imported_ids", [])) | set(config.get("skipped_ids", []))
+    try:
+        from plaid.model.transactions_get_request import TransactionsGetRequest
+        from plaid.model.transactions_get_request_options import TransactionsGetRequestOptions
+        import datetime as dt
+        try:
+            days = max(1, min(90, int(request.args.get("days", 30))))
+        except (TypeError, ValueError):
+            days = 30
+        end_date = dt.date.today()
+        start_date = end_date - dt.timedelta(days=days)
+        pending = []
+        for it in items:
+            req = TransactionsGetRequest(
+                access_token=it["access_token"], start_date=start_date, end_date=end_date,
+                options=TransactionsGetRequestOptions(count=100))
+            resp = plaid_c.transactions_get(req)
+            for t in resp["transactions"]:
+                tid = t["transaction_id"]
+                amt = float(t["amount"])
+                if tid in seen or amt <= 0:   # already handled, or inflow/refund (expenses only)
+                    continue
+                name = t.get("merchant_name") or t["name"]
+                pending.append({
+                    "id": tid, "name": name, "amount": amt,
+                    "date": t["date"].isoformat() if hasattr(t["date"], "isoformat") else str(t["date"]),
+                    "category": _plaid_to_finance_category(t.get("category"), name),
+                })
+        pending.sort(key=lambda x: x["date"], reverse=True)
+        return jsonify({"pending": pending, "count": len(pending)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/plaid/import", methods=["POST"])
+def plaid_import():
+    """Write the chosen reviewed transactions to the finance Sheet and remember their
+    Plaid ids so they never import twice."""
+    d = request.json or {}
+    txns = d.get("transactions", [])
+    config = _load(PLAID_CONFIG_FILE, {"items": []})
+    imported = set(config.get("imported_ids", []))
+    written, failed, errors = 0, 0, []
+    for t in txns:
+        tid = t.get("id")
+        if not tid or tid in imported:
+            continue
+        try:
+            ok, detail = _record_expense(
+                t.get("date") or datetime.now().strftime("%Y-%m-%d"),
+                t.get("name", "Bank transaction"),
+                float(t.get("amount", 0)),
+                t.get("category", "Fun"))
+            if ok:
+                imported.add(tid); written += 1
+            else:
+                failed += 1; errors.append(detail)
+        except Exception as e:
+            failed += 1; errors.append(str(e))
+    config["imported_ids"] = list(imported)
+    _save(PLAID_CONFIG_FILE, config)
+    return jsonify({"ok": True, "written": written, "failed": failed, "errors": errors[:5]})
+
+@app.route("/api/plaid/skip", methods=["POST"])
+def plaid_skip():
+    """Remember transactions the user chose not to import so they stop reappearing."""
+    d = request.json or {}
+    ids = [i for i in d.get("ids", []) if i]
+    config = _load(PLAID_CONFIG_FILE, {"items": []})
+    skipped = set(config.get("skipped_ids", []))
+    skipped.update(ids)
+    config["skipped_ids"] = list(skipped)
+    _save(PLAID_CONFIG_FILE, config)
+    return jsonify({"ok": True, "skipped": len(ids)})
 
 # ── Calendar overview ─────────────────────────────────────────────────────────
 

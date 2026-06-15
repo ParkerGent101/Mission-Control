@@ -344,13 +344,13 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 const ACCENT_OPTIONS = ["#e0a857", "#6ed3b6", "#e07a5f", "#b69cf0", "#8fb3e0"];
 
 const SIDEBAR_NAV = [
-  { id: "dashboard", icon: "home",       label: "Dashboard" },
-  { id: "finance",   icon: "wallet",     label: "Finance"   },
-  { id: "band",      icon: "music",      label: "Band"      },
-  { id: "health",    icon: "heart",      label: "Health"    },
-  { id: "practice",  icon: "target",     label: "Practice"  },
-  { id: "calendar",  icon: "calendar",   label: "Calendar"  },
-  { id: "recurring", icon: "clock",      label: "Routines"  },
+  { id: "dashboard", icon: "home",       label: "Dashboard", key: "D" },
+  { id: "finance",   icon: "wallet",     label: "Finance",   key: "F" },
+  { id: "band",      icon: "music",      label: "Band",      key: "B" },
+  { id: "health",    icon: "heart",      label: "Health",    key: "H" },
+  { id: "practice",  icon: "target",     label: "Practice",  key: "P" },
+  { id: "calendar",  icon: "calendar",   label: "Calendar",  key: "C" },
+  { id: "recurring", icon: "clock",      label: "Routines",  key: "R" },
 ];
 
 const MOBILE_NAV = [
@@ -439,6 +439,34 @@ const App = () => {
 
   useEffectApp(() => {
     fetch('/api/onboarding').then(r => r.json()).then(d => setNeedsOnboarding(d.needed)).catch(() => setNeedsOnboarding(false));
+  }, []);
+
+  // Plaid OAuth handoff: OAuth banks (Fidelity, Chase, etc.) authenticate on the bank's
+  // site, then redirect the browser back here with ?oauth_state_id=... . Re-open Plaid
+  // Link with the stored link_token + receivedRedirectUri to finish the connection.
+  useEffectApp(() => {
+    if (!window.location.search.includes('oauth_state_id')) return;
+    const clearUrl = () => window.history.replaceState({}, document.title, window.location.pathname);
+    const token = localStorage.getItem('mc_plaid_link_token');
+    if (!token || !window.Plaid) { clearUrl(); return; }
+    try {
+      const handler = window.Plaid.create({
+        token,
+        receivedRedirectUri: window.location.href,
+        onSuccess: async (publicToken) => {
+          await fetch('/api/plaid/exchange', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ public_token: publicToken }),
+          });
+          localStorage.removeItem('mc_plaid_link_token');
+          clearUrl();
+          window.__toast?.('Bank account connected', 'success');
+          window.dispatchEvent(new CustomEvent('mc:refresh'));   // flips Finance to "Sync bank"
+        },
+        onExit: () => { localStorage.removeItem('mc_plaid_link_token'); clearUrl(); },
+      });
+      handler.open();
+    } catch { localStorage.removeItem('mc_plaid_link_token'); clearUrl(); }
   }, []);
 
   useEffectApp(() => {
@@ -604,26 +632,26 @@ const App = () => {
         <div className="sb-section">Workspace</div>
         {SIDEBAR_NAV.slice(0, 1).map((n) => (
           <div key={n.id} className={"sb-item" + (active === n.id ? " active" : "")} onClick={() => setActive(n.id)}>
-            <Icon name={n.icon} size={16} className="sb-icon" />
+            <span className="sb-key">[{n.key}]</span>
             <span className="sb-label">{n.label}</span>
           </div>
         ))}
         <div className="sb-section">Modules</div>
         {SIDEBAR_NAV.slice(1).map((n) => (
           <div key={n.id} className={"sb-item" + (active === n.id ? " active" : "")} onClick={() => setActive(n.id)}>
-            <Icon name={n.icon} size={16} className="sb-icon" />
+            <span className="sb-key">[{n.key}]</span>
             <span className="sb-label">{n.label}</span>
           </div>
         ))}
         <div style={{ flex: 1 }}/>
         <div className="sb-section">Shortcuts</div>
         <div className="sb-item" onClick={() => setCmdOpen(true)}>
-          <Icon name="command" size={16} className="sb-icon" />
+          <span className="sb-key">[K]</span>
           <span className="sb-label">Command palette</span>
           <span className="sb-badge">⌘K</span>
         </div>
         <div className="sb-item" onClick={() => setShowSettings(true)}>
-          <Icon name="settings" size={16} className="sb-icon" />
+          <span className="sb-key">[T]</span>
           <span className="sb-label">Tweaks</span>
         </div>
       </nav>

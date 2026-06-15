@@ -106,6 +106,8 @@ const OnboardingWizard = ({ onComplete }) => {
       });
       const d = await r.json();
       if (d.error) { setPlaidStatus('idle'); window.__toast?.(d.error, 'error'); return; }
+      // Persist link_token so OAuth banks can resume after the redirect (see app.jsx).
+      localStorage.setItem('mc_plaid_link_token', d.link_token);
       const handler = window.Plaid.create({
         token: d.link_token,
         onSuccess: async (publicToken) => {
@@ -113,6 +115,7 @@ const OnboardingWizard = ({ onComplete }) => {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ public_token: publicToken })
           });
+          localStorage.removeItem('mc_plaid_link_token');
           setPlaidStatus('connected');
           window.__toast?.('Bank account connected', 'success');
           // Fetch recent transactions for categorization
@@ -128,7 +131,7 @@ const OnboardingWizard = ({ onComplete }) => {
             }
           } catch {}
         },
-        onExit: () => { if (plaidStatus !== 'connected') setPlaidStatus('idle'); },
+        onExit: () => { localStorage.removeItem('mc_plaid_link_token'); if (plaidStatus !== 'connected') setPlaidStatus('idle'); },
       });
       handler.open();
     } catch {

@@ -1,36 +1,173 @@
 {
   "habits": {
-    "2026-05-11": {
+    "2026-05-18": {
       "lift": true,
-      "cardio": false,
-      "elbow_rehab": false,
-      "water": false,
-      "guitar_practice": true,
-      "flea_medicine": false,
+      "Creatine": true,
+      "Vitamins": true,
       "stretching": true
     },
-    "2026-05-12": {
-      "stretching": true
+    "2026-05-19": {
+      "cardio": true,
+      "Creatine": true,
+      "Vitamins": true
     },
-    "2026-05-14": {
-      "lift": false,
-      "cardio": false,
-      "flea_medicine": false,
-      "elbow_rehab": false,
-      "piano": false
+    "2026-05-20": {
+      "lift": true,
+      "Creatine": true,
+      "Vitamins": false,
+      "guitar_practice": true
+    },
+    "2026-05-21": {
+      "lift": true,
+      "cardio": true,
+      "Creatine": true,
+      "Vitamins": true
+    },
+    "2026-05-22": {
+      "lift": true,
+      "Creatine": true,
+      "Vitamins": true,
+      "water": true
+    },
+    "2026-05-23": {
+      "cardio": true,
+      "Creatine": true,
+      "Vitamins": true
+    },
+    "2026-05-24": {
+      "Creatine": true,
+      "Vitamins": true,
+      "stretching": true
     },
     "2026-05-25": {
-      "workout": true,
       "lift": true,
-      "cardio": false,
-      "elbow_rehab": false,
-      "stretching": false,
-      "water": false
+      "Creatine": true,
+      "Vitamins": true,
+      "study": true
+    },
+    "2026-05-26": {
+      "cardio": true,
+      "Creatine": true,
+      "Vitamins": true
+    },
+    "2026-05-27": {
+      "lift": true,
+      "Creatine": true,
+      "Vitamins": true,
+      "guitar_practice": true
+    },
+    "2026-05-28": {
+      "lift": true,
+      "Creatine": false,
+      "Vitamins": true
+    },
+    "2026-05-29": {
+      "Creatine": true,
+      "Vitamins": true,
+      "stretching": true
+    },
+    "2026-05-30": {
+      "cardio": true,
+      "Creatine": true,
+      "Vitamins": true
+    },
+    "2026-05-31": {
+      "Creatine": true,
+      "Vitamins": true
+    },
+    "2026-06-01": {
+      "lift": true,
+      "Creatine": true,
+      "Vitamins": true,
+      "water": true
+    },
+    "2026-06-02": {
+      "cardio": true,
+      "Creatine": true,
+      "Vitamins": true,
+      "study": true
+    },
+    "2026-06-03": {
+      "lift": true,
+      "Creatine": true,
+      "Vitamins": true
+    },
+    "2026-06-04": {
+      "lift": true,
+      "cardio": true,
+      "Creatine": true,
+      "Vitamins": true
+    },
+    "2026-06-05": {
+      "lift": true,
+      "Creatine": true,
+      "Vitamins": true,
+      "guitar_practice": true
+    },
+    "2026-06-06": {
+      "cardio": true,
+      "Creatine": true,
+      "Vitamins": true
+    },
+    "2026-06-07": {
+      "Creatine": true,
+      "Vitamins": true,
+      "stretching": true
+    },
+    "2026-06-08": {
+      "lift": true,
+      "Creatine": true,
+      "Vitamins": true,
+      "water": true
+    },
+    "2026-06-09": {
+      "cardio": true,
+      "Creatine": true,
+      "Vitamins": true,
+      "water": true
+    },
+    "2026-06-10": {
+      "lift": true,
+      "Creatine": true,
+      "Vitamins": true,
+      "study": true
+    },
+    "2026-06-11": {
+      "lift": true,
+      "Creatine": true,
+      "Vitamins": true,
+      "water": true
+    },
+    "2026-06-12": {
+      "lift": true,
+      "Creatine": true,
+      "Vitamins": true,
+      "guitar_practice": true
+    },
+    "2026-06-13": {
+      "cardio": true,
+      "Creatine": true,
+      "Vitamins": true,
+      "water": true
+    },
+    "2026-06-14": {
+      "cardio": true,
+      "Creatine": false,
+      "Vitamins": false,
+      "water": true,
+      "stretching": true
     }
   },
   "weight": {
-    "2026-05-11": 230.0,
-    "2026-05-25": 232.0
+    "2026-05-18": 232.0,
+    "2026-05-22": 231.2,
+    "2026-05-25": 230.6,
+    "2026-05-29": 230.1,
+    "2026-06-01": 229.4,
+    "2026-06-05": 228.7,
+    "2026-06-08": 228.2,
+    "2026-06-11": 227.5,
+    "2026-06-14": 236.0
   },
   "calories": {
     "2026-05-25": {
@@ -69,6 +206,14 @@
     {
       "id": "study",
       "label": "Study"
+    },
+    {
+      "id": "Creatine",
+      "label": "Creatine"
+    },
+    {
+      "id": "Vitamins",
+      "label": "Vitamins"
     }
   ],
   "workout_config": {
@@ -425,6 +570,72 @@
       }
     ],
     "2026-05-20": [],
-    "2026-05-24": []
+    "2026-05-24": [],
+    "2026-06-13": [
+      {
+        "name": "Protein Shake",
+        "calories": 160,
+        "protein": 30,
+        "carbs": 10,
+        "fat": 0
+      },
+      {
+        "name": "Greek Yogurt",
+        "calories": 150,
+        "protein": 20,
+        "carbs": 8,
+        "fat": 4
+      }
+    ],
+    "2026-06-14": [
+      {
+        "name": "Oatmeal & Banana",
+        "calories": 320,
+        "protein": 10,
+        "carbs": 60,
+        "fat": 6
+      },
+      {
+        "name": "Protein Shake",
+        "calories": 160,
+        "protein": 30,
+        "carbs": 10,
+        "fat": 0
+      },
+      {
+        "name": "Chicken, Rice & Broccoli",
+        "calories": 620,
+        "protein": 55,
+        "carbs": 65,
+        "fat": 14
+      },
+      {
+        "name": "Greek Yogurt",
+        "calories": 150,
+        "protein": 20,
+        "carbs": 8,
+        "fat": 4
+      },
+      {
+        "name": "Almonds",
+        "calories": 170,
+        "protein": 6,
+        "carbs": 6,
+        "fat": 15
+      }
+    ]
+  },
+  "rehab": {
+    "2026-06-14": {
+      "Isometric Wrist Extension": false,
+      "Wrist Pronation / Supination": false,
+      "Eccentric Wrist Extension": false,
+      "Wrist Flexor Stretch": false,
+      "Wrist Extensor Stretch": false
+    }
+  },
+  "water": {
+    "2026-06-13": 128,
+    "2026-06-14": 64
   }
 }

@@ -57,6 +57,13 @@
     height: 100vh;
     width: 100vw;
     overflow: hidden;
+    /* No global tint: the base palette is neutral white-phosphor (see :root), so
+       content reads white/grey and AMBER is reserved for highlights via --accent /
+       --accent-2. (Earlier this carried a grayscale+sepia "all amber" filter; it was
+       dropped so amber can be an accent instead of the whole screen. The few hard-
+       coded module hues — FIN_CATS, calendar dots — are tuned to an amber palette so
+       nothing reads off-theme.) Green body backdrop still shows through the
+       transparent work area. */
   }
   .app[data-sidebar="icons"] { --sidebar-w: 56px; }
   .app[data-sidebar="hidden"] { --sidebar-w: 0px; }
@@ -1292,55 +1299,73 @@
      (and remove Cinzel/Share+Tech+Mono from the font <link>) to revert.
      ═══════════════════════════════════════════════════════════════════════ */
   :root {
-    /* Dark olive-green "cogitator" base (hue ~146) — near-black with a green cast */
-    --bg:        oklch(0.155 0.014 146);
-    --bg-2:      oklch(0.190 0.016 146);
-    --surface:   oklch(0.220 0.018 146);
-    --surface-2: oklch(0.260 0.020 146);
-    --surface-3: oklch(0.300 0.022 146);
-    --line:      oklch(0.380 0.030 146);
-    --line-soft: oklch(0.285 0.020 146);
-    /* Warm bone/parchment ink stays legible; muted labels take a faint phosphor tint */
-    --ink:       oklch(0.935 0.022 92);
-    --ink-2:     oklch(0.800 0.022 96);
-    --ink-3:     oklch(0.630 0.022 120);
-    --ink-4:     oklch(0.505 0.022 128);
-    --accent:    oklch(0.810 0.140 90);    /* imperial gold (kept) */
-    --accent-2:  oklch(0.820 0.175 142);   /* bright phosphor lime — the cogitator readout green */
-    --warn:      oklch(0.775 0.150 72);
-    --danger:    oklch(0.600 0.190 25);    /* blood red */
-    --info:      oklch(0.710 0.100 232);
-    --violet:    oklch(0.705 0.120 296);
-    --font-sans: 'IBM Plex Sans', ui-sans-serif, sans-serif;
+    /* NO neutral grey anywhere: the whole ramp is warm (amber hue). Darks = warm
+       near-black, surfaces = warm browns, lines = amber, lights = warm white. The
+       only "color" is still amber — greys are just warmed, not turned into a 2nd hue. */
+    --bg:        oklch(0.150 0.018 70);
+    --bg-2:      oklch(0.190 0.022 72);
+    --surface:   oklch(0.225 0.028 74);
+    --surface-2: oklch(0.275 0.034 76);
+    --surface-3: oklch(0.320 0.040 78);
+    --line:      oklch(0.500 0.060 80);   /* warm amber rule — not grey */
+    --line-soft: oklch(0.360 0.045 78);
+    /* Warm white ink; muted labels step down into tan/amber (never neutral grey) */
+    --ink:       oklch(0.965 0.022 92);
+    --ink-2:     oklch(0.880 0.045 88);
+    --ink-3:     oklch(0.780 0.065 84);
+    --ink-4:     oklch(0.660 0.080 80);
+    /* Amber accents (the ONE color). !important so they beat the runtime inline
+       theme (which would otherwise set accent-2 to teal) — this skin is amber-only. */
+    --accent:    oklch(0.80 0.135 75) !important;   /* amber highlight */
+    --accent-2:  oklch(0.88 0.12 92) !important;    /* brighter gold highlight */
+    --warn:      oklch(0.800 0.135 68);   /* orange-amber */
+    --danger:    oklch(0.660 0.160 45);   /* deep orange alert (warm, never grey) */
+    --info:      oklch(0.840 0.100 92);   /* gold */
+    --violet:    oklch(0.740 0.100 78);   /* amber */
+    --amber:     oklch(0.800 0.150 70);   /* HUD accent — crosshairs + wireframe. Used only on the
+                                             .hud-overlay, which sits OUTSIDE the grayscale filter, so
+                                             it actually renders amber (the reference's orange HUD). */
+    /* Reference is an all-monospace terminal — every text role uses the mono stack
+       (fully bitmap-terminal). Swap --font-sans back to 'IBM Plex Sans' to soften. */
+    --font-sans: 'Share Tech Mono', 'IBM Plex Mono', ui-monospace, monospace;
     --font-mono: 'Share Tech Mono', 'IBM Plex Mono', ui-monospace, monospace;
-    --font-serif:'Cinzel', 'IBM Plex Serif', ui-serif, serif;
-    --font-display:'Cinzel Decorative', 'Cinzel', ui-serif, serif;   /* ornate imperial caps */
-    --font-black:'UnifrakturCook', 'Cinzel Decorative', serif;       /* gothic blackletter */
+    --font-serif:'Share Tech Mono', 'IBM Plex Mono', ui-monospace, monospace;
+    --font-display:'Share Tech Mono', 'IBM Plex Mono', ui-monospace, monospace;
+    --font-black:'Share Tech Mono', 'IBM Plex Mono', ui-monospace, monospace;
     /* Angular, mechanical corners */
     --r-sm: 2px;
     --r:    3px;
     --r-lg: 4px;
-    --gold:        oklch(0.810 0.140 90);
-    --gold-bright: oklch(0.890 0.150 92);
-    --gold-deep:   oklch(0.640 0.130 78);
-    --bone:        oklch(0.930 0.040 92);
-    --blood:       oklch(0.490 0.190 27);
+    /* "gold"/"bone"/"blood" vars — all warm (amber family), no neutral greys */
+    --gold:        oklch(0.840 0.120 85);
+    --gold-bright: oklch(0.930 0.100 92);
+    --gold-deep:   oklch(0.660 0.120 70);
+    --bone:        oklch(0.970 0.030 92);   /* warm white highlight */
+    --blood:       oklch(0.550 0.120 45);   /* deep warm amber trim */
     --gold-soft: color-mix(in oklch, var(--accent) 48%, var(--line));
   }
 
-  /* Slightly tighter, more "console terminal" base rhythm */
-  body { letter-spacing: 0.01em; }
+  /* Slightly tighter, more "console terminal" base rhythm + a faint phosphor
+     bloom on every glyph so text glows green like a live tube. */
+  body { letter-spacing: 0.01em; text-shadow: 0 0 1px color-mix(in oklch, var(--accent-2) 24%, transparent); }
+  /* Green CRT screen backdrop. Painted on <body>, which sits BEHIND the grayscale
+     filter on .app, so it stays green while all app content remains monochrome.
+     It shows through the (now transparent) work-area background. */
+  body { background: oklch(0.275 0.115 150); }
 
-  /* CRT scanlines — full-screen, above everything, never intercept input */
+  /* ── CRT scanlines — full-screen, above everything, never intercept input ──
+     Denser + darker than stock, with a faint grey noise grain. The crtFlicker
+     animation gives the whole layer an occasional, irregular opacity flutter so
+     the lines read like a live (slightly failing) cathode tube. */
   body::before {
     content: ""; position: fixed; inset: 0; z-index: 9000; pointer-events: none;
     background:
       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
       repeating-linear-gradient(to bottom,
-        rgba(0,0,0,0.30) 0px, rgba(0,0,0,0.30) 1px,
-        transparent 1px, transparent 3px);
+        rgba(0,0,0,0.42) 0px, rgba(0,0,0,0.42) 1.2px,
+        transparent 1.2px, transparent 3px);
     background-size: 120px 120px, auto;
-    opacity: 0.6;
+    opacity: 0.62;
     mix-blend-mode: multiply;
   }
   /* Candlelit top-glow + deep grimdark vignette at the edges */
@@ -1350,18 +1375,64 @@
       radial-gradient(62% 42% at 50% -8%, color-mix(in oklch, var(--accent-2) 15%, transparent), transparent 70%),
       radial-gradient(135% 125% at 50% 44%, transparent 44%, color-mix(in oklch, #000 87%, var(--accent-2)) 100%);
   }
+
+  /* ── Extra CRT pass on a dedicated overlay div (so body's two pseudo-elements
+     stay free): a slow bright phosphor band that rolls down the tube, plus a
+     coarser second set of scanlines for depth. pointer-events:none + fixed. ── */
+  .crt-overlay {
+    position: fixed; inset: 0; z-index: 9001; pointer-events: none; overflow: hidden;
+    border-radius: 12px;   /* hint of a rounded tube at the very corners */
+    box-shadow:
+      inset 0 0 160px 12px color-mix(in oklch, var(--accent-2) 13%, transparent),  /* glowing green bezel */
+      inset 0 0 60px 0 rgba(0,0,0,0.5);                                            /* darkened tube edges */
+  }
+  .crt-overlay::before {        /* the rolling scan band — translateY so it stays GPU-cheap */
+    content: ""; position: absolute; left: 0; right: 0; top: 0; height: 26vh;
+    transform: translateY(-26vh); will-change: transform;
+    background: linear-gradient(to bottom,
+      transparent,
+      color-mix(in oklch, var(--accent-2) 9%, transparent) 45%,
+      color-mix(in oklch, #fff 7%, transparent) 50%,
+      color-mix(in oklch, var(--accent-2) 9%, transparent) 55%,
+      transparent);
+    mix-blend-mode: screen; opacity: 0.75;
+  }
+  .crt-overlay::after {         /* coarse secondary scanlines, wider gauge than the fine set */
+    content: ""; position: absolute; inset: 0;
+    background: repeating-linear-gradient(to bottom,
+      rgba(0,0,0,0.16) 0px, rgba(0,0,0,0.16) 1px,
+      transparent 1px, transparent 5px);
+    mix-blend-mode: multiply; opacity: 0.5;
+  }
+
   @media (prefers-reduced-motion: no-preference) {
     /* Very slow phosphor breathe — subtle, not a strobe */
     body::after { animation: crtBreathe 7s ease-in-out infinite; }
     @keyframes crtBreathe { 0%,100% { opacity: 1; } 50% { opacity: 0.86; } }
+    /* Light, irregular flicker — mostly steady with the odd quick dip. */
+    body::before { animation: crtFlicker 5.5s linear infinite; }
+    @keyframes crtFlicker {
+      0%, 100% { opacity: 0.62; }
+      9%  { opacity: 0.50; }  10% { opacity: 0.63; }
+      28% { opacity: 0.59; }
+      47% { opacity: 0.62; }  48% { opacity: 0.45; }  49% { opacity: 0.62; }
+      62% { opacity: 0.60; }
+      82% { opacity: 0.63; }  83% { opacity: 0.52; }  84% { opacity: 0.63; }
+    }
+    /* The bright band sweeps top → bottom on a long cycle. */
+    .crt-overlay::before { animation: crtRoll 7.5s linear infinite; }
+    @keyframes crtRoll { 0% { transform: translateY(-26vh); } 100% { transform: translateY(100vh); } }
   }
 
-  /* Work area: steel field with gold + verdigris corner wash */
+  /* Work area: phosphor field with corner wash + coordinate rulers along the top
+     and left edges (the measured-viewport cue from the reference cogitator). */
   main {
     background:
+      repeating-linear-gradient(90deg, color-mix(in oklch, var(--accent) 30%, transparent) 0 1px, transparent 1px 26px) top left / 100% 6px no-repeat,
+      repeating-linear-gradient(180deg, color-mix(in oklch, var(--accent) 30%, transparent) 0 1px, transparent 1px 26px) top left / 6px 100% no-repeat,
       radial-gradient(1000px 560px at 100% -10%, color-mix(in oklch, var(--accent) 9%, transparent), transparent 60%),
       radial-gradient(900px 520px at -8% 105%, color-mix(in oklch, var(--accent-2) 11%, transparent), transparent 60%),
-      var(--bg);
+      transparent;   /* let the green <body> backdrop (outside the grayscale filter) show through */
   }
 
   /* ── Topbar / brand: imperial banner with gold + blood trim ── */
@@ -1519,11 +1590,114 @@
   *::-webkit-scrollbar-thumb:hover { background: var(--gold-soft); }
 
   /* Keep the scanline/vignette overlays out of the mobile flow too */
-  @media (max-width: 768px) { body::after { background: radial-gradient(140% 130% at 50% 46%, transparent 60%, rgba(0,0,0,0.5) 100%); } }
+  @media (max-width: 768px) {
+    body::after { background: radial-gradient(140% 130% at 50% 46%, transparent 60%, rgba(0,0,0,0.5) 100%); }
+    .crt-overlay::before { display: none; }   /* drop the rolling band on phones to save battery */
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     REFERENCE LAYOUT CUES — bracketed-hotkey sidebar, CRT gauge meters.
+     Matches the cogitator screen in gui.jpg. Appended last so it wins the cascade.
+     ═══════════════════════════════════════════════════════════════════════ */
+
+  /* ── Sidebar: "[H] Help" bracketed-hotkey menu ── */
+  .sb-key {
+    font-family: var(--font-mono);
+    color: var(--accent-2);
+    font-size: 13px; line-height: 1; flex: 0 0 auto; min-width: 30px;
+    text-shadow: 0 0 7px color-mix(in oklch, var(--accent-2) 50%, transparent);
+  }
+  .sb-item { letter-spacing: 0.04em; }
+  .sb-item:hover .sb-key { color: var(--bone); }
+  .sb-item.active .sb-key { color: var(--bone); text-shadow: 0 0 9px color-mix(in oklch, var(--accent-2) 70%, transparent); }
+  .sb-label { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; font-size: 12px; }
+
+  /* ── CRT gauge meters: segmented, glowing phosphor bars (reference bottom panel) ── */
+  .mini-bar, .progress {
+    position: relative;
+    height: 10px; border-radius: 1px; overflow: hidden;
+    background: color-mix(in oklch, #000 52%, var(--surface-2));   /* dark recessed track */
+    border: 1px solid color-mix(in oklch, var(--accent) 26%, var(--line));
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.6);
+  }
+  .mini-bar .fill, .progress .bar {
+    box-shadow: 0 0 9px color-mix(in oklch, var(--accent-2) 70%, transparent),
+                inset 0 0 0 1px color-mix(in oklch, #fff 16%, transparent);
+  }
+  /* Carve the bar into discrete filling boxes (LED-segment meter, like the water
+     bottle slots): 8px lit block + 2px dark gap drawn OVER the fill. */
+  .mini-bar::after, .progress::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 2;
+    background: repeating-linear-gradient(90deg, transparent 0 8px, rgba(0,0,0,0.85) 8px 10px);
+  }
+
+  /* ── Green module fills, white lines kept ──
+     Cards + their header bars go transparent so the green <body> backdrop shows
+     through them (it lives behind the .app grayscale filter, so it stays green).
+     The cards' own borders / top rail / inner frame / titles stay white. A faint
+     dark wash is layered in to keep white text legible over the green. */
+  .card {
+    background: linear-gradient(0deg, rgba(0,0,0,0.30), rgba(0,0,0,0.30)) !important;
+    /* 3D: raised panel — amber top-edge highlight, dark base lip, soft cast shadow */
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklch, var(--accent) 40%, transparent),
+      0 2px 0 rgba(0,0,0,0.55),
+      0 12px 24px rgba(0,0,0,0.42) !important;
+    transition: box-shadow .18s ease, transform .18s ease;
+  }
+  .card:hover {
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklch, var(--accent) 70%, transparent),
+      0 0 0 1px color-mix(in oklch, var(--accent) 35%, transparent),
+      0 4px 0 rgba(0,0,0,0.55),
+      0 16px 30px rgba(0,0,0,0.48) !important;
+  }
+  /* Header bar = same green as the card body, separated only by its white divider line */
+  .card-head { background: transparent !important; }
+
+  /* Every white-lined box goes green too: buttons, inputs, tags, pills. Translucent
+     washes let the green show through; their white borders + text stay. */
+  .btn            { background: transparent !important; }            /* bordered green box (like the reference's PRINT/ENHANCE) */
+  .btn:hover      { background: rgba(255,255,255,0.10) !important; } /* lit on hover */
+  .btn:active     { background: rgba(0,0,0,0.18) !important; }       /* pressed = darker */
+  .btn.ghost      { background: transparent !important; }
+  .btn.primary    { background: rgba(255,255,255,0.13) !important; } /* filled brighter green = emphasis */
+  .btn.primary:hover { background: rgba(255,255,255,0.20) !important; }
+  .input, textarea.input, select.input { background: rgba(0,0,0,0.28) !important; }  /* recessed darker-green field */
+  .input:focus, textarea.input:focus   { background: rgba(0,0,0,0.16) !important; }
+  .tag, .pill     { background: transparent !important; }            /* green chip, white outline */
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     PROJECT-AURORA HUD LAYER — amber corner crosshairs only.
+     Lives on .hud-overlay (sibling of #root, OUTSIDE the .app grayscale filter),
+     so amber renders as amber. Fixed, never intercepts input.
+     (Bottom wireframe "floor" grid was removed — it clashed with the command
+     palette + tweaks panel, which sit below this z-index 9002 layer.)
+     ═══════════════════════════════════════════════════════════════════════ */
+  .hud-overlay {
+    position: fixed; inset: 0; z-index: 9002; pointer-events: none;
+  }
+  .hud-x { position: absolute; width: 22px; height: 22px; }
+  .hud-x::before, .hud-x::after {
+    content: ""; position: absolute; background: var(--amber);
+    box-shadow: 0 0 6px color-mix(in oklch, var(--amber) 70%, transparent);
+  }
+  .hud-x::before { left: 50%; top: 0; width: 1.5px; height: 100%; transform: translateX(-50%); }
+  .hud-x::after  { top: 50%; left: 0; height: 1.5px; width: 100%; transform: translateY(-50%); }
+  .hud-x.tl { top: 62px; left: 12px; }
+  .hud-x.tr { top: 62px; right: 12px; }
+  .hud-x.bl { bottom: 34px; left: 12px; }
+  .hud-x.br { bottom: 34px; right: 12px; }
+  @media (max-width: 768px) { .hud-x { display: none; } }
 </style>
 </head>
 <body>
   <div id="root"></div>
+  <div class="crt-overlay" aria-hidden="true"></div>
+  <div class="hud-overlay" aria-hidden="true">
+    <span class="hud-x tl"></span><span class="hud-x tr"></span>
+    <span class="hud-x bl"></span><span class="hud-x br"></span>
+  </div>
 
   <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>

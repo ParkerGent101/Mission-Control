@@ -41,30 +41,264 @@ const Sparkline = ({ data, color = "var(--accent-2)", fill = true, height = 36 }
   );
 };
 
+// 3D bar-graph variant of the sparkline: extruded (isometric) bars standing on a
+// receding grid floor. The three faces use stepped lightness so the faceting still
+// reads after the app's amber monochrome filter (which preserves luminance, not hue).
+const BarGraph3D = ({ data, color = "var(--accent-2)", height = 58 }) => {
+  if (!data || data.length < 2) return null;
+  const w = 200, h = height;
+  const padX = 7, padTop = 9, padBot = 5;
+  const dx = 7, dy = 6;                       // isometric depth offset
+  const baseY = h - padBot;
+  const topLimit = padTop + dy;
+  const min = Math.min(...data), max = Math.max(...data);
+  const range = (max - min) || 1;
+  const n = data.length;
+  const slot = (w - padX * 2 - dx) / n;
+  const barW = Math.max(5, slot * 0.58);
+  const minBarH = 7, maxBarH = baseY - topLimit;
+  const bars = data.map((v, i) => {
+    const x = padX + i * slot + (slot - barW) / 2;
+    const bh = minBarH + ((v - min) / range) * (maxBarH - minBarH);
+    return { x, topY: baseY - bh, bh };
+  });
+  const gridN = 4;
+  const gridYs = Array.from({ length: gridN + 1 }, (_, k) => baseY - (k / gridN) * maxBarH);
+  return (
+    <svg className="spark spark-3d" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ width: '100%', height }}>
+      {/* receding grid floor */}
+      <g stroke={color} fill="none" strokeWidth="0.6">
+        {gridYs.map((y, k) => (
+          <g key={k}>
+            <line x1={padX} y1={y} x2={w - padX} y2={y} strokeOpacity="0.24" />
+            <line x1={w - padX} y1={y} x2={w - padX + dx} y2={y - dy} strokeOpacity="0.16" />
+            <line x1={padX + dx} y1={y - dy} x2={w - padX + dx} y2={y - dy} strokeOpacity="0.10" />
+          </g>
+        ))}
+        {Array.from({ length: n + 1 }, (_, k) => (
+          <line key={'v' + k} x1={padX + k * slot} y1={baseY} x2={padX + k * slot + dx} y2={baseY - dy} strokeOpacity="0.12" />
+        ))}
+      </g>
+      {/* extruded bars: side (dark) + top (bright) + front (mid) so the facets read in monochrome */}
+      {bars.map((b, k) => (
+        <g key={k}>
+          <path d={`M${b.x + barW},${b.topY} l${dx},${-dy} l0,${b.bh} l${-dx},${dy} Z`} fill={color} fillOpacity="0.30" />
+          <path d={`M${b.x},${b.topY} l${dx},${-dy} l${barW},0 l${-dx},${dy} Z`} fill={color} fillOpacity="0.92" />
+          <rect x={b.x} y={b.topY} width={barW} height={b.bh} fill={color} fillOpacity="0.58" />
+          <rect x={b.x} y={b.topY} width={barW} height={b.bh} fill="none" stroke={color} strokeOpacity="0.9" strokeWidth="0.5" />
+        </g>
+      ))}
+    </svg>
+  );
+};
+
 const Checkbox = ({ checked, onClick }) => (
   <span className={"checkbox" + (checked ? " checked" : "")} onClick={onClick}>
     {checked && <Icon name="check" size={11} stroke={2.5} />}
   </span>
 );
 
-const DonutChart = ({ data, size = 110 }) => {
+// Pie as territory on a 3D planet. In `war` mode it's a LIVE rotating globe: each expense
+// is a faction holding a longitude arc of the whole sphere (sized by share of income), and
+// the surface spins under fixed lighting so territories scroll across the face and wrap
+// around the back. Only the front 180° hemisphere is drawn each frame. Battle fronts are
+// jagged FEBA sawtooth lines that slowly creep; the dim "Savings" arc is unclaimed ground
+// (calm dots, dashed armistice borders, no teeth). Both the Finance and Health cards use
+// `war`; the non-war branch is a static smooth-globe fallback. Honors prefers-reduced-motion.
+const DonutChart = ({ data, size = 110, war = false, labels = true, alert = false }) => {
   const total = data.reduce((s, d) => s + d.value, 0);
+  const [tick, setTick] = useState(0);   // animation clock (ms), war globe only
+  useEffect(() => {
+    if (!war || !total) return;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    let raf, prev = null, acc = 0, last = 0;
+    const loop = (t) => {
+      if (prev !== null) acc += t - prev;
+      prev = t;
+      if (t - last > 33) { last = t; setTick(acc); }   // throttle to ~30fps
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [war, total]);
+
   if (!total) return <div style={{width:size,height:size,display:'flex',alignItems:'center',justifyContent:'center'}}><span className="muted-2 mono" style={{fontSize:10}}>no data</span></div>;
-  const cx = size/2, cy = size/2, r = size*0.42, inner = size*0.25;
-  let cum = -Math.PI/2;
-  const slices = data.map(d => {
-    const angle = (d.value/total)*2*Math.PI;
-    const start = cum; cum += angle; const end = cum;
-    const x1=cx+r*Math.cos(start), y1=cy+r*Math.sin(start);
-    const x2=cx+r*Math.cos(end),   y2=cy+r*Math.sin(end);
-    const ix1=cx+inner*Math.cos(start), iy1=cy+inner*Math.sin(start);
-    const ix2=cx+inner*Math.cos(end),   iy2=cy+inner*Math.sin(end);
-    const large = angle>Math.PI?1:0;
-    return {...d, path:`M${x1.toFixed(2)} ${y1.toFixed(2)} A${r} ${r} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} L${ix2.toFixed(2)} ${iy2.toFixed(2)} A${inner} ${inner} 0 ${large} 0 ${ix1.toFixed(2)} ${iy1.toFixed(2)}Z`};
+  const cx = size/2, cy = size/2, r = size*0.44;
+  const uid = (war ? 'warplanet' : 'planet') + Math.round(size);
+  const D = Math.PI/180, N = 16;
+  const project = (lat, lon) => [cx + r*Math.cos(lat*D)*Math.sin(lon*D), cy - r*Math.sin(lat*D)];
+  const toPath = (pts) => pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(2)+' '+p[1].toFixed(2)).join(' ');
+  const rev = (pts) => pts.slice().reverse().map(p=>'L'+p[0].toFixed(2)+' '+p[1].toFixed(2)).join(' ');
+  const HATCH = ['-h0','-h1','-h2','-h3','-h4'];
+  const FONT = Math.max(6.5, size*0.052);
+  const labelOf = (s) => (s.label || '').split(/[ /]/)[0].slice(0,9).toUpperCase();
+  const lats = [45,0,-45].map(a => ({ rx: r*Math.cos(a*D), ry: Math.max(0.6, r*Math.cos(a*D)*0.18), yc: cy - r*Math.sin(a*D) }));
+  const mk = Math.max(2, size*0.03);
+  // sawtooth front-line teeth (FEBA symbol) along a boundary, as one path string
+  const teeth = (pts) => {
+    let dstr = '';
+    for (let k = 1; k < pts.length-2; k += 2) {
+      const a = pts[k], b = pts[k+1];
+      const dx=b[0]-a[0], dy=b[1]-a[1], len=Math.hypot(dx,dy)||1, ux=dx/len, uy=dy/len, nx=uy, ny=-ux;
+      const mxp=(a[0]+b[0])/2, myp=(a[1]+b[1])/2, tH=Math.max(2.4,size*0.032), tW=len*0.5;
+      dstr += `M${(mxp-ux*tW).toFixed(2)} ${(myp-uy*tW).toFixed(2)} L${(mxp+ux*tW).toFixed(2)} ${(myp+uy*tW).toFixed(2)} L${(mxp+nx*tH).toFixed(2)} ${(myp+ny*tH).toFixed(2)} Z `;
+    }
+    return dstr;
+  };
+
+  // Shared sphere shading + atmosphere, reused by both modes.
+  const baseDefs = (
+    <React.Fragment>
+      <radialGradient id={uid+'-atmo'} cx="50%" cy="50%" r="50%">
+        <stop offset="74%"  stopColor="var(--accent-2)" stopOpacity="0"/>
+        <stop offset="95%"  stopColor="var(--accent-2)" stopOpacity="0.22"/>
+        <stop offset="100%" stopColor="var(--accent-2)" stopOpacity="0"/>
+      </radialGradient>
+      <radialGradient id={uid+'-hi'} cx="33%" cy="26%" r="75%">
+        <stop offset="0%"   stopColor="#fff" stopOpacity="0.34"/>
+        <stop offset="40%"  stopColor="#fff" stopOpacity="0.07"/>
+        <stop offset="100%" stopColor="#fff" stopOpacity="0"/>
+      </radialGradient>
+      <radialGradient id={uid+'-limb'} cx="50%" cy="50%" r="50%">
+        <stop offset="55%"  stopColor="#000" stopOpacity="0"/>
+        <stop offset="86%"  stopColor="#000" stopOpacity="0.30"/>
+        <stop offset="100%" stopColor="#000" stopOpacity="0.60"/>
+      </radialGradient>
+      <filter id={uid+'-ds'} x="-30%" y="-30%" width="160%" height="170%">
+        <feDropShadow dx="0" dy={(size*0.05).toFixed(1)} stdDeviation={(size*0.05).toFixed(1)} floodColor="#000" floodOpacity="0.55"/>
+      </filter>
+      <clipPath id={uid+'-clip'}><circle cx={cx} cy={cy} r={r}/></clipPath>
+    </React.Fragment>
+  );
+  const shading = (
+    <React.Fragment>
+      <circle cx={cx} cy={cy} r={r} fill={`url(#${uid}-limb)`}/>
+      <circle cx={cx} cy={cy} r={r} fill={`url(#${uid}-hi)`}/>
+    </React.Fragment>
+  );
+  const atmosphere = <circle cx={cx} cy={cy} r={(r*1.08).toFixed(2)} fill={`url(#${uid}-atmo)`}/>;
+  const latRings = (
+    <g fill="none" stroke="var(--accent-2)" strokeWidth="0.6" strokeOpacity="0.2">
+      {lats.map((l,i)=><ellipse key={'la'+i} cx={cx} cy={l.yc.toFixed(2)} rx={l.rx.toFixed(2)} ry={l.ry.toFixed(2)}/>)}
+    </g>
+  );
+  const outline = <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--accent)" strokeOpacity="0.9" strokeWidth="1.2"/>;
+
+  // ===== WAR: live rotating globe of organic continents on an ocean =====
+  // Each expense is a landmass; its AREA ∝ share, so the biggest spend is the biggest country
+  // (no size clamp — relative sizes stay true). Unclaimed Savings is the ocean they sit on.
+  if (war) {
+    const rot = tick * (360 / 46000);     // ~46s per revolution
+    const jagPhase = tick * 0.0012;        // coastline creep
+    const noise = (x) => Math.sin(x);
+    const loop = (pts) => toPath(pts) + ' Z';
+    const land = data.filter(d => !d.neutral && d.value > 0);
+    const ocean = data.find(d => d.neutral);
+    const oceanColor = ocean ? ocean.color : 'var(--surface-3)';
+    const landN = Math.max(1, land.length);
+    const LAT = [16, -15, 31, -27, 8, -34, 23, -19];
+    // organic blob outline (closed loop) in local coords — a lobed circle that slowly morphs
+    const blob = (R, seed) => {
+      const pts = [], M = 30;
+      for (let k = 0; k < M; k++) {
+        const a = (k / M) * Math.PI * 2;
+        const w = 1 + 0.17*noise(3*a + seed) + 0.11*noise(5*a + seed*1.7 + jagPhase) + 0.07*noise(8*a + seed*2.3 - jagPhase*0.7);
+        pts.push([Math.cos(a) * R * w, Math.sin(a) * R * w]);
+      }
+      return pts;
+    };
+    const continents = land.map((d, i) => {
+      const lon = i * (360 / landN), lat = LAT[i % LAT.length];
+      const vlon = lon + rot;                                  // current view longitude
+      const f = Math.cos(vlon*D) * Math.cos(lat*D);            // >0 ⇒ front hemisphere
+      const [px, py] = project(lat, vlon);
+      const sx = Math.max(0.06, Math.abs(Math.cos(vlon*D)));   // horizontal foreshortening near limb
+      const R = Math.min(r * 0.6, r * Math.sqrt(d.value / total));   // facing area ≈ its % of the planet disk
+      const alpha = Math.max(0, Math.min(1, (f - 0.05) / 0.22));   // fade in/out across the limb
+      const pts = blob(R, i*1.3 + 0.7).map(([lx,ly]) => [px + lx*sx, py + ly]);
+      return { i, d, f, alpha, px, py, R, sx, pts, share: d.value/total, hatch: HATCH[i % HATCH.length] };
+    }).filter(c => c.alpha > 0.02).sort((a,b) => a.f - b.f);   // far continents drawn first
+    const namedLand = continents.filter(c => c.alpha > 0.6 && c.R > r*0.14)
+      .map(c => ({ ...c, text: labelOf(c.d) }));
+    return (
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{overflow:'visible'}}>
+        <defs>
+          {baseDefs}
+          <pattern id={uid+'-h0'} width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="5" stroke="var(--bg)" strokeWidth="1.3" strokeOpacity="0.5"/></pattern>
+          <pattern id={uid+'-h1'} width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)"><line x1="0" y1="0" x2="0" y2="5" stroke="var(--bg)" strokeWidth="1.3" strokeOpacity="0.5"/></pattern>
+          <pattern id={uid+'-h2'} width="5" height="5" patternUnits="userSpaceOnUse"><path d="M0 0H5M0 0V5" fill="none" stroke="var(--bg)" strokeWidth="0.9" strokeOpacity="0.45"/></pattern>
+          <pattern id={uid+'-h3'} width="5" height="5" patternUnits="userSpaceOnUse"><circle cx="2.5" cy="2.5" r="1.1" fill="var(--bg)" fillOpacity="0.5"/></pattern>
+          <pattern id={uid+'-h4'} width="6" height="6" patternUnits="userSpaceOnUse"><line x1="0" y1="0" x2="6" y2="0" stroke="var(--bg)" strokeWidth="1.3" strokeOpacity="0.5"/></pattern>
+          {/* ocean of unclaimed Savings: sparse calm swell */}
+          <pattern id={uid+'-hn'} width="9" height="9" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.8" fill="var(--ink-3)" fillOpacity="0.22"/></pattern>
+          {/* over-budget alert: red atmosphere halo */}
+          <radialGradient id={uid+'-atmoR'} cx="50%" cy="50%" r="50%">
+            <stop offset="58%"  stopColor="var(--danger)" stopOpacity="0"/>
+            <stop offset="92%"  stopColor="var(--danger)" stopOpacity="0.55"/>
+            <stop offset="100%" stopColor="var(--danger)" stopOpacity="0"/>
+          </radialGradient>
+        </defs>
+        {alert ? <circle cx={cx} cy={cy} r={(r*1.08).toFixed(2)} fill={`url(#${uid}-atmoR)`}/> : atmosphere}
+        <g filter={`url(#${uid}-ds)`}>
+          <g clipPath={`url(#${uid}-clip)`}>
+            {/* ocean = unclaimed Savings */}
+            <circle cx={cx} cy={cy} r={r} fill={oceanColor}/>
+            <circle cx={cx} cy={cy} r={r} fill={`url(#${uid}-hn)`}/>
+            {latRings}
+            {/* continents = expense factions, sized by share, with fortified coastlines */}
+            {continents.map(c => (
+              <g key={'c'+c.i} opacity={c.alpha.toFixed(2)}>
+                <path d={loop(c.pts)} fill={c.d.color} stroke="var(--bg)" strokeWidth="0.8"/>
+                <path d={loop(c.pts)} fill={`url(#${uid}${c.hatch})`}/>
+                <path d={loop(c.pts)} fill="none" stroke="var(--bone)" strokeWidth="1.1" strokeOpacity="0.92" strokeLinejoin="round"/>
+                <path d={teeth(c.pts.filter((_,k)=>k%2===0))} fill="var(--bone)" fillOpacity="0.8"/>
+              </g>
+            ))}
+            {/* over-budget: wash the whole world red (under the shading so it stays spherical) */}
+            {alert && <circle cx={cx} cy={cy} r={r} fill="var(--danger)" opacity="0.40"/>}
+            {shading}
+          </g>
+          {alert
+            ? <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--danger)" strokeOpacity="0.95" strokeWidth="1.6"/>
+            : outline}
+          {labels && ocean && (
+            <text x={cx} y={(cy + r*0.62).toFixed(2)} textAnchor="middle" dominantBaseline="middle"
+              fontFamily="var(--font-mono)" fontSize={(FONT*0.92).toFixed(1)} fontWeight="500" letterSpacing="1"
+              fill="var(--ink-2)" fillOpacity="0.8" stroke="var(--bg)" strokeWidth={(FONT*0.28).toFixed(1)} paintOrder="stroke" strokeLinejoin="round">{labelOf(ocean)}</text>
+          )}
+          {labels && namedLand.map(c => (
+            <text key={'t'+c.i} x={c.px.toFixed(2)} y={c.py.toFixed(2)} textAnchor="middle" dominantBaseline="middle" opacity={c.alpha.toFixed(2)}
+              fontFamily="var(--font-mono)" fontSize={FONT.toFixed(1)} fontWeight="700" letterSpacing="0.5"
+              fill="var(--bone)" stroke="var(--bg)" strokeWidth={(FONT*0.32).toFixed(1)} paintOrder="stroke" strokeLinejoin="round">{c.text}</text>
+          ))}
+        </g>
+      </svg>
+    );
+  }
+
+  // ===== Non-war: static smooth globe (fallback for non-themed charts) =====
+  const cuts = [0]; { let a = 0; data.forEach(d => { a += d.value; cuts.push(a / total); }); }
+  const bnd = cuts.map(f => { const lon = -90 + f*180; const pts = []; for (let k=0;k<=N;k++){ const lat = 90-(k/N)*180; pts.push(project(lat, lon)); } return pts; });
+  const bands = data.map((d, i) => {
+    const pc = -90 + ((cuts[i]+cuts[i+1])/2)*180; const [mx,my] = project(8, pc);
+    return {...d, path: toPath(bnd[i+1]) + ' ' + rev(bnd[i]) + ' Z', mx, my, share: d.value/total };
   });
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-      {slices.map((s,i)=><path key={i} d={s.path} fill={s.color} stroke="var(--surface)" strokeWidth={1.5}/>)}
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{overflow:'visible'}}>
+      <defs>{baseDefs}</defs>
+      {atmosphere}
+      <g filter={`url(#${uid}-ds)`}>
+        <g clipPath={`url(#${uid}-clip)`}>
+          {bands.map((s,i)=><path key={i} d={s.path} fill={s.color} stroke="var(--bg)" strokeWidth="1.4"/>)}
+          {latRings}
+          {shading}
+        </g>
+        {outline}
+        {bands.map((s,i)=> s.share < 0.06 ? null : (
+          <path key={'m'+i} d={`M${s.mx.toFixed(2)} ${(s.my-mk).toFixed(2)} L${(s.mx+mk).toFixed(2)} ${(s.my+mk*0.8).toFixed(2)} L${(s.mx-mk).toFixed(2)} ${(s.my+mk*0.8).toFixed(2)} Z`}
+            fill="var(--bone)" stroke="var(--bg)" strokeWidth="0.4"/>
+        ))}
+      </g>
     </svg>
   );
 };
@@ -284,17 +518,19 @@ const AgendaCard = () => {
 // =========================================================
 // FINANCE
 // =========================================================
+// Amber palette (warm hues, stepped lightness) so the donut/swatches stay
+// distinguishable while keeping the white + amber-accent theme — no off-hue colors.
 const FIN_CATS = [
-  { name: "Housing",       budget: 987,  color: "var(--info)" },
-  { name: "Utilities",     budget: 450,  color: "var(--violet)" },
-  { name: "Subscriptions", budget: 125,  color: "var(--accent-2)" },
-  { name: "Food / Grocery", budget: 400,  color: "var(--accent)" },
-  { name: "Fun",           budget: 500,  color: "var(--danger)" },
-  { name: "Gas",           budget: 300,  color: "oklch(0.7 0.13 200)" },
-  { name: "Shopping",      budget: 0,    color: "oklch(0.72 0.12 160)" },
-  { name: "Band",          budget: 0,    color: "oklch(0.68 0.18 320)" },
-  { name: "Loans",         budget: 500,  color: "oklch(0.65 0.10 30)" },
-  { name: "Other",         budget: 0,    color: "var(--ink-3)" },
+  { name: "Housing",       budget: 987,  color: "oklch(0.88 0.11 90)" },
+  { name: "Utilities",     budget: 450,  color: "oklch(0.58 0.12 66)" },
+  { name: "Subscriptions", budget: 125,  color: "oklch(0.92 0.09 98)" },
+  { name: "Food / Grocery", budget: 400,  color: "oklch(0.64 0.14 56)" },
+  { name: "Fun",           budget: 500,  color: "oklch(0.83 0.12 80)" },
+  { name: "Gas",           budget: 300,  color: "oklch(0.54 0.11 46)" },
+  { name: "Shopping",      budget: 0,    color: "oklch(0.76 0.11 92)" },
+  { name: "Band",          budget: 0,    color: "oklch(0.48 0.10 40)" },
+  { name: "Loans",         budget: 500,  color: "oklch(0.70 0.13 70)" },
+  { name: "Other",         budget: 0,    color: "oklch(0.40 0.05 82)" },
 ];
 const FIN_CAT_NAMES = FIN_CATS.map(c => c.name);
 const FIN_CAT_COLOR = Object.fromEntries(FIN_CATS.map(c => [c.name, c.color]));
@@ -355,6 +591,10 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
   const [subEditId, setSubEditId] = useState(null);   // id of subscription being edited (reuses the add form)
   const catOverrides = React.useRef({});
   const [budget, setBudget] = React.useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [pending, setPending] = useState(null);   // null = idle; [] = synced w/ nothing new; [...] = review queue
+  const [bankConnected, setBankConnected] = useState(null);  // null = unknown, false = no Plaid items, true = linked
+  const [connecting, setConnecting] = useState(false);
   const [collapsedCats, setCollapsedCats] = useState({});
   const toggleCat = (name) => setCollapsedCats(s => ({...s, [name]: !s[name]}));
   // Mobile: Overview / Transactions / Subscriptions become horizontally swipeable panes.
@@ -392,10 +632,12 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
   useEffect(() => { loadFinances(month); }, [month]);
   useEffect(() => {
     fetch('/api/finances/subscriptions').then(r=>r.json()).then(setSubs).catch(()=>{});
+    fetch('/api/plaid/status').then(r=>r.json()).then(d => setBankConnected(!!d.connected)).catch(()=>setBankConnected(null));
   }, []);
   useRefreshListener(() => {
     loadFinances(month);
     fetch('/api/finances/subscriptions').then(r=>r.json()).then(setSubs).catch(()=>{});
+    fetch('/api/plaid/status').then(r=>r.json()).then(d => setBankConnected(!!d.connected)).catch(()=>{});
   });
   const changeMonth = (dir) => {
     const [y, m] = month.split('-').map(Number);
@@ -418,6 +660,71 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
       return;
     }
     setDesc(''); setAmt(''); setShowAdd(false);
+    loadFinances(month);
+  };
+
+  // Sheet-tracked expense categories (the only ones Plaid imports can write to).
+  const SHEET_CATS = ["Food / Grocery", "Fun", "Gas", "Housing", "Utilities"];
+
+  const syncBank = async () => {
+    setSyncing(true);
+    try {
+      const r = await fetch('/api/plaid/sync');
+      const d = await r.json();
+      if (!r.ok || d.error) { alert(d.error || 'Bank sync failed'); setSyncing(false); return; }
+      const rows = (d.pending || []).map(t => ({ ...t, include: true }));
+      setPending(rows);
+      if (rows.length === 0) window.__toast?.('No new transactions to import', 'info');
+    } catch { alert('Bank sync failed — is Plaid configured?'); }
+    setSyncing(false);
+  };
+
+  // Link a real bank via Plaid Link (mirrors connectPlaid() in onboarding.jsx) so a
+  // bank can be connected outside the first-run onboarding wizard.
+  const connectBank = async () => {
+    if (!window.Plaid) { window.__toast?.('Plaid not loaded — is PLAID_CLIENT_ID set?', 'error'); return; }
+    setConnecting(true);
+    try {
+      const r = await fetch('/api/plaid/link_token', { method:'POST', headers:{'Content-Type':'application/json'} });
+      const d = await r.json();
+      if (!r.ok || d.error) { setConnecting(false); window.__toast?.(d.error || 'Could not start Plaid', 'error'); return; }
+      // Persist the link_token so an OAuth bank (e.g. Fidelity) can resume after it
+      // redirects the page back here — see the OAuth handoff effect in app.jsx.
+      localStorage.setItem('mc_plaid_link_token', d.link_token);
+      const handler = window.Plaid.create({
+        token: d.link_token,
+        onSuccess: async (publicToken) => {
+          await fetch('/api/plaid/exchange', { method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ public_token: publicToken }) });
+          localStorage.removeItem('mc_plaid_link_token');
+          setBankConnected(true); setConnecting(false);
+          window.__toast?.('Bank account connected', 'success');
+          syncBank();   // pull the first batch straight into the review queue
+        },
+        onExit: () => { localStorage.removeItem('mc_plaid_link_token'); setConnecting(false); },
+      });
+      handler.open();
+    } catch { setConnecting(false); window.__toast?.('Plaid connection failed', 'error'); }
+  };
+
+  const importPending = async () => {
+    const chosen = (pending || []).filter(t => t.include);
+    const skip = (pending || []).filter(t => !t.include).map(t => t.id);
+    setSyncing(true);
+    try {
+      if (chosen.length) {
+        const r = await fetch('/api/plaid/import', { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ transactions: chosen }) });
+        const d = await r.json();
+        if (d.written) window.__toast?.(`Imported ${d.written} transaction${d.written===1?'':'s'} to the Sheet`, 'success');
+        if (d.failed) alert(`${d.failed} couldn’t be imported:\n` + (d.errors||[]).map(e => typeof e==='string'?e:JSON.stringify(e)).join('\n'));
+      }
+      if (skip.length) {
+        await fetch('/api/plaid/skip', { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ ids: skip }) }).catch(()=>{});
+      }
+    } catch { alert('Import failed'); }
+    setPending(null); setSyncing(false);
     loadFinances(month);
   };
 
@@ -561,7 +868,18 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
 
   const totalBudget = categories.reduce((s,c)=>s+(c.budget||c.budgeted||0), 0);
 
-  const donutData = categories.filter(c=>c.actual>0).map(c=>({value:c.actual, color:c.color, label:c.name}));
+  // Finance "planet": the whole globe = income; each expense category is a territory
+  // taken over, and the dim remainder is unspent income (unclaimed surface). Falls
+  // back to plain expense proportions if there's no income figure yet.
+  const expenseSlices = categories.filter(c=>c.actual>0).map(c=>({value:c.actual, color:c.color, label:c.name}));
+  // Savings = the share of income no expense has "conquered". Measured against the
+  // summed expense territories so the whole globe reads as exactly one month's income
+  // (e.g. Housing $1000 of $5000 income ⇒ 1/5 of the map; the rest is unclaimed Savings).
+  const spentClaimed = expenseSlices.reduce((s,d)=>s+d.value, 0);
+  const savings = Math.max(0, totalIn - spentClaimed);
+  const donutData = totalIn > 0
+    ? [...expenseSlices, ...(savings > 0 ? [{ value: savings, color: 'var(--surface-3)', label: 'Savings', neutral: true }] : [])]
+    : expenseSlices;
 
   return (
     <Card {...cardProps} id="finance" num="02" title={`Finance — ${monthLabel}`} span={cardProps.span || 7}
@@ -573,9 +891,41 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
         <button className="btn" disabled={rolling} onClick={rolloverMonth} title="Create next month's sheet from this one"><Icon name="file" size={13}/>New month</button>
         <button className="btn" disabled={rolling} onClick={rolloverYear} title="Create a new year's finances file to fill out"><Icon name="calendar" size={13}/>New year</button>
         <button className="btn" onClick={toggleStats} title={hideStats ? "Show income & totals" : "Hide income & totals"}><Icon name={hideStats ? "eye-off" : "eye"} size={13}/>{hideStats ? "Show totals" : "Hide totals"}</button>
+        {bankConnected === false ? (
+          <button className="btn" disabled={connecting} onClick={connectBank} title="Link a bank account via Plaid"><Icon name={connecting ? "loader" : "wallet"} size={13}/>{connecting ? "Connecting…" : "Connect bank"}</button>
+        ) : (
+          <button className="btn" disabled={syncing} onClick={syncBank} title="Pull recent transactions from your connected bank (Plaid) for review"><Icon name={syncing ? "loader" : "wallet"} size={13}/>{syncing ? "Syncing…" : "Sync bank"}</button>
+        )}
         <button className="btn primary" onClick={() => setShowAdd(s=>!s)}><Icon name="plus" size={13}/>Add expense</button>
       </>}
     >
+      {pending && pending.length > 0 && (
+        <div style={{ padding:'0 0 12px', borderBottom:'1px solid var(--line-soft)', marginBottom:12 }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8, gap:8, flexWrap:'wrap' }}>
+            <div style={{ fontFamily:'var(--font-mono)', fontSize:11, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--accent-2)' }}>
+              Review — {pending.filter(t=>t.include).length} of {pending.length} from bank
+            </div>
+            <div style={{ display:'flex', gap:6 }}>
+              <button className="btn primary" disabled={syncing} onClick={importPending}>Import {pending.filter(t=>t.include).length} to Sheet</button>
+              <button className="btn ghost" onClick={()=>setPending(null)}>Cancel</button>
+            </div>
+          </div>
+          <div style={{ maxHeight:220, overflowY:'auto', display:'flex', flexDirection:'column', gap:4 }}>
+            {pending.map((t, i) => (
+              <div key={t.id} style={{ display:'flex', gap:8, alignItems:'center', fontSize:12.5, opacity: t.include ? 1 : 0.4 }}>
+                <input type="checkbox" checked={t.include} onChange={e=>setPending(p=>p.map((x,j)=>j===i?{...x,include:e.target.checked}:x))} />
+                <span style={{ width:46, color:'var(--ink-4)', fontFamily:'var(--font-mono)', fontSize:11 }}>{(t.date||'').slice(5)}</span>
+                <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={t.name}>{t.name}</span>
+                <span style={{ width:72, textAlign:'right', fontFamily:'var(--font-mono)' }}>{fmtMoney(t.amount,{cents:true})}</span>
+                <select className="input" value={t.category} onChange={e=>setPending(p=>p.map((x,j)=>j===i?{...x,category:e.target.value}:x))} style={{ width:122, padding:'3px 6px' }}>
+                  {SHEET_CATS.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop:6, fontSize:11, color:'var(--ink-4)' }}>Unchecked rows are skipped this time and won’t reappear on the next sync.</div>
+        </div>
+      )}
       {showAdd && (
         <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'flex-end', padding:'0 0 12px', borderBottom:'1px solid var(--line-soft)', marginBottom:12 }}>
           <input className="input" placeholder="Description" value={desc} onChange={e=>setDesc(e.target.value)} style={{flex:2,minWidth:120}} />
@@ -618,14 +968,14 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
                   <div className="amt">{fmtMoney(c.actual)}</div>
                   <div className="amt muted-2" onClick={()=>editBudget(c)} title="Edit budget" style={{cursor:'pointer'}}>/ {fmtMoney(c.budget,{cents:false})}</div>
                   <div className="pct" style={{color:over?"var(--danger)":"var(--ink-3)"}}>{Math.round(pct)}%</div>
-                  <div className="mini-bar"><div className="fill" style={{width:Math.min(100,pct)+"%",background:over?"var(--danger)":c.color}}/></div>
+                  <div className="mini-bar"><div className="fill" style={{width:Math.min(100,pct)+"%",background:over?"var(--danger)":"var(--accent-2)"}}/></div>
                 </div>
               );
             })}
           </div>
         </div>
         <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:6,paddingTop:4}}>
-          <DonutChart data={donutData} size={110}/>
+          <DonutChart data={donutData} size={148} war alert={totalEx > totalIn}/>
           {donutData.length>0 && (
             <div style={{display:'flex',flexDirection:'column',gap:3}}>
               {donutData.slice(0,4).map((d,i)=>(
@@ -1606,6 +1956,15 @@ const HealthCard = ({ cardProps = {} } = {}) => {
   ];
   const calGoal = 3000;
   const calPct  = Math.min(100, (totalCal / calGoal) * 100);
+  // Macro planet (same rotating-continents globe as Finance): the calorie goal is the
+  // whole world, each macro is a continent sized by its CALORIES (4·protein, 4·carbs,
+  // 9·fat), and the calories still under goal are the unclaimed "Reserve" ocean.
+  const macroGlobe = [
+    { value: totalProtein * 4, color: 'var(--accent)', label: 'Protein' },
+    { value: totalCarbs   * 4, color: 'var(--warn)',   label: 'Carbs'   },
+    { value: totalFat     * 9, color: 'var(--info)',   label: 'Fat'     },
+    { value: Math.max(0, calGoal - totalCal), color: 'var(--surface-3)', label: 'Reserve', neutral: true },
+  ].filter(d => d.value > 0);
 
   const bmi    = (weight && height) ? +(weight / (height * height) * 703).toFixed(1) : null;
   const bmiCat = bmi == null ? '' : bmi < 18.5 ? 'Underweight' : bmi < 25 ? 'Normal' : bmi < 30 ? 'Overweight' : 'Obese';
@@ -1630,7 +1989,7 @@ const HealthCard = ({ cardProps = {} } = {}) => {
         <div className="stat-block">
           <span className="l">Weight</span>
           <span className="v">{weight ?? '—'}<span className="muted-2" style={{ fontSize: 11, marginLeft: 3 }}>lb</span></span>
-          {weightLog.length > 1 && <Sparkline data={weightLog} color="var(--accent-2)" height={26} />}
+          {weightLog.length > 1 && <BarGraph3D data={weightLog} color="var(--accent-2)" height={56} />}
           <div style={{ display: 'flex', gap: 4, marginTop: 5 }}>
             <input className="input" type="number" placeholder="log lb" value={newWeight}
               onChange={e => setNewWeight(e.target.value)}
@@ -1742,7 +2101,7 @@ const HealthCard = ({ cardProps = {} } = {}) => {
         {/* Donut + calorie bar (positioned BELOW the search row) */}
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 10 }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-            <DonutChart data={macroData} size={80} />
+            <DonutChart data={macroGlobe} size={92} war labels={false} alert={totalCal > calGoal} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               {macroData.map(({ label, grams, color }) => (
                 <div key={label} style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
@@ -1759,9 +2118,9 @@ const HealthCard = ({ cardProps = {} } = {}) => {
                 {totalCal}<span className="muted-2" style={{ fontSize: 10 }}> / {calGoal}</span>
               </span>
             </div>
-            <div style={{ height: 10, borderRadius: 5, background: 'var(--surface-2)', overflow: 'hidden', border: '1px solid var(--line-soft)' }}>
-              <div style={{
-                height: '100%', width: calPct + '%', borderRadius: 5,
+            <div className="mini-bar">
+              <div className="fill" style={{
+                width: calPct + '%',
                 background: totalCal > calGoal ? 'var(--danger)' : totalCal > calGoal * 0.85 ? 'var(--warn)' : 'var(--accent-2)',
               }} />
             </div>
@@ -1816,8 +2175,8 @@ const HealthCard = ({ cardProps = {} } = {}) => {
                 {water}<span className="muted-2" style={{ fontSize: 10 }}> / {waterGoal} oz</span>
               </span>
             </div>
-            <div style={{ height: 10, borderRadius: 5, background: 'var(--surface-2)', overflow: 'hidden', border: '1px solid var(--line-soft)' }}>
-              <div style={{ height: '100%', width: waterPct + '%', borderRadius: 5, background: water >= waterGoal ? 'var(--accent)' : 'var(--info)' }} />
+            <div className="mini-bar">
+              <div className="fill" style={{ width: waterPct + '%', background: water >= waterGoal ? 'var(--accent)' : 'var(--info)' }} />
             </div>
             <div className="muted-2 mono" style={{ fontSize: 9.5, marginTop: 4 }}>
               {water >= waterGoal
@@ -2627,17 +2986,19 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
   useRefreshListener(load);
 
   // Each type gets its own distinct hue (oklch around the wheel) so the dots read at a glance.
+  // Amber palette — warm hues at stepped lightness so dots stay readable while
+  // keeping the white + amber-accent theme (no off-hue blues/greens/reds).
   const COLOR = {
-    band:       'oklch(0.70 0.14 300)',  // violet
-    show:       'oklch(0.68 0.19 335)',  // magenta
-    work:       'oklch(0.70 0.13 245)',  // blue
-    piano:      'oklch(0.75 0.11 190)',  // teal
-    birthday:   'oklch(0.80 0.14 80)',   // amber
-    anniversary:'oklch(0.66 0.19 20)',   // red
-    holiday:    'oklch(0.74 0.14 150)',  // green
-    culture:    'oklch(0.84 0.14 100)',  // yellow
-    other:      'oklch(0.74 0.16 50)',   // orange
-    gcal:       'oklch(0.68 0.04 250)',  // slate / external
+    band:       'oklch(0.80 0.13 80)',   // amber
+    show:       'oklch(0.70 0.14 52)',   // deep orange-amber
+    work:       'oklch(0.87 0.10 95)',   // pale gold
+    piano:      'oklch(0.74 0.11 70)',   // amber
+    birthday:   'oklch(0.90 0.12 92)',   // bright gold
+    anniversary:'oklch(0.62 0.13 45)',   // dark amber
+    holiday:    'oklch(0.83 0.10 100)',  // light gold
+    culture:    'oklch(0.78 0.12 60)',   // orange-amber
+    other:      'oklch(0.68 0.10 65)',   // mid amber
+    gcal:       'oklch(0.78 0.03 80)',   // warm grey / external
   };
   const ICON  = {band:'music',show:'mic',work:'briefcase',piano:'target',birthday:'sparkles',anniversary:'heart',
                  other:'flag',holiday:'flag',culture:'sparkles',gcal:'calendar'};
