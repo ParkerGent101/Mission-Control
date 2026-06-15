@@ -132,7 +132,7 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
 
   // Non-war charts still need data to draw; the war planet renders its world even at zero logged.
   if (!total && !war) return <div style={{width:size,height:size,display:'flex',alignItems:'center',justifyContent:'center'}}><span className="muted-2 mono" style={{fontSize:10}}>no data</span></div>;
-  const cx = size/2, cy = size/2, r = size * (war ? 0.38 : 0.44);   // war globe sits a touch smaller so a ring of space shows around it
+  const cx = size/2, cy = size/2, r = size * (war ? 0.37 : 0.44);   // war globe fills the scope viewport, framed by a crosshair + graticule (idea2)
   const uid = (war ? 'warplanet' : 'planet') + Math.round(size);
   const D = Math.PI/180, N = 16;
   const project = (lat, lon) => [cx + r*Math.cos(lat*D)*Math.sin(lon*D), cy - r*Math.sin(lat*D)];
@@ -346,22 +346,19 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
       fire.push({ s, S, P, T, period, phase: fr() * period, flight, beam, beamDur: 260 + fr() * 170, col: colorFor(fr()) });
     }
 
-    // ===== 3D wireframe deck: the world sits on a green perspective grid that recedes for depth =====
-    // No dark "space" fill — the card shows through and the receding grid alone carries the 3D illusion.
-    // A ground plane below a horizon at hY: depth rows bunch toward the horizon and columns fan out to a
-    // vanishing point behind the globe (which rests its lower third on the deck). Same green (--accent-2)
-    // as the app's other grids; framed by a hard boundary with corner brackets.
+    // ===== idea2 scanner scope: a 3D globe on a green sensor readout =====
+    // No dark "space" fill — the card shows through. The 3D is the shaded sphere itself; we frame it like
+    // idea2's cogitator scope: a faint measurement grid, a centre targeting crosshair (the globe occludes
+    // its middle), and a coordinate graticule (ruler ticks + axis numbers) around the bordered edges.
     const pad = Math.max(2, size * 0.022);
     const inX0 = pad, inY0 = pad, inX1 = size - pad, inY1 = size - pad;   // inner panel rect
-    const bezR = Math.max(2, size * 0.02);                               // slight corner round on the boundary
-    const hY = cy + r * 0.52;                                            // horizon: the globe's lower third rests on the deck
-    const VP = [cx, hY];                                                 // vanishing point for the floor grid
-    // receding floor grid (perspective): depth rows bunch toward the horizon; columns fan out to the VP
-    const ROWS = 7, COLS = 12;
-    const gridRows = [];
-    for (let i = 1; i <= ROWS; i++) { const tt = i / ROWS; gridRows.push(hY + (inY1 - hY) * (tt * tt)); }
-    const gridCols = [];
-    for (let j = 0; j <= COLS; j++) gridCols.push(inX0 + (inX1 - inX0) * (j / COLS));   // each fans from (x, inY1) → VP
+    const bezR = Math.max(1, size * 0.01);                               // crisp, near-square screen corners
+    const span = inX1 - inX0;
+    const gridN = 10;                                                    // faint graph-paper measurement grid (10×10)
+    const gstep = span / gridN;
+    const tickN = 16;                                                    // graticule ticks per edge (long every 4th)
+    const tstep = span / tickN;
+    const showNums = size >= 120;                                        // axis numbers only where they stay legible
 
     return (
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{overflow:'visible'}}>
@@ -386,21 +383,31 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
           </filter>
           <clipPath id={uid+'-box'}><rect x={inX0.toFixed(1)} y={inY0.toFixed(1)} width={(inX1-inX0).toFixed(1)} height={(inY1-inY0).toFixed(1)} rx={bezR.toFixed(1)} ry={bezR.toFixed(1)}/></clipPath>
         </defs>
-        {/* ===== 3D wireframe deck: a green receding grid that gives the depth (no space fill) ===== */}
+        {/* ===== idea2 scanner scope: faint grid + targeting crosshair + edge graticule (the globe is the 3D) ===== */}
         <g clipPath={`url(#${uid}-box)`}>
-          {/* receding floor grid: a soft bloom under a crisp green wireframe (lines converge to the VP) */}
-          <g fill="none" stroke="var(--accent-2)" strokeLinecap="round">
-            <g strokeOpacity="0.18" strokeWidth="1.6" filter={`url(#${uid}-glow)`}>
-              {gridRows.map((gy,i)=><line key={'rb'+i} x1={inX0.toFixed(1)} y1={gy.toFixed(1)} x2={inX1.toFixed(1)} y2={gy.toFixed(1)}/>)}
-              {gridCols.map((xb,j)=><line key={'cb'+j} x1={xb.toFixed(1)} y1={inY1.toFixed(1)} x2={VP[0].toFixed(1)} y2={VP[1].toFixed(1)}/>)}
-            </g>
-            <g strokeOpacity="0.55" strokeWidth="0.7">
-              {gridRows.map((gy,i)=><line key={'r'+i} x1={inX0.toFixed(1)} y1={gy.toFixed(1)} x2={inX1.toFixed(1)} y2={gy.toFixed(1)}/>)}
-              {gridCols.map((xb,j)=><line key={'c'+j} x1={xb.toFixed(1)} y1={inY1.toFixed(1)} x2={VP[0].toFixed(1)} y2={VP[1].toFixed(1)}/>)}
-            </g>
+          {/* faint graph-paper measurement grid */}
+          <g stroke="var(--accent-2)" strokeOpacity="0.09" strokeWidth="0.5">
+            {Array.from({length: gridN-1}, (_,i) => { const x = inX0 + gstep*(i+1); return <line key={'gv'+i} x1={x.toFixed(1)} y1={inY0.toFixed(1)} x2={x.toFixed(1)} y2={inY1.toFixed(1)}/>; })}
+            {Array.from({length: gridN-1}, (_,i) => { const y = inY0 + gstep*(i+1); return <line key={'gh'+i} x1={inX0.toFixed(1)} y1={y.toFixed(1)} x2={inX1.toFixed(1)} y2={y.toFixed(1)}/>; })}
           </g>
-          {/* horizon: where the deck recedes out of view */}
-          <line x1={inX0.toFixed(1)} y1={hY.toFixed(1)} x2={inX1.toFixed(1)} y2={hY.toFixed(1)} stroke="var(--accent-2)" strokeWidth="0.8" strokeOpacity="0.5"/>
+          {/* targeting crosshair through the centre — the globe occludes the middle, leaving reticle stubs */}
+          <g stroke="var(--accent-2)" strokeOpacity="0.4" strokeWidth="0.8">
+            <line x1={inX0.toFixed(1)} y1={cy.toFixed(1)} x2={inX1.toFixed(1)} y2={cy.toFixed(1)}/>
+            <line x1={cx.toFixed(1)} y1={inY0.toFixed(1)} x2={cx.toFixed(1)} y2={inY1.toFixed(1)}/>
+          </g>
+          {/* coordinate graticule: ruler ticks down all four edges (long every 4th) */}
+          <g stroke="var(--accent-2)" strokeOpacity="0.55">
+            {Array.from({length: tickN+1}, (_,i) => { const x = inX0 + tstep*i, big = i%4===0, h = big ? size*0.028 : size*0.015;
+              return <g key={'th'+i}>
+                <line x1={x.toFixed(1)} y1={inY1.toFixed(1)} x2={x.toFixed(1)} y2={(inY1-h).toFixed(1)} strokeWidth={big?0.9:0.5}/>
+                <line x1={x.toFixed(1)} y1={inY0.toFixed(1)} x2={x.toFixed(1)} y2={(inY0+h).toFixed(1)} strokeWidth={big?0.9:0.5}/>
+              </g>; })}
+            {Array.from({length: tickN+1}, (_,i) => { const y = inY0 + tstep*i, big = i%4===0, h = big ? size*0.028 : size*0.015;
+              return <g key={'tv'+i}>
+                <line x1={inX0.toFixed(1)} y1={y.toFixed(1)} x2={(inX0+h).toFixed(1)} y2={y.toFixed(1)} strokeWidth={big?0.9:0.5}/>
+                <line x1={inX1.toFixed(1)} y1={y.toFixed(1)} x2={(inX1-h).toFixed(1)} y2={y.toFixed(1)} strokeWidth={big?0.9:0.5}/>
+              </g>; })}
+          </g>
         </g>
         {alert ? <circle cx={cx} cy={cy} r={(r*1.08).toFixed(2)} fill={`url(#${uid}-atmoR)`}/> : atmosphere}
         <g filter={`url(#${uid}-ds)`}>
@@ -525,17 +532,27 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
             return null;
           })}
         </g>
-        {/* ===== boundary: a hard green frame + corner brackets containing the deck ===== */}
+        {/* ===== defined CRT border: a double green frame + corner crosshairs (idea3 / idea1 HUD screen) ===== */}
         <rect x={inX0.toFixed(1)} y={inY0.toFixed(1)} width={(inX1-inX0).toFixed(1)} height={(inY1-inY0).toFixed(1)} rx={bezR.toFixed(1)} ry={bezR.toFixed(1)}
-          fill="none" stroke="var(--accent-2)" strokeOpacity="0.4" strokeWidth="1"/>
+          fill="none" stroke="var(--accent-2)" strokeOpacity="0.7" strokeWidth="1.3"/>
+        <rect x={(inX0+3).toFixed(1)} y={(inY0+3).toFixed(1)} width={(inX1-inX0-6).toFixed(1)} height={(inY1-inY0-6).toFixed(1)} rx={Math.max(0.5,bezR-1).toFixed(1)} ry={Math.max(0.5,bezR-1).toFixed(1)}
+          fill="none" stroke="var(--accent-2)" strokeOpacity="0.3" strokeWidth="0.6"/>
         {(() => {
-          const b = Math.max(7, size * 0.085);     // corner bracket arm length
-          const C = (x, y, sx, sy) => `M${(x+sx*b).toFixed(1)} ${y.toFixed(1)}H${x.toFixed(1)}V${(y+sy*b).toFixed(1)}`;
+          const cm = Math.max(4, size * 0.045);    // crosshair arm length
+          const o = Math.max(7, size * 0.075);     // crosshair centre inset from the corner
+          const plus = (x, y) => `M${(x-cm).toFixed(1)} ${y.toFixed(1)}H${(x+cm).toFixed(1)}M${x.toFixed(1)} ${(y-cm).toFixed(1)}V${(y+cm).toFixed(1)}`;
           return (
-            <path d={[C(inX0+2, inY0+2, 1, 1), C(inX1-2, inY0+2, -1, 1), C(inX0+2, inY1-2, 1, -1), C(inX1-2, inY1-2, -1, -1)].join(' ')}
-              fill="none" stroke="var(--accent-2)" strokeOpacity="0.8" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d={[plus(inX0+o, inY0+o), plus(inX1-o, inY0+o), plus(inX0+o, inY1-o), plus(inX1-o, inY1-o)].join(' ')}
+              fill="none" stroke="var(--accent-2)" strokeOpacity="0.85" strokeWidth="1.1" strokeLinecap="round"/>
           );
         })()}
+        {/* coordinate readout: small axis numbers along the bottom + right (idea2's scope scale) */}
+        {showNums && (
+          <g fill="var(--accent-2)" fillOpacity="0.55" fontFamily="var(--font-mono)" fontSize={(size*0.038).toFixed(1)}>
+            {[0.2,0.4,0.6,0.8].map((f,i) => <text key={'nx'+i} x={(inX0+span*f).toFixed(1)} y={(inY1-size*0.04).toFixed(1)} textAnchor="middle">{Math.round(f*100)}</text>)}
+            {[0.2,0.4,0.6,0.8].map((f,i) => <text key={'ny'+i} x={(inX1-size*0.05).toFixed(1)} y={(inY0+span*f).toFixed(1)} textAnchor="end" dominantBaseline="middle">{Math.round((1-f)*100)}</text>)}
+          </g>
+        )}
       </svg>
     );
   }
