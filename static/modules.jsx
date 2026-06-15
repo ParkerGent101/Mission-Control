@@ -105,7 +105,7 @@ const Checkbox = ({ checked, onClick }) => (
 // jagged FEBA sawtooth lines that slowly creep; the dim "Savings" arc is unclaimed ground
 // (calm dots, dashed armistice borders, no teeth). Both the Finance and Health cards use
 // `war`; the non-war branch is a static smooth-globe fallback. Honors prefers-reduced-motion.
-const DonutChart = ({ data, size = 110, war = false, labels = true, alert = false }) => {
+const DonutChart = ({ data, size = 110, war = false, labels = true, alert = false, whole = 0 }) => {
   const total = data.reduce((s, d) => s + d.value, 0);
   const [tick, setTick] = useState(0);   // animation clock (ms), war globe only
   useEffect(() => {
@@ -184,17 +184,22 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
   );
   const outline = <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--accent)" strokeOpacity="0.9" strokeWidth="1.2"/>;
 
-  // ===== WAR: live rotating globe of organic continents on an ocean =====
-  // Each expense is a landmass; its AREA ∝ share, so the biggest spend is the biggest country
-  // (no size clamp — relative sizes stay true). Unclaimed Savings is the ocean they sit on.
+  // ===== WAR: live rotating globe — territories conquer black unclaimed ground =====
+  // Each category is a continent sized as a fraction of the FIXED whole (calorie goal /
+  // income), so the territories only cover total/goal of the planet and the rest stays as
+  // unclaimed black "ocean" land. As totals rise toward the goal the land fills up; once the
+  // total goes OVER the goal (over budget / over the 3000 cals) the whole planet turns red.
   if (war) {
     const rot = tick * (360 / 46000);     // ~46s per revolution
     const jagPhase = tick * 0.0012;        // coastline creep
     const noise = (x) => Math.sin(x);
     const loop = (pts) => toPath(pts) + ' Z';
     const land = data.filter(d => !d.neutral && d.value > 0);
-    const ocean = data.find(d => d.neutral);
-    const oceanColor = ocean ? ocean.color : 'var(--surface-3)';
+    const denom = whole > 0 ? whole : total;    // the whole planet = calorie goal / income
+    const filled = Math.min(1, total / denom);  // 0..1 — how much of the goal is reached
+    // the winner (largest category) takes the whole remaining surface once the goal is reached
+    const winner = land.reduce((a, b) => (b.value > a.value ? b : a), land[0] || { color: 'var(--bone)' });
+    const winnerHatch = HATCH[Math.max(0, land.indexOf(winner)) % HATCH.length];
     const landN = Math.max(1, land.length);
     const LAT = [16, -15, 31, -27, 8, -34, 23, -19];
     // organic blob outline (closed loop) in local coords — a lobed circle that slowly morphs
@@ -213,10 +218,14 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
       const f = Math.cos(vlon*D) * Math.cos(lat*D);            // >0 ⇒ front hemisphere
       const [px, py] = project(lat, vlon);
       const sx = Math.max(0.06, Math.abs(Math.cos(vlon*D)));   // horizontal foreshortening near limb
-      const R = Math.min(r * 0.6, r * Math.sqrt(d.value / total));   // facing area ≈ its % of the planet disk
+      const share = d.value / denom;                                // this army's fraction of the goal
+      // armies conquer land in proportion to the goal: at half the goal they hold ~half the
+      // planet, at the full goal the land is fully taken (winner biggest). ~2× compensates for
+      // only half the sphere facing you at once.
+      const R = Math.min(r * 0.92, r * Math.sqrt(1.5 * share));
       const alpha = Math.max(0, Math.min(1, (f - 0.05) / 0.22));   // fade in/out across the limb
       const pts = blob(R, i*1.3 + 0.7).map(([lx,ly]) => [px + lx*sx, py + ly]);
-      return { i, d, f, alpha, px, py, R, sx, pts, share: d.value/total, hatch: HATCH[i % HATCH.length] };
+      return { i, d, f, alpha, px, py, R, sx, pts, share, hatch: HATCH[i % HATCH.length] };
     }).filter(c => c.alpha > 0.02).sort((a,b) => a.f - b.f);   // far continents drawn first
     const namedLand = continents.filter(c => c.alpha > 0.6 && c.R > r*0.14)
       .map(c => ({ ...c, text: labelOf(c.d) }));
@@ -229,8 +238,8 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
           <pattern id={uid+'-h2'} width="5" height="5" patternUnits="userSpaceOnUse"><path d="M0 0H5M0 0V5" fill="none" stroke="var(--bg)" strokeWidth="0.9" strokeOpacity="0.45"/></pattern>
           <pattern id={uid+'-h3'} width="5" height="5" patternUnits="userSpaceOnUse"><circle cx="2.5" cy="2.5" r="1.1" fill="var(--bg)" fillOpacity="0.5"/></pattern>
           <pattern id={uid+'-h4'} width="6" height="6" patternUnits="userSpaceOnUse"><line x1="0" y1="0" x2="6" y2="0" stroke="var(--bg)" strokeWidth="1.3" strokeOpacity="0.5"/></pattern>
-          {/* ocean of unclaimed Savings: sparse calm swell */}
-          <pattern id={uid+'-hn'} width="9" height="9" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.8" fill="var(--ink-3)" fillOpacity="0.22"/></pattern>
+          {/* unconquered ocean: white water with faint wave lines */}
+          <pattern id={uid+'-hn'} width="7" height="7" patternUnits="userSpaceOnUse"><path d="M0 3 Q1.75 1.4 3.5 3 T7 3" fill="none" stroke="var(--ink-3)" strokeWidth="0.7" strokeOpacity="0.22"/></pattern>
           {/* over-budget alert: red atmosphere halo */}
           <radialGradient id={uid+'-atmoR'} cx="50%" cy="50%" r="50%">
             <stop offset="58%"  stopColor="var(--danger)" stopOpacity="0"/>
@@ -241,11 +250,12 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
         {alert ? <circle cx={cx} cy={cy} r={(r*1.08).toFixed(2)} fill={`url(#${uid}-atmoR)`}/> : atmosphere}
         <g filter={`url(#${uid}-ds)`}>
           <g clipPath={`url(#${uid}-clip)`}>
-            {/* ocean = unclaimed Savings */}
-            <circle cx={cx} cy={cy} r={r} fill={oceanColor}/>
-            <circle cx={cx} cy={cy} r={r} fill={`url(#${uid}-hn)`}/>
+            {/* unconquered surface = white ocean; once the goal is reached the winner has
+                taken the whole remaining surface (no ocean). Over the goal ⇒ red planet below. */}
+            <circle cx={cx} cy={cy} r={r} fill={filled >= 1 ? winner.color : 'var(--bone)'}/>
+            <circle cx={cx} cy={cy} r={r} fill={`url(#${uid}${filled >= 1 ? winnerHatch : '-hn'})`}/>
             {latRings}
-            {/* continents = expense factions, sized by share, with fortified coastlines */}
+            {/* conquered territories, sized by share, with fortified borders */}
             {continents.map(c => (
               <g key={'c'+c.i} opacity={c.alpha.toFixed(2)}>
                 <path d={loop(c.pts)} fill={c.d.color} stroke="var(--bg)" strokeWidth="0.8"/>
@@ -261,11 +271,6 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
           {alert
             ? <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--danger)" strokeOpacity="0.95" strokeWidth="1.6"/>
             : outline}
-          {labels && ocean && (
-            <text x={cx} y={(cy + r*0.62).toFixed(2)} textAnchor="middle" dominantBaseline="middle"
-              fontFamily="var(--font-mono)" fontSize={(FONT*0.92).toFixed(1)} fontWeight="500" letterSpacing="1"
-              fill="var(--ink-2)" fillOpacity="0.8" stroke="var(--bg)" strokeWidth={(FONT*0.28).toFixed(1)} paintOrder="stroke" strokeLinejoin="round">{labelOf(ocean)}</text>
-          )}
           {labels && namedLand.map(c => (
             <text key={'t'+c.i} x={c.px.toFixed(2)} y={c.py.toFixed(2)} textAnchor="middle" dominantBaseline="middle" opacity={c.alpha.toFixed(2)}
               fontFamily="var(--font-mono)" fontSize={FONT.toFixed(1)} fontWeight="700" letterSpacing="0.5"
@@ -868,18 +873,10 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
 
   const totalBudget = categories.reduce((s,c)=>s+(c.budget||c.budgeted||0), 0);
 
-  // Finance "planet": the whole globe = income; each expense category is a territory
-  // taken over, and the dim remainder is unspent income (unclaimed surface). Falls
-  // back to plain expense proportions if there's no income figure yet.
-  const expenseSlices = categories.filter(c=>c.actual>0).map(c=>({value:c.actual, color:c.color, label:c.name}));
-  // Savings = the share of income no expense has "conquered". Measured against the
-  // summed expense territories so the whole globe reads as exactly one month's income
-  // (e.g. Housing $1000 of $5000 income ⇒ 1/5 of the map; the rest is unclaimed Savings).
-  const spentClaimed = expenseSlices.reduce((s,d)=>s+d.value, 0);
-  const savings = Math.max(0, totalIn - spentClaimed);
-  const donutData = totalIn > 0
-    ? [...expenseSlices, ...(savings > 0 ? [{ value: savings, color: 'var(--surface-3)', label: 'Savings', neutral: true }] : [])]
-    : expenseSlices;
+  // Finance "planet": the whole globe = income. Each expense category is a territory sized as
+  // its share of income, so spent income conquers land and the unspent remainder stays as
+  // black unclaimed ground. The planet turns red only when expenses exceed income (overspent).
+  const donutData = categories.filter(c=>c.actual>0).map(c=>({value:c.actual, color:c.color, label:c.name}));
 
   return (
     <Card {...cardProps} id="finance" num="02" title={`Finance — ${monthLabel}`} span={cardProps.span || 7}
@@ -975,7 +972,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
           </div>
         </div>
         <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:6,paddingTop:4}}>
-          <DonutChart data={donutData} size={148} war alert={totalEx > totalIn}/>
+          <DonutChart data={donutData} size={148} war alert={totalEx > totalIn} whole={totalIn}/>
           {donutData.length>0 && (
             <div style={{display:'flex',flexDirection:'column',gap:3}}>
               {donutData.slice(0,4).map((d,i)=>(
@@ -1645,6 +1642,21 @@ const HealthCard = ({ cardProps = {} } = {}) => {
   const [waterBottleInput, setWaterBottleInput] = useState('32');
   const [waterGoalInput, setWaterGoalInput]     = useState('128');
   const [editWater, setEditWater] = useState(false);
+  const [nutritionView, setNutritionView] = useState('today');   // 'today' | 'week' — swipe to switch
+
+  // Mobile: swipe left/right to toggle the Nutrition Today / Week views (same gesture as Band tabs).
+  const NUTRITION_VIEWS = ['today', 'week'];
+  const nutritionTouch = React.useRef(null);
+  const onNutritionTouchStart = (e) => { const t = e.touches[0]; nutritionTouch.current = { x: t.clientX, y: t.clientY }; };
+  const onNutritionTouchEnd = (e) => {
+    const s = nutritionTouch.current; if (!s) return; nutritionTouch.current = null;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - s.x, dy = t.clientY - s.y;
+    if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;   // ignore vertical scrolls / taps
+    const i = NUTRITION_VIEWS.indexOf(nutritionView);
+    const ni = dx < 0 ? Math.min(NUTRITION_VIEWS.length - 1, i + 1) : Math.max(0, i - 1);
+    if (ni !== i) setNutritionView(NUTRITION_VIEWS[ni]);
+  };
 
   const getTodayPlan = (prog) => {
     if (!prog || !prog.start_date) return null;
@@ -1956,15 +1968,45 @@ const HealthCard = ({ cardProps = {} } = {}) => {
   ];
   const calGoal = 3000;
   const calPct  = Math.min(100, (totalCal / calGoal) * 100);
-  // Macro planet (same rotating-continents globe as Finance): the calorie goal is the
-  // whole world, each macro is a continent sized by its CALORIES (4·protein, 4·carbs,
-  // 9·fat), and the calories still under goal are the unclaimed "Reserve" ocean.
+  // Macro planet (same rotating-continents globe as Finance): the calorie goal is the whole
+  // world. Each macro is a continent sized by its CALORIES (4·protein, 4·carbs, 9·fat) as a
+  // share of the goal, so calories conquer land and the rest stays as black unclaimed ground.
+  // The planet turns red only on a full calorie day (totalCal over the 3000 goal).
   const macroGlobe = [
     { value: totalProtein * 4, color: 'var(--accent)', label: 'Protein' },
     { value: totalCarbs   * 4, color: 'var(--warn)',   label: 'Carbs'   },
     { value: totalFat     * 9, color: 'var(--info)',   label: 'Fat'     },
-    { value: Math.max(0, calGoal - totalCal), color: 'var(--surface-3)', label: 'Reserve', neutral: true },
   ].filter(d => d.value > 0);
+
+  // Weekly calorie picture: the 7 days ending on the viewed day, summed from the food log.
+  // weekGoal is the daily goal × 7 (e.g. 3000 × 7 = 21,000) — the "whole week" total.
+  const weekDays = (() => {
+    const log = (rawHealth && rawHealth.food_log) || {};
+    const base = new Date(viewDate + 'T12:00:00');
+    const out = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(base); d.setDate(base.getDate() - i);
+      const ds = localDateStr(d);
+      const foods = log[ds] || [];
+      out.push({
+        ds,
+        dow: d.toLocaleDateString('en-US', { weekday: 'narrow' }),
+        cals:    foods.reduce((s, f) => s + (f.calories || 0), 0),
+        protein: foods.reduce((s, f) => s + (f.protein  || 0), 0),
+        carbs:   foods.reduce((s, f) => s + (f.carbs    || 0), 0),
+        fat:     foods.reduce((s, f) => s + (f.fat      || 0), 0),
+      });
+    }
+    return out;
+  })();
+  const weekTotal     = weekDays.reduce((s, d) => s + d.cals, 0);
+  const weekGoal      = calGoal * 7;
+  const weekPct       = Math.min(100, (weekTotal / weekGoal) * 100);
+  const weekDaysLogged = weekDays.filter(d => d.cals > 0).length;
+  const weekAvg       = weekDaysLogged ? Math.round(weekTotal / weekDaysLogged) : 0;
+  const weekProtein   = weekDays.reduce((s, d) => s + d.protein, 0);
+  const weekCarbs     = weekDays.reduce((s, d) => s + d.carbs,   0);
+  const weekFat       = weekDays.reduce((s, d) => s + d.fat,     0);
 
   const bmi    = (weight && height) ? +(weight / (height * height) * 703).toFixed(1) : null;
   const bmiCat = bmi == null ? '' : bmi < 18.5 ? 'Underweight' : bmi < 25 ? 'Normal' : bmi < 30 ? 'Overweight' : 'Obese';
@@ -2023,8 +2065,20 @@ const HealthCard = ({ cardProps = {} } = {}) => {
       {/* ── Nutrition ── */}
       <div style={{ marginBottom: 14 }}>
         <div className="section-h" style={{ marginBottom: 8 }}>
-          <span>Nutrition · Today</span><span className="line" />
+          <span>Nutrition · {nutritionView === 'today' ? 'Today' : 'This week'}</span>
+          <span className="line" />
+          <div style={{ display: 'flex', gap: 2 }}>
+            {NUTRITION_VIEWS.map(v => (
+              <button key={v} className={'btn' + (nutritionView === v ? ' primary' : ' ghost')}
+                style={{ fontSize: 9.5, padding: '2px 8px', textTransform: 'capitalize' }}
+                onClick={() => setNutritionView(v)}>{v}</button>
+            ))}
+          </div>
         </div>
+
+        {/* Swipe left/right (touch) to switch between the Today and Week views. */}
+        <div onTouchStart={onNutritionTouchStart} onTouchEnd={onNutritionTouchEnd}>
+        {nutritionView === 'today' ? (<>
 
         {/* Search + add row sits ABOVE the donut/calorie display so the suggestions
             dropdown opens over the chart area (which is OK to obscure briefly)
@@ -2101,7 +2155,7 @@ const HealthCard = ({ cardProps = {} } = {}) => {
         {/* Donut + calorie bar (positioned BELOW the search row) */}
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 10 }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-            <DonutChart data={macroGlobe} size={92} war labels={false} alert={totalCal > calGoal} />
+            <DonutChart data={macroGlobe} size={92} war labels={false} alert={totalCal > calGoal} whole={calGoal} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               {macroData.map(({ label, grams, color }) => (
                 <div key={label} style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
@@ -2142,6 +2196,64 @@ const HealthCard = ({ cardProps = {} } = {}) => {
               </div>
             )}
           </div>
+        </div>
+
+        </>) : (<>
+
+        {/* Week view — the whole week's calories at a glance (swipe left/right or tap "week"). */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+          <span className="muted mono" style={{ fontSize: 10 }}>Weekly calories</span>
+          <span className="mono" style={{ fontSize: 18, color: weekTotal > weekGoal ? 'var(--danger)' : 'var(--ink)' }}>
+            {weekTotal.toLocaleString()}<span className="muted-2" style={{ fontSize: 11 }}> / {weekGoal.toLocaleString()}</span>
+          </span>
+        </div>
+        <div className="mini-bar">
+          <div className="fill" style={{
+            width: weekPct + '%',
+            background: weekTotal > weekGoal ? 'var(--danger)' : weekTotal > weekGoal * 0.85 ? 'var(--warn)' : 'var(--accent-2)',
+          }} />
+        </div>
+        <div className="muted-2 mono" style={{ fontSize: 9.5, marginTop: 4 }}>
+          {weekPct.toFixed(0)}% of weekly goal · avg {weekAvg.toLocaleString()} kcal/day · {weekDaysLogged}/7 days logged
+        </div>
+
+        {/* 7-day bar chart — each bar is that day's calories vs the daily goal */}
+        <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end', marginTop: 12 }}>
+          {weekDays.map(d => {
+            const h = Math.max(3, Math.min(100, (d.cals / calGoal) * 100));
+            const over = d.cals > calGoal;
+            const isToday = d.ds === viewDate;
+            return (
+              <div key={d.ds} title={`${d.ds}: ${d.cals.toLocaleString()} kcal`}
+                style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                <span className="mono" style={{ fontSize: 8.5, color: 'var(--ink-4)', height: 11 }}>
+                  {d.cals ? (d.cals >= 1000 ? (d.cals / 1000).toFixed(1) + 'k' : d.cals) : ''}
+                </span>
+                <div style={{ width: '100%', height: 56, display: 'flex', alignItems: 'flex-end' }}>
+                  <div style={{
+                    width: '100%', height: h + '%', borderRadius: '3px 3px 0 0',
+                    background: over ? 'var(--danger)' : d.cals ? 'var(--accent-2)' : 'var(--surface-3)',
+                    opacity: d.cals ? (isToday ? 1 : 0.8) : 0.4,
+                    outline: isToday ? '1px solid var(--accent)' : 'none',
+                  }} />
+                </div>
+                <span className="mono" style={{ fontSize: 9, color: isToday ? 'var(--accent)' : 'var(--ink-4)' }}>{d.dow}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Weekly macro totals */}
+        <div style={{ display: 'flex', gap: 14, marginTop: 12, justifyContent: 'center' }}>
+          {[['Protein', weekProtein, 'var(--accent)'], ['Carbs', weekCarbs, 'var(--warn)'], ['Fat', weekFat, 'var(--info)']].map(([label, g, color]) => (
+            <div key={label} style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+              <span style={{ width: 7, height: 7, borderRadius: 2, background: color, flexShrink: 0 }} />
+              <span className="muted mono" style={{ fontSize: 10 }}>{label} <span style={{ color: 'var(--ink-2)' }}>{g}g</span></span>
+            </div>
+          ))}
+        </div>
+
+        </>)}
         </div>
       </div>
 
