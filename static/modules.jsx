@@ -105,7 +105,7 @@ const Checkbox = ({ checked, onClick }) => (
 // jagged FEBA sawtooth lines that slowly creep; the dim "Savings" arc is unclaimed ground
 // (calm dots, dashed armistice borders, no teeth). Both the Finance and Health cards use
 // `war`; the non-war branch is a static smooth-globe fallback. Honors prefers-reduced-motion.
-const DonutChart = ({ data, size = 110, war = false, labels = true, alert = false, whole = 0 }) => {
+const DonutChart = ({ data, size = 110, war = false, labels = true, alert = false, whole = 0, ocean }) => {
   const total = data.reduce((s, d) => s + d.value, 0);
   const [tick, setTick] = useState(0);   // animation clock (ms), war globe only
   useEffect(() => {
@@ -184,11 +184,10 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
   );
   const outline = <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--accent)" strokeOpacity="0.9" strokeWidth="1.2"/>;
 
-  // ===== WAR: live rotating globe — territories conquer black unclaimed ground =====
-  // Each category is a continent sized as a fraction of the FIXED whole (calorie goal /
-  // income), so the territories only cover total/goal of the planet and the rest stays as
-  // unclaimed black "ocean" land. As totals rise toward the goal the land fills up; once the
-  // total goes OVER the goal (over budget / over the 3000 cals) the whole planet turns red.
+  // ===== WAR: live rotating globe — island territories on a blue ocean =====
+  // Each category is an island sized as a fraction of the whole (calorie goal / income), so the
+  // islands grow to cover the planet as the total nears the goal; the blue ocean is the unclaimed
+  // remainder. Over the goal (over budget / over the 3000 cals) the whole planet turns red.
   if (war) {
     const rot = tick * (360 / 46000);     // ~46s per revolution
     const jagPhase = tick * 0.0012;        // coastline creep
@@ -196,12 +195,9 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
     const loop = (pts) => toPath(pts) + ' Z';
     const land = data.filter(d => !d.neutral && d.value > 0);
     const denom = whole > 0 ? whole : total;    // the whole planet = calorie goal / income
-    const filled = Math.min(1, total / denom);  // 0..1 — how much of the goal is reached
-    // the winner (largest category) takes the whole remaining surface once the goal is reached
-    const winner = land.reduce((a, b) => (b.value > a.value ? b : a), land[0] || { color: 'var(--bone)' });
-    const winnerHatch = HATCH[Math.max(0, land.indexOf(winner)) % HATCH.length];
     const landN = Math.max(1, land.length);
     const LAT = [16, -15, 31, -27, 8, -34, 23, -19];
+    const OCEAN = ocean || 'oklch(0.52 0.11 245)';   // default simple blue sea; cards may override
     // organic blob outline (closed loop) in local coords — a lobed circle that slowly morphs
     const blob = (R, seed) => {
       const pts = [], M = 30;
@@ -212,17 +208,16 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
       }
       return pts;
     };
+    // Each category is an island sized by its share of the whole (goal / income), sitting on a
+    // blue ocean. The islands grow to cover the planet as the total nears the goal.
     const continents = land.map((d, i) => {
       const lon = i * (360 / landN), lat = LAT[i % LAT.length];
       const vlon = lon + rot;                                  // current view longitude
       const f = Math.cos(vlon*D) * Math.cos(lat*D);            // >0 ⇒ front hemisphere
       const [px, py] = project(lat, vlon);
       const sx = Math.max(0.06, Math.abs(Math.cos(vlon*D)));   // horizontal foreshortening near limb
-      const share = d.value / denom;                                // this army's fraction of the goal
-      // armies conquer land in proportion to the goal: at half the goal they hold ~half the
-      // planet, at the full goal the land is fully taken (winner biggest). ~2× compensates for
-      // only half the sphere facing you at once.
-      const R = Math.min(r * 0.92, r * Math.sqrt(1.5 * share));
+      const share = d.value / denom;                           // fraction of the whole planet
+      const R = Math.min(r * 0.9, r * Math.sqrt(2 * share));
       const alpha = Math.max(0, Math.min(1, (f - 0.05) / 0.22));   // fade in/out across the limb
       const pts = blob(R, i*1.3 + 0.7).map(([lx,ly]) => [px + lx*sx, py + ly]);
       return { i, d, f, alpha, px, py, R, sx, pts, share, hatch: HATCH[i % HATCH.length] };
@@ -238,8 +233,8 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
           <pattern id={uid+'-h2'} width="5" height="5" patternUnits="userSpaceOnUse"><path d="M0 0H5M0 0V5" fill="none" stroke="var(--bg)" strokeWidth="0.9" strokeOpacity="0.45"/></pattern>
           <pattern id={uid+'-h3'} width="5" height="5" patternUnits="userSpaceOnUse"><circle cx="2.5" cy="2.5" r="1.1" fill="var(--bg)" fillOpacity="0.5"/></pattern>
           <pattern id={uid+'-h4'} width="6" height="6" patternUnits="userSpaceOnUse"><line x1="0" y1="0" x2="6" y2="0" stroke="var(--bg)" strokeWidth="1.3" strokeOpacity="0.5"/></pattern>
-          {/* unconquered ocean: white water with faint wave lines */}
-          <pattern id={uid+'-hn'} width="7" height="7" patternUnits="userSpaceOnUse"><path d="M0 3 Q1.75 1.4 3.5 3 T7 3" fill="none" stroke="var(--ink-3)" strokeWidth="0.7" strokeOpacity="0.22"/></pattern>
+          {/* ocean wave lines (read on both blue and white seas) */}
+          <pattern id={uid+'-hn'} width="7" height="7" patternUnits="userSpaceOnUse"><path d="M0 3 Q1.75 1.4 3.5 3 T7 3" fill="none" stroke="var(--ink-3)" strokeWidth="0.6" strokeOpacity="0.25"/></pattern>
           {/* over-budget alert: red atmosphere halo */}
           <radialGradient id={uid+'-atmoR'} cx="50%" cy="50%" r="50%">
             <stop offset="58%"  stopColor="var(--danger)" stopOpacity="0"/>
@@ -250,12 +245,11 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
         {alert ? <circle cx={cx} cy={cy} r={(r*1.08).toFixed(2)} fill={`url(#${uid}-atmoR)`}/> : atmosphere}
         <g filter={`url(#${uid}-ds)`}>
           <g clipPath={`url(#${uid}-clip)`}>
-            {/* unconquered surface = white ocean; once the goal is reached the winner has
-                taken the whole remaining surface (no ocean). Over the goal ⇒ red planet below. */}
-            <circle cx={cx} cy={cy} r={r} fill={filled >= 1 ? winner.color : 'var(--bone)'}/>
-            <circle cx={cx} cy={cy} r={r} fill={`url(#${uid}${filled >= 1 ? winnerHatch : '-hn'})`}/>
+            {/* simple blue ocean = the unclaimed remainder up to the goal */}
+            <circle cx={cx} cy={cy} r={r} fill={OCEAN}/>
+            <circle cx={cx} cy={cy} r={r} fill={`url(#${uid}-hn)`}/>
             {latRings}
-            {/* conquered territories, sized by share, with fortified borders */}
+            {/* island territories, sized by share, with fortified coastlines */}
             {continents.map(c => (
               <g key={'c'+c.i} opacity={c.alpha.toFixed(2)}>
                 <path d={loop(c.pts)} fill={c.d.color} stroke="var(--bg)" strokeWidth="0.8"/>
@@ -264,8 +258,8 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
                 <path d={teeth(c.pts.filter((_,k)=>k%2===0))} fill="var(--bone)" fillOpacity="0.8"/>
               </g>
             ))}
-            {/* over-budget: wash the whole world red (under the shading so it stays spherical) */}
-            {alert && <circle cx={cx} cy={cy} r={r} fill="var(--danger)" opacity="0.40"/>}
+            {/* over the goal: wash the whole world red (under the shading so it stays spherical) */}
+            {alert && <circle cx={cx} cy={cy} r={r} fill="var(--danger)" opacity="0.45"/>}
             {shading}
           </g>
           {alert
@@ -972,7 +966,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
           </div>
         </div>
         <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:6,paddingTop:4}}>
-          <DonutChart data={donutData} size={148} war alert={totalEx > totalIn} whole={totalIn}/>
+          <DonutChart data={donutData} size={148} war alert={totalEx > totalIn} whole={totalIn} ocean="var(--bone)"/>
           {donutData.length>0 && (
             <div style={{display:'flex',flexDirection:'column',gap:3}}>
               {donutData.slice(0,4).map((d,i)=>(
