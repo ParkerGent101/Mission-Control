@@ -132,7 +132,7 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
 
   // Non-war charts still need data to draw; the war planet renders its world even at zero logged.
   if (!total && !war) return <div style={{width:size,height:size,display:'flex',alignItems:'center',justifyContent:'center'}}><span className="muted-2 mono" style={{fontSize:10}}>no data</span></div>;
-  const cx = size/2, cy = size/2, r = size*0.44;
+  const cx = size/2, cy = size/2, r = size * (war ? 0.38 : 0.44);   // war globe sits a touch smaller so a ring of space shows around it
   const uid = (war ? 'warplanet' : 'planet') + Math.round(size);
   const D = Math.PI/180, N = 16;
   const project = (lat, lon) => [cx + r*Math.cos(lat*D)*Math.sin(lon*D), cy - r*Math.sin(lat*D)];
@@ -200,24 +200,32 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
   // among factions by share of the day's total; a front creeps across the frontier continent
   // so the fill grows smoothly. At/over the goal (`alert`) the whole planet washes red.
   if (war) {
-    const rot = tick * (360 / 46000);     // ~46s per revolution
-    const jagPhase = tick * 0.0012;        // coastline creep
+    const rot = tick * (360 / 60000);     // slow, steady spin (~60s/rev) — the map turns, it doesn't churn
     const noise = (x) => Math.sin(x);
     const loop = (pts) => toPath(pts) + ' Z';
     const denom = whole > 0 ? whole : total;                  // the full goal / income
     const conq = denom > 0 ? Math.max(0, Math.min(1, total / denom)) : 0;   // fraction of land taken
     const OCEAN = ocean || 'oklch(0.52 0.11 245)';            // default simple blue sea; cards may override
     const LANDN = landNeutral || 'var(--surface-3)';          // dim unclaimed terrain, present from day start
+    const ROCK  = 'oklch(0.27 0.022 55)';                     // bare basalt — a rock world's backdrop, no real ocean
     const LAT = [12, -10, 22, -18, 6, -24, 16, -14];          // kept near the equator so land fills the visible face
 
     // ---- the world: continents seeded from the date, fixed for the day ----
     const wr = mulberry32(hashStr('mc-world|' + (seed || todayStr())));
-    // Near-total land: most days the planet is almost all continent (0.90–0.99), ocean down to a
-    // few seas/lakes, with a rare "water world" (~1 in 20 days, 0.30–0.48 land) for variety.
+    // World type, seeded per day: a rare "water world" (~1 in 20) where oceans dominate; a good
+    // share of "rock worlds" (~1 in 3.5) that are essentially all land — the backdrop is bare rock,
+    // not sea, so there's no real ocean (some get a small inland sea, some none at all); and the
+    // rest land-heavy with a few seas/lakes.
     const u = wr();
-    const baseLandRatio = u < 0.05
-      ? 0.30 + (u / 0.05) * 0.18
-      : 0.90 + ((u - 0.05) / 0.95) * 0.09;
+    let baseLandRatio, rockWorld = false;
+    if (u < 0.05) {                                           // water world: oceans dominate
+      baseLandRatio = 0.30 + (u / 0.05) * 0.18;
+    } else if (u < 0.33) {                                    // rock world: land on land, rock backdrop
+      rockWorld = true;
+      baseLandRatio = 0.97 + ((u - 0.05) / 0.28) * 0.03;      // 0.97 .. 1.0
+    } else {                                                  // land-heavy with a few seas/lakes
+      baseLandRatio = 0.90 + ((u - 0.33) / 0.67) * 0.09;      // 0.90 .. 0.99
+    }
     const landRatio = landRatioProp != null ? landRatioProp : baseLandRatio;   // preview can override
     const K = 6 + Math.floor(wr() * 4);                       // 6–9 continents — tile the globe so land stays dominant at any rotation
     const weights = []; for (let k = 0; k < K; k++) weights.push(0.55 + wr());
@@ -235,6 +243,13 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
         lat: LAT[Math.floor(wr() * LAT.length) % LAT.length] });
     }
     world.sort((a, b) => a.baseLon - b.baseLon);              // stable layout (by longitude)
+    // A rock world may host a small inland sea or two — or none at all (truly zero ocean).
+    const seas = [];
+    if (rockWorld && wr() < 0.55) {
+      const n = 1 + (wr() < 0.3 ? 1 : 0);
+      for (let i = 0; i < n; i++) seas.push({ i, R: r * (0.11 + wr() * 0.13), blobSeed: 3.1 + i * 2.7,
+        baseLon: wr() * 360, lat: LAT[Math.floor(wr() * LAT.length) % LAT.length] });
+    }
     // Conquer in a scattered (low-discrepancy) order, NOT one contiguous longitude arc, so the
     // taken fraction is readable at any rotation instead of hiding on the planet's far side.
     const order = world.map((_, j) => j).sort((x, y) => ((x * 0.61803) % 1) - ((y * 0.61803) % 1));
@@ -249,12 +264,14 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
     });
     const ownerAt = (pos) => facSpans.find(s => pos >= s.start && pos < s.end) || null;   // null ⇒ unclaimed
 
-    // organic blob outline (closed loop) in local coords — a lobed circle that slowly morphs
+    // organic blob outline (closed loop) in local coords — a FIXED lobed shape per continent
+    // (seeded only by bseed, no time term), so coastlines stay put and the globe's rotation is
+    // the only thing that moves them. Stable borders that read like a real map.
     const blob = (R, bseed) => {
-      const pts = [], M = 30;
+      const pts = [], M = 36;
       for (let q = 0; q < M; q++) {
         const a = (q / M) * Math.PI * 2;
-        const w = 1 + 0.17*noise(3*a + bseed) + 0.11*noise(5*a + bseed*1.7 + jagPhase) + 0.07*noise(8*a + bseed*2.3 - jagPhase*0.7);
+        const w = 1 + 0.17*noise(3*a + bseed) + 0.11*noise(5*a + bseed*1.7) + 0.07*noise(8*a + bseed*2.3);
         pts.push([Math.cos(a) * R * w, Math.sin(a) * R * w]);
       }
       return pts;
@@ -272,12 +289,80 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
       const straddles = c.a < conq && c.b > conq;              // the frontier continent (partly taken)
       const localConq = straddles ? (conq - c.a) / (c.b - c.a) : 0;   // 0..1 of this continent that's taken
       const frontOwner = straddles ? (ownerAt(Math.min(conq - 1e-6, c.b)) || facSpans[facSpans.length-1] || null) : null;
-      const xL = px - c.R*1.35*sx, xW = c.R*2.7*sx;            // horizontal extent for the wipe clip
-      return { ...c, f, alpha, px, py, sx, pts, owner, straddles, localConq, frontOwner, xL, xW };
+      // frontier conquest grows as a stable island from the continent's heart outward (area ∝ taken
+      // fraction), centred on the land so it rotates WITH it — no screen-space curtain.
+      const fsc = straddles ? Math.sqrt(Math.max(0, Math.min(1, localConq))) : 0;
+      const frontPts = straddles ? pts.map(p => [px + (p[0]-px)*fsc, py + (p[1]-py)*fsc]) : null;
+      return { ...c, f, alpha, px, py, sx, pts, owner, straddles, localConq, frontOwner, frontPts };
     }).filter(c => c.alpha > 0.02).sort((a,b) => a.f - b.f);   // far continents drawn first
 
     const named = drawn.filter(c => c.owner && c.alpha > 0.6 && c.R > r*0.14)
       .map(c => ({ ...c, text: labelOf(c.owner.d) }));
+    // inland seas projected to the current view (rock worlds only); culled on the back hemisphere
+    const seasDrawn = seas.map(sea => {
+      const vlon = sea.baseLon + rot, f = Math.cos(vlon*D) * Math.cos(sea.lat*D);
+      const [px, py] = project(sea.lat, vlon), sx = Math.max(0.06, Math.abs(Math.cos(vlon*D)));
+      return { i: sea.i, alpha: Math.max(0, Math.min(1, (f - 0.05) / 0.22)),
+        pts: blob(sea.R, sea.blobSeed).map(([lx,ly]) => [px + lx*sx, py + ly]) };
+    }).filter(sea => sea.alpha > 0.02);
+
+    // ===== orbital bombardment: tracer fire across a world at total war ==========
+    // A deterministic salvo (seeded from the day, so it's stable per render yet differs day to
+    // day) of ballistic missiles arcing over the globe. The number of launch tracks and their
+    // tempo climb with how much land is conquered, and the whole barrage turns red and heaviest
+    // once the goal is breached (`alert`). prefers-reduced-motion gets static arcs (no tick).
+    const reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    const fr = mulberry32(hashStr('mc-war-fire|' + (seed || todayStr())));
+    const intensity = (alert ? 1.0 : 0.45) + conq * 0.9;            // ~0.45 (idle) .. 1.9 (total war)
+    const SLOTS = Math.round(2 + intensity * 2.2);                  // ~3 (idle) .. 6 (total war) — calmer skies
+    const bez = (A, B, C, p) => { const u = 1 - p; return [u*u*A[0] + 2*u*p*B[0] + p*p*C[0], u*u*A[1] + 2*u*p*B[1] + p*p*C[1]]; };
+    const arcStr = (A, B, C, p0, p1, n) => { let d = ''; for (let i = 0; i <= n; i++) { const pp = p0 + (p1 - p0) * (i / n), q = bez(A, B, C, pp); d += (i ? 'L' : 'M') + q[0].toFixed(1) + ' ' + q[1].toFixed(1) + ' '; } return d; };
+    const IMPACT = 560;   // ms an impact flash lingers
+    // Each tracer is colour-coded to the faction (macro / expense category) it fights for, picked
+    // weighted by that faction's share of the day — so the lines read apart at a glance. Over the
+    // goal the whole barrage burns red; with nothing logged yet, a calm amber ambient fire holds.
+    const facHues = facs.map(f => f.color).filter(Boolean);
+    const pickHue = (u) => { let c = 0; for (let i = 0; i < facs.length; i++) { c += facs[i].value / facTotal; if (u < c) return facs[i].color; } return facHues[facHues.length - 1]; };
+    const colorFor = (u) => alert ? 'var(--danger)' : (facHues.length ? pickHue(u) : 'var(--warn)');
+    const fire = [];
+    for (let s = 0; s < SLOTS; s++) {
+      const a0 = fr() * Math.PI * 2, rad0 = (0.22 + fr() * 0.6) * r;            // launch site on the visible disc
+      const a1 = a0 + (0.55 + fr() * 0.7) * Math.PI * (fr() < 0.5 ? 1 : -1);    // strike a good arc away
+      const rad1 = (0.22 + fr() * 0.6) * r;
+      const S = [cx + Math.cos(a0) * rad0, cy + Math.sin(a0) * rad0];
+      const T = [cx + Math.cos(a1) * rad1, cy + Math.sin(a1) * rad1];
+      const mx2 = (S[0] + T[0]) / 2, my2 = (S[1] + T[1]) / 2;
+      const chord = Math.hypot(T[0] - S[0], T[1] - S[1]) || 1;
+      // bow the trajectory outward, away from the planet centre (lobbed into low orbit)
+      let ox = mx2 - cx, oy = my2 - cy, ol = Math.hypot(ox, oy);
+      if (ol < 1e-3) { ox = -(T[1] - S[1]); oy = T[0] - S[0]; ol = chord; }     // ~antipodal shot → bow off the chord
+      const lift = chord * 0.22 + r * 0.14;
+      const P = [mx2 + (ox / ol) * lift, my2 + (oy / ol) * lift];
+      const beam = fr() < 0.30;                                                 // ~3 in 10 tracks fire a straight beam
+      const flight = 1150 + fr() * 850;                                         // ms a warhead is airborne (slower, deliberate)
+      // tempo: gaps shrink as the war intensifies, but stay long enough to feel deliberate, not frantic
+      const period = Math.max(beam ? 2600 : flight + IMPACT + 600,
+                              (5200 + fr() * 4200) / (0.55 + intensity * 0.55));
+      fire.push({ s, S, P, T, period, phase: fr() * period, flight, beam, beamDur: 260 + fr() * 170, col: colorFor(fr()) });
+    }
+
+    // ===== 3D wireframe deck: the world sits on a green perspective grid that recedes for depth =====
+    // No dark "space" fill — the card shows through and the receding grid alone carries the 3D illusion.
+    // A ground plane below a horizon at hY: depth rows bunch toward the horizon and columns fan out to a
+    // vanishing point behind the globe (which rests its lower third on the deck). Same green (--accent-2)
+    // as the app's other grids; framed by a hard boundary with corner brackets.
+    const pad = Math.max(2, size * 0.022);
+    const inX0 = pad, inY0 = pad, inX1 = size - pad, inY1 = size - pad;   // inner panel rect
+    const bezR = Math.max(2, size * 0.02);                               // slight corner round on the boundary
+    const hY = cy + r * 0.52;                                            // horizon: the globe's lower third rests on the deck
+    const VP = [cx, hY];                                                 // vanishing point for the floor grid
+    // receding floor grid (perspective): depth rows bunch toward the horizon; columns fan out to the VP
+    const ROWS = 7, COLS = 12;
+    const gridRows = [];
+    for (let i = 1; i <= ROWS; i++) { const tt = i / ROWS; gridRows.push(hY + (inY1 - hY) * (tt * tt)); }
+    const gridCols = [];
+    for (let j = 0; j <= COLS; j++) gridCols.push(inX0 + (inX1 - inX0) * (j / COLS));   // each fans from (x, inY1) → VP
+
     return (
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{overflow:'visible'}}>
         <defs>
@@ -295,42 +380,66 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
             <stop offset="92%"  stopColor="var(--danger)" stopOpacity="0.55"/>
             <stop offset="100%" stopColor="var(--danger)" stopOpacity="0"/>
           </radialGradient>
-          {/* vertical wipe clips: the conquered slice of each frontier continent */}
-          {drawn.filter(c => c.straddles).map(c => (
-            <clipPath key={'wc'+c.k} id={uid+'-wipe'+c.k}>
-              <rect x={c.xL.toFixed(2)} y={(cy - r - 4).toFixed(2)} width={Math.max(0, c.xW * c.localConq).toFixed(2)} height={(2*r + 8).toFixed(2)}/>
-            </clipPath>
-          ))}
+          {/* soft glow for tracer fire + impact flashes */}
+          <filter id={uid+'-glow'} x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation={(size*0.016).toFixed(1)}/>
+          </filter>
+          <clipPath id={uid+'-box'}><rect x={inX0.toFixed(1)} y={inY0.toFixed(1)} width={(inX1-inX0).toFixed(1)} height={(inY1-inY0).toFixed(1)} rx={bezR.toFixed(1)} ry={bezR.toFixed(1)}/></clipPath>
         </defs>
+        {/* ===== 3D wireframe deck: a green receding grid that gives the depth (no space fill) ===== */}
+        <g clipPath={`url(#${uid}-box)`}>
+          {/* receding floor grid: a soft bloom under a crisp green wireframe (lines converge to the VP) */}
+          <g fill="none" stroke="var(--accent-2)" strokeLinecap="round">
+            <g strokeOpacity="0.18" strokeWidth="1.6" filter={`url(#${uid}-glow)`}>
+              {gridRows.map((gy,i)=><line key={'rb'+i} x1={inX0.toFixed(1)} y1={gy.toFixed(1)} x2={inX1.toFixed(1)} y2={gy.toFixed(1)}/>)}
+              {gridCols.map((xb,j)=><line key={'cb'+j} x1={xb.toFixed(1)} y1={inY1.toFixed(1)} x2={VP[0].toFixed(1)} y2={VP[1].toFixed(1)}/>)}
+            </g>
+            <g strokeOpacity="0.55" strokeWidth="0.7">
+              {gridRows.map((gy,i)=><line key={'r'+i} x1={inX0.toFixed(1)} y1={gy.toFixed(1)} x2={inX1.toFixed(1)} y2={gy.toFixed(1)}/>)}
+              {gridCols.map((xb,j)=><line key={'c'+j} x1={xb.toFixed(1)} y1={inY1.toFixed(1)} x2={VP[0].toFixed(1)} y2={VP[1].toFixed(1)}/>)}
+            </g>
+          </g>
+          {/* horizon: where the deck recedes out of view */}
+          <line x1={inX0.toFixed(1)} y1={hY.toFixed(1)} x2={inX1.toFixed(1)} y2={hY.toFixed(1)} stroke="var(--accent-2)" strokeWidth="0.8" strokeOpacity="0.5"/>
+        </g>
         {alert ? <circle cx={cx} cy={cy} r={(r*1.08).toFixed(2)} fill={`url(#${uid}-atmoR)`}/> : atmosphere}
         <g filter={`url(#${uid}-ds)`}>
           <g clipPath={`url(#${uid}-clip)`}>
-            {/* the sea (fixed backdrop) */}
-            <circle cx={cx} cy={cy} r={r} fill={OCEAN}/>
-            <circle cx={cx} cy={cy} r={r} fill={`url(#${uid}-hn)`}/>
+            {/* backdrop: open sea, or — on a rock world — bare rock with no real ocean */}
+            <circle cx={cx} cy={cy} r={r} fill={rockWorld ? ROCK : OCEAN}/>
+            {!rockWorld && <circle cx={cx} cy={cy} r={r} fill={`url(#${uid}-hn)`}/>}
             {latRings}
             {/* continents: unclaimed terrain (present from day start), then conquered faction colors */}
             {drawn.map(c => (
               <g key={'c'+c.k} opacity={c.alpha.toFixed(2)}>
-                {/* base land = unclaimed terrain */}
-                <path d={loop(c.pts)} fill={LANDN} stroke="var(--bg)" strokeWidth="0.8"/>
-                {/* fully conquered: whole-continent faction color + hatch */}
+                {/* base land = unclaimed territory (savings / not yet spent), dark border between countries */}
+                <path d={loop(c.pts)} fill={LANDN} stroke="var(--bg)" strokeWidth="1" strokeLinejoin="round"/>
+                {/* fully conquered: whole-continent faction colour + hatch */}
                 {c.owner && <React.Fragment>
                   <path d={loop(c.pts)} fill={c.owner.d.color}/>
                   <path d={loop(c.pts)} fill={`url(#${uid}${c.owner.hatch})`}/>
                 </React.Fragment>}
-                {/* frontier: faction color wiped across the taken local fraction */}
-                {c.straddles && c.frontOwner && c.localConq > 0.001 && (
-                  <g clipPath={`url(#${uid}-wipe${c.k})`}>
-                    <path d={loop(c.pts)} fill={c.frontOwner.d.color}/>
-                    <path d={loop(c.pts)} fill={`url(#${uid}${c.frontOwner.hatch})`}/>
-                  </g>
+                {/* frontier: the faction's hold grows as a centred island with its own crisp border */}
+                {c.straddles && c.frontOwner && c.localConq > 0.004 && (
+                  <React.Fragment>
+                    <path d={loop(c.frontPts)} fill={c.frontOwner.d.color}/>
+                    <path d={loop(c.frontPts)} fill={`url(#${uid}${c.frontOwner.hatch})`}/>
+                    <path d={loop(c.frontPts)} fill="none" stroke="var(--bone)" strokeWidth="1.1" strokeOpacity="0.9" strokeLinejoin="round"/>
+                  </React.Fragment>
                 )}
-                {/* coastline: bright bone on conquered land, dim on unclaimed */}
-                <path d={loop(c.pts)} fill="none" stroke={(c.owner || c.straddles) ? 'var(--bone)' : 'var(--ink-4)'}
-                  strokeWidth={(c.owner || c.straddles) ? 1.1 : 0.8} strokeOpacity={(c.owner || c.straddles) ? 0.92 : 0.6} strokeLinejoin="round"/>
-                {/* battle teeth only where land has been taken */}
-                {(c.owner || c.straddles) && <path d={teeth(c.pts.filter((_,q)=>q%2===0))} fill="var(--bone)" fillOpacity="0.8"/>}
+                {/* coastline / national border — always defined so every country reads clearly */}
+                <path d={loop(c.pts)} fill="none" stroke={(c.owner || c.straddles) ? 'var(--bone)' : 'var(--ink-3)'}
+                  strokeWidth={(c.owner || c.straddles) ? 1.4 : 1.0} strokeOpacity={(c.owner || c.straddles) ? 0.95 : 0.8} strokeLinejoin="round"/>
+                {/* battle teeth mark only the active front line (the frontier island's edge) */}
+                {c.straddles && c.frontPts && c.localConq > 0.03 && <path d={teeth(c.frontPts.filter((_,q)=>q%2===0))} fill="var(--bone)" fillOpacity="0.8"/>}
+              </g>
+            ))}
+            {/* inland seas / lakes nestled in the rock (rock worlds only — the "little water") */}
+            {seasDrawn.map(sea => (
+              <g key={'sea'+sea.i} opacity={sea.alpha.toFixed(2)}>
+                <path d={loop(sea.pts)} fill={OCEAN}/>
+                <path d={loop(sea.pts)} fill={`url(#${uid}-hn)`}/>
+                <path d={loop(sea.pts)} fill="none" stroke="var(--ink-4)" strokeWidth="0.7" strokeOpacity="0.55" strokeLinejoin="round"/>
               </g>
             ))}
             {/* at/over the goal: wash the whole world red (under the shading so it stays spherical) */}
@@ -346,6 +455,87 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
               fill="var(--bone)" stroke="var(--bg)" strokeWidth={(FONT*0.32).toFixed(1)} paintOrder="stroke" strokeLinejoin="round">{c.text}</text>
           ))}
         </g>
+        {/* ===== orbital bombardment: tracer fire over the war world ===== */}
+        <g>
+          {fire.map(m => {
+            // --- static fallback (no animation clock under prefers-reduced-motion) ---
+            if (reduced) {
+              return (
+                <g key={'f' + m.s}>
+                  {m.beam
+                    ? <line x1={m.S[0].toFixed(1)} y1={m.S[1].toFixed(1)} x2={m.T[0].toFixed(1)} y2={m.T[1].toFixed(1)}
+                        stroke={m.col} strokeWidth={Math.max(0.8, size*0.008)} strokeOpacity="0.5" strokeDasharray="1 3" strokeLinecap="round"/>
+                    : <path d={arcStr(m.S, m.P, m.T, 0, 1, 18)} fill="none" stroke={m.col} strokeWidth={Math.max(0.8, size*0.008)} strokeOpacity="0.5" strokeDasharray="2 3" strokeLinecap="round"/>}
+                  <circle cx={m.T[0].toFixed(1)} cy={m.T[1].toFixed(1)} r={Math.max(1.4, size*0.014)} fill={m.col} fillOpacity="0.8"/>
+                </g>
+              );
+            }
+            const t = (tick + m.phase) % m.period;
+
+            // --- straight beam strike: snap on bright, then fade, flashes at both ends ---
+            if (m.beam) {
+              if (t >= m.beamDur) return null;
+              const k = t / m.beamDur, op = 1 - k;                          // 0..1 across the strike
+              const muzzle = Math.max(0, 1 - k * 1.6);
+              const flash = Math.max(1.5, size*0.02) * op;
+              return (
+                <g key={'f' + m.s}>
+                  <line x1={m.S[0].toFixed(1)} y1={m.S[1].toFixed(1)} x2={m.T[0].toFixed(1)} y2={m.T[1].toFixed(1)}
+                    stroke={m.col} strokeWidth={Math.max(2, size*0.03)} strokeOpacity={(op*0.2).toFixed(2)} strokeLinecap="round" filter={`url(#${uid}-glow)`}/>
+                  <line x1={m.S[0].toFixed(1)} y1={m.S[1].toFixed(1)} x2={m.T[0].toFixed(1)} y2={m.T[1].toFixed(1)}
+                    stroke={m.col} strokeWidth={Math.max(1, size*0.012*op).toFixed(1)} strokeOpacity={(0.5 + op*0.45).toFixed(2)} strokeLinecap="round"/>
+                  {/* thin white-hot core keeps the bolt crisp even over a same-hue sea */}
+                  <line x1={m.S[0].toFixed(1)} y1={m.S[1].toFixed(1)} x2={m.T[0].toFixed(1)} y2={m.T[1].toFixed(1)}
+                    stroke="var(--bone)" strokeWidth={Math.max(0.5, size*0.004).toFixed(1)} strokeOpacity={(op*0.85).toFixed(2)} strokeLinecap="round"/>
+                  <circle cx={m.S[0].toFixed(1)} cy={m.S[1].toFixed(1)} r={(flash*0.7).toFixed(1)} fill={m.col} fillOpacity={muzzle.toFixed(2)}/>
+                  <circle cx={m.T[0].toFixed(1)} cy={m.T[1].toFixed(1)} r={flash.toFixed(1)} fill="var(--bone)" fillOpacity={op.toFixed(2)} filter={`url(#${uid}-glow)`}/>
+                </g>
+              );
+            }
+
+            // --- arcing ballistic missile: comet trail brightening toward a glowing warhead ---
+            if (t < m.flight) {
+              const p = t / m.flight, tail = Math.max(0, p - 0.45), h = bez(m.S, m.P, m.T, p);
+              const hr = Math.max(1.3, size * 0.014);
+              return (
+                <g key={'f' + m.s}>
+                  <path d={arcStr(m.S, m.P, m.T, tail, p, 14)} fill="none" stroke={m.col} strokeWidth={Math.max(2, size*0.026)} strokeOpacity="0.16" strokeLinecap="round" filter={`url(#${uid}-glow)`}/>
+                  <path d={arcStr(m.S, m.P, m.T, tail, p, 14)} fill="none" stroke={m.col} strokeWidth={Math.max(0.8, size*0.008)} strokeOpacity="0.42" strokeLinecap="round"/>
+                  <path d={arcStr(m.S, m.P, m.T, tail + (p - tail) * 0.55, p, 9)} fill="none" stroke={m.col} strokeWidth={Math.max(1, size*0.012)} strokeOpacity="0.9" strokeLinecap="round"/>
+                  {/* thin white-hot core on the leading length — refined tracer, always legible */}
+                  <path d={arcStr(m.S, m.P, m.T, tail + (p - tail) * 0.72, p, 5)} fill="none" stroke="var(--bone)" strokeWidth={Math.max(0.5, size*0.0045).toFixed(1)} strokeOpacity="0.85" strokeLinecap="round"/>
+                  <circle cx={h[0].toFixed(1)} cy={h[1].toFixed(1)} r={(hr*1.9).toFixed(1)} fill={m.col} fillOpacity="0.35" filter={`url(#${uid}-glow)`}/>
+                  <circle cx={h[0].toFixed(1)} cy={h[1].toFixed(1)} r={hr.toFixed(1)} fill={m.col}/>
+                  <circle cx={h[0].toFixed(1)} cy={h[1].toFixed(1)} r={(hr*0.42).toFixed(1)} fill="var(--bone)"/>
+                </g>
+              );
+            }
+
+            // --- impact flash where the warhead lands: expanding ring + fading bloom ---
+            const it = t - m.flight;
+            if (it < IMPACT) {
+              const k = it / IMPACT, rad = Math.max(1.5, size*0.012) + k * size * 0.07;
+              return (
+                <g key={'f' + m.s} opacity={(1 - k).toFixed(2)}>
+                  <circle cx={m.T[0].toFixed(1)} cy={m.T[1].toFixed(1)} r={rad.toFixed(1)} fill="none" stroke={m.col} strokeWidth={Math.max(1, size*0.012*(1-k)).toFixed(1)}/>
+                  <circle cx={m.T[0].toFixed(1)} cy={m.T[1].toFixed(1)} r={(Math.max(1.6, size*0.022)*(1-k)).toFixed(1)} fill="var(--bone)" filter={`url(#${uid}-glow)`}/>
+                </g>
+              );
+            }
+            return null;
+          })}
+        </g>
+        {/* ===== boundary: a hard green frame + corner brackets containing the deck ===== */}
+        <rect x={inX0.toFixed(1)} y={inY0.toFixed(1)} width={(inX1-inX0).toFixed(1)} height={(inY1-inY0).toFixed(1)} rx={bezR.toFixed(1)} ry={bezR.toFixed(1)}
+          fill="none" stroke="var(--accent-2)" strokeOpacity="0.4" strokeWidth="1"/>
+        {(() => {
+          const b = Math.max(7, size * 0.085);     // corner bracket arm length
+          const C = (x, y, sx, sy) => `M${(x+sx*b).toFixed(1)} ${y.toFixed(1)}H${x.toFixed(1)}V${(y+sy*b).toFixed(1)}`;
+          return (
+            <path d={[C(inX0+2, inY0+2, 1, 1), C(inX1-2, inY0+2, -1, 1), C(inX0+2, inY1-2, 1, -1), C(inX1-2, inY1-2, -1, -1)].join(' ')}
+              fill="none" stroke="var(--accent-2)" strokeOpacity="0.8" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+          );
+        })()}
       </svg>
     );
   }
@@ -2030,10 +2220,13 @@ const HealthCard = ({ cardProps = {} } = {}) => {
   const totalFat     = foodLog.reduce((s, f) => s + f.fat,      0);
   const foodQuery    = foodName.trim().toLowerCase();
   const foodMatches  = (foodQuery ? foodSug.filter(s => s.name.toLowerCase().includes(foodQuery)) : foodSug).slice(0, 6);
+  // Three clearly-distinct faction colours so the war planet's territories — and the tracer
+  // fire colour-coded to them — read apart at a glance: blood red, toxic green, imperial blue.
+  const MACRO_COLORS = { protein: 'oklch(0.62 0.20 25)', carbs: 'oklch(0.72 0.16 150)', fat: 'oklch(0.66 0.14 255)' };
   const macroData    = [
-    { value: totalProtein, color: 'var(--accent)', label: 'Protein', grams: totalProtein },
-    { value: totalCarbs,   color: 'var(--warn)',   label: 'Carbs',   grams: totalCarbs   },
-    { value: totalFat,     color: 'var(--info)',   label: 'Fat',     grams: totalFat     },
+    { value: totalProtein, color: MACRO_COLORS.protein, label: 'Protein', grams: totalProtein },
+    { value: totalCarbs,   color: MACRO_COLORS.carbs,   label: 'Carbs',   grams: totalCarbs   },
+    { value: totalFat,     color: MACRO_COLORS.fat,     label: 'Fat',     grams: totalFat     },
   ];
   const calGoal = 3000;
   const calPct  = Math.min(100, (totalCal / calGoal) * 100);
@@ -2042,9 +2235,9 @@ const HealthCard = ({ cardProps = {} } = {}) => {
   // share of the goal, so calories conquer land and the rest stays as black unclaimed ground.
   // The planet turns red only on a full calorie day (totalCal over the 3000 goal).
   const macroGlobe = [
-    { value: totalProtein * 4, color: 'var(--accent)', label: 'Protein' },
-    { value: totalCarbs   * 4, color: 'var(--warn)',   label: 'Carbs'   },
-    { value: totalFat     * 9, color: 'var(--info)',   label: 'Fat'     },
+    { value: totalProtein * 4, color: MACRO_COLORS.protein, label: 'Protein' },
+    { value: totalCarbs   * 4, color: MACRO_COLORS.carbs,   label: 'Carbs'   },
+    { value: totalFat     * 9, color: MACRO_COLORS.fat,     label: 'Fat'     },
   ].filter(d => d.value > 0);
 
   // Weekly calorie picture: the 7 days ending on the viewed day, summed from the food log.
