@@ -98,18 +98,26 @@ const Checkbox = ({ checked, onClick }) => (
   </span>
 );
 
-// Pie as territory on a 3D planet. In `war` mode it's a LIVE rotating globe: each expense
-// is a faction holding a longitude arc of the whole sphere (sized by share of income), and
-// the surface spins under fixed lighting so territories scroll across the face and wrap
-// around the back. Only the front 180° hemisphere is drawn each frame. Battle fronts are
-// jagged FEBA sawtooth lines that slowly creep; the dim "Savings" arc is unclaimed ground
-// (calm dots, dashed armistice borders, no teeth). Both the Finance and Health cards use
-// `war`; the non-war branch is a static smooth-globe fallback. Honors prefers-reduced-motion.
-const DonutChart = ({ data, size = 110, war = false, labels = true, alert = false, whole = 0, ocean }) => {
+// Deterministic per-day world: a string seed (a date) hashes to a fixed PRNG stream, so a
+// given day always renders the same land/ocean layout but consecutive days differ.
+const hashStr = (s) => { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
+const mulberry32 = (a) => () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const todayStr = () => { try { return new Date().toISOString().slice(0, 10); } catch { return 'world'; } };
+
+// Pie as territory on a 3D planet. In `war` mode it's a LIVE rotating globe whose WORLD is
+// fixed for the day: the land:ocean ratio is seeded from `seed` (a date), so each day looks
+// different, and the land is present from the START of the day as dim "unclaimed" terrain.
+// As the factions (macros / expense categories in `data`) are logged, they CONQUER that land
+// — the conquered fraction of all land = total / `whole` (goal / income), split among the
+// factions by their share of the day's total. A battle front creeps across the frontier
+// continent so the fill grows smoothly. Once the land is fully taken (at/over the goal,
+// `alert`) the whole planet washes red. The non-war branch is a static smooth-globe fallback.
+// Honors prefers-reduced-motion. Both the Finance and Health cards use `war`.
+const DonutChart = ({ data, size = 110, war = false, labels = true, alert = false, whole = 0, ocean, landNeutral, seed, landRatio: landRatioProp }) => {
   const total = data.reduce((s, d) => s + d.value, 0);
   const [tick, setTick] = useState(0);   // animation clock (ms), war globe only
   useEffect(() => {
-    if (!war || !total) return;
+    if (!war) return;   // the war world exists (and spins) from day start, before anything is logged
     if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     let raf, prev = null, acc = 0, last = 0;
     const loop = (t) => {
@@ -122,7 +130,8 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
     return () => cancelAnimationFrame(raf);
   }, [war, total]);
 
-  if (!total) return <div style={{width:size,height:size,display:'flex',alignItems:'center',justifyContent:'center'}}><span className="muted-2 mono" style={{fontSize:10}}>no data</span></div>;
+  // Non-war charts still need data to draw; the war planet renders its world even at zero logged.
+  if (!total && !war) return <div style={{width:size,height:size,display:'flex',alignItems:'center',justifyContent:'center'}}><span className="muted-2 mono" style={{fontSize:10}}>no data</span></div>;
   const cx = size/2, cy = size/2, r = size*0.44;
   const uid = (war ? 'warplanet' : 'planet') + Math.round(size);
   const D = Math.PI/180, N = 16;
@@ -184,46 +193,91 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
   );
   const outline = <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--accent)" strokeOpacity="0.9" strokeWidth="1.2"/>;
 
-  // ===== WAR: live rotating globe — island territories on a blue ocean =====
-  // Each category is an island sized as a fraction of the whole (calorie goal / income), so the
-  // islands grow to cover the planet as the total nears the goal; the blue ocean is the unclaimed
-  // remainder. Over the goal (over budget / over the 3000 cals) the whole planet turns red.
+  // ===== WAR: a fixed world (set for the day) whose land gets conquered as you log =====
+  // The land/ocean layout is seeded from the date, so each day's world differs — and the land
+  // is there from the START of the day as dim "unclaimed" terrain. As the factions in `data`
+  // are logged they conquer that land (conquered fraction of all land = total / goal), split
+  // among factions by share of the day's total; a front creeps across the frontier continent
+  // so the fill grows smoothly. At/over the goal (`alert`) the whole planet washes red.
   if (war) {
     const rot = tick * (360 / 46000);     // ~46s per revolution
     const jagPhase = tick * 0.0012;        // coastline creep
     const noise = (x) => Math.sin(x);
     const loop = (pts) => toPath(pts) + ' Z';
-    const land = data.filter(d => !d.neutral && d.value > 0);
-    const denom = whole > 0 ? whole : total;    // the whole planet = calorie goal / income
-    const landN = Math.max(1, land.length);
-    const LAT = [16, -15, 31, -27, 8, -34, 23, -19];
-    const OCEAN = ocean || 'oklch(0.52 0.11 245)';   // default simple blue sea; cards may override
+    const denom = whole > 0 ? whole : total;                  // the full goal / income
+    const conq = denom > 0 ? Math.max(0, Math.min(1, total / denom)) : 0;   // fraction of land taken
+    const OCEAN = ocean || 'oklch(0.52 0.11 245)';            // default simple blue sea; cards may override
+    const LANDN = landNeutral || 'var(--surface-3)';          // dim unclaimed terrain, present from day start
+    const LAT = [12, -10, 22, -18, 6, -24, 16, -14];          // kept near the equator so land fills the visible face
+
+    // ---- the world: continents seeded from the date, fixed for the day ----
+    const wr = mulberry32(hashStr('mc-world|' + (seed || todayStr())));
+    // Near-total land: most days the planet is almost all continent (0.90–0.99), ocean down to a
+    // few seas/lakes, with a rare "water world" (~1 in 20 days, 0.30–0.48 land) for variety.
+    const u = wr();
+    const baseLandRatio = u < 0.05
+      ? 0.30 + (u / 0.05) * 0.18
+      : 0.90 + ((u - 0.05) / 0.95) * 0.09;
+    const landRatio = landRatioProp != null ? landRatioProp : baseLandRatio;   // preview can override
+    const K = 6 + Math.floor(wr() * 4);                       // 6–9 continents — tile the globe so land stays dominant at any rotation
+    const weights = []; for (let k = 0; k < K; k++) weights.push(0.55 + wr());
+    const wSum = weights.reduce((a, b) => a + b, 0) || 1;
+    const lonOff = wr() * 360;
+    const world = [];
+    for (let k = 0; k < K; k++) {
+      const frac = weights[k] / wSum;                         // this continent's share of all land
+      // Size blobs so the VISIBLE land fraction ≈ landRatio. Only the front hemisphere shows,
+      // edge continents foreshorten, and blobs overlap — so nominal sphere-area runs ~3.0× the
+      // target disc fraction. Higher ⇒ land-dominant; the cap keeps any one continent off-limb.
+      const R = Math.min(r * 1.05, r * Math.sqrt(landRatio * frac * 4.4));
+      world.push({ k, frac, R, blobSeed: 0.7 + k * 1.3,
+        baseLon: (k / K) * 360 + lonOff + (wr() - 0.5) * 16,
+        lat: LAT[Math.floor(wr() * LAT.length) % LAT.length] });
+    }
+    world.sort((a, b) => a.baseLon - b.baseLon);              // stable layout (by longitude)
+    // Conquer in a scattered (low-discrepancy) order, NOT one contiguous longitude arc, so the
+    // taken fraction is readable at any rotation instead of hiding on the planet's far side.
+    const order = world.map((_, j) => j).sort((x, y) => ((x * 0.61803) % 1) - ((y * 0.61803) % 1));
+    let acc = 0; order.forEach(j => { world[j].a = acc; acc += world[j].frac; world[j].b = acc; });
+
+    // ---- factions (macros / expense categories) packed into the conquered span [0, conq] ----
+    const facs = data.filter(d => !d.neutral && d.value > 0);
+    const facTotal = facs.reduce((s, d) => s + d.value, 0) || 1;
+    let fc = 0; const facSpans = facs.map((d, i) => {
+      const seg = { d, start: fc, end: fc + (d.value / facTotal) * conq, hatch: HATCH[i % HATCH.length] };
+      fc = seg.end; return seg;
+    });
+    const ownerAt = (pos) => facSpans.find(s => pos >= s.start && pos < s.end) || null;   // null ⇒ unclaimed
+
     // organic blob outline (closed loop) in local coords — a lobed circle that slowly morphs
-    const blob = (R, seed) => {
+    const blob = (R, bseed) => {
       const pts = [], M = 30;
-      for (let k = 0; k < M; k++) {
-        const a = (k / M) * Math.PI * 2;
-        const w = 1 + 0.17*noise(3*a + seed) + 0.11*noise(5*a + seed*1.7 + jagPhase) + 0.07*noise(8*a + seed*2.3 - jagPhase*0.7);
+      for (let q = 0; q < M; q++) {
+        const a = (q / M) * Math.PI * 2;
+        const w = 1 + 0.17*noise(3*a + bseed) + 0.11*noise(5*a + bseed*1.7 + jagPhase) + 0.07*noise(8*a + bseed*2.3 - jagPhase*0.7);
         pts.push([Math.cos(a) * R * w, Math.sin(a) * R * w]);
       }
       return pts;
     };
-    // Each category is an island sized by its share of the whole (goal / income), sitting on a
-    // blue ocean. The islands grow to cover the planet as the total nears the goal.
-    const continents = land.map((d, i) => {
-      const lon = i * (360 / landN), lat = LAT[i % LAT.length];
-      const vlon = lon + rot;                                  // current view longitude
-      const f = Math.cos(vlon*D) * Math.cos(lat*D);            // >0 ⇒ front hemisphere
-      const [px, py] = project(lat, vlon);
+    // project each continent to the current view; cull the back hemisphere; resolve ownership
+    const drawn = world.map(c => {
+      const vlon = c.baseLon + rot;
+      const f = Math.cos(vlon*D) * Math.cos(c.lat*D);          // >0 ⇒ front hemisphere
+      const [px, py] = project(c.lat, vlon);
       const sx = Math.max(0.06, Math.abs(Math.cos(vlon*D)));   // horizontal foreshortening near limb
-      const share = d.value / denom;                           // fraction of the whole planet
-      const R = Math.min(r * 0.9, r * Math.sqrt(2 * share));
-      const alpha = Math.max(0, Math.min(1, (f - 0.05) / 0.22));   // fade in/out across the limb
-      const pts = blob(R, i*1.3 + 0.7).map(([lx,ly]) => [px + lx*sx, py + ly]);
-      return { i, d, f, alpha, px, py, R, sx, pts, share, hatch: HATCH[i % HATCH.length] };
+      const alpha = Math.max(0, Math.min(1, (f - 0.05) / 0.22));
+      const pts = blob(c.R, c.blobSeed).map(([lx,ly]) => [px + lx*sx, py + ly]);
+      const mid = (c.a + c.b) / 2;
+      const owner = c.b <= conq ? ownerAt(Math.min(mid, conq - 1e-6)) : null;   // fully-conquered continent
+      const straddles = c.a < conq && c.b > conq;              // the frontier continent (partly taken)
+      const localConq = straddles ? (conq - c.a) / (c.b - c.a) : 0;   // 0..1 of this continent that's taken
+      const frontOwner = straddles ? (ownerAt(Math.min(conq - 1e-6, c.b)) || facSpans[facSpans.length-1] || null) : null;
+      const xL = px - c.R*1.35*sx, xW = c.R*2.7*sx;            // horizontal extent for the wipe clip
+      return { ...c, f, alpha, px, py, sx, pts, owner, straddles, localConq, frontOwner, xL, xW };
     }).filter(c => c.alpha > 0.02).sort((a,b) => a.f - b.f);   // far continents drawn first
-    const namedLand = continents.filter(c => c.alpha > 0.6 && c.R > r*0.14)
-      .map(c => ({ ...c, text: labelOf(c.d) }));
+
+    const named = drawn.filter(c => c.owner && c.alpha > 0.6 && c.R > r*0.14)
+      .map(c => ({ ...c, text: labelOf(c.owner.d) }));
     return (
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{overflow:'visible'}}>
         <defs>
@@ -241,32 +295,53 @@ const DonutChart = ({ data, size = 110, war = false, labels = true, alert = fals
             <stop offset="92%"  stopColor="var(--danger)" stopOpacity="0.55"/>
             <stop offset="100%" stopColor="var(--danger)" stopOpacity="0"/>
           </radialGradient>
+          {/* vertical wipe clips: the conquered slice of each frontier continent */}
+          {drawn.filter(c => c.straddles).map(c => (
+            <clipPath key={'wc'+c.k} id={uid+'-wipe'+c.k}>
+              <rect x={c.xL.toFixed(2)} y={(cy - r - 4).toFixed(2)} width={Math.max(0, c.xW * c.localConq).toFixed(2)} height={(2*r + 8).toFixed(2)}/>
+            </clipPath>
+          ))}
         </defs>
         {alert ? <circle cx={cx} cy={cy} r={(r*1.08).toFixed(2)} fill={`url(#${uid}-atmoR)`}/> : atmosphere}
         <g filter={`url(#${uid}-ds)`}>
           <g clipPath={`url(#${uid}-clip)`}>
-            {/* simple blue ocean = the unclaimed remainder up to the goal */}
+            {/* the sea (fixed backdrop) */}
             <circle cx={cx} cy={cy} r={r} fill={OCEAN}/>
             <circle cx={cx} cy={cy} r={r} fill={`url(#${uid}-hn)`}/>
             {latRings}
-            {/* island territories, sized by share, with fortified coastlines */}
-            {continents.map(c => (
-              <g key={'c'+c.i} opacity={c.alpha.toFixed(2)}>
-                <path d={loop(c.pts)} fill={c.d.color} stroke="var(--bg)" strokeWidth="0.8"/>
-                <path d={loop(c.pts)} fill={`url(#${uid}${c.hatch})`}/>
-                <path d={loop(c.pts)} fill="none" stroke="var(--bone)" strokeWidth="1.1" strokeOpacity="0.92" strokeLinejoin="round"/>
-                <path d={teeth(c.pts.filter((_,k)=>k%2===0))} fill="var(--bone)" fillOpacity="0.8"/>
+            {/* continents: unclaimed terrain (present from day start), then conquered faction colors */}
+            {drawn.map(c => (
+              <g key={'c'+c.k} opacity={c.alpha.toFixed(2)}>
+                {/* base land = unclaimed terrain */}
+                <path d={loop(c.pts)} fill={LANDN} stroke="var(--bg)" strokeWidth="0.8"/>
+                {/* fully conquered: whole-continent faction color + hatch */}
+                {c.owner && <React.Fragment>
+                  <path d={loop(c.pts)} fill={c.owner.d.color}/>
+                  <path d={loop(c.pts)} fill={`url(#${uid}${c.owner.hatch})`}/>
+                </React.Fragment>}
+                {/* frontier: faction color wiped across the taken local fraction */}
+                {c.straddles && c.frontOwner && c.localConq > 0.001 && (
+                  <g clipPath={`url(#${uid}-wipe${c.k})`}>
+                    <path d={loop(c.pts)} fill={c.frontOwner.d.color}/>
+                    <path d={loop(c.pts)} fill={`url(#${uid}${c.frontOwner.hatch})`}/>
+                  </g>
+                )}
+                {/* coastline: bright bone on conquered land, dim on unclaimed */}
+                <path d={loop(c.pts)} fill="none" stroke={(c.owner || c.straddles) ? 'var(--bone)' : 'var(--ink-4)'}
+                  strokeWidth={(c.owner || c.straddles) ? 1.1 : 0.8} strokeOpacity={(c.owner || c.straddles) ? 0.92 : 0.6} strokeLinejoin="round"/>
+                {/* battle teeth only where land has been taken */}
+                {(c.owner || c.straddles) && <path d={teeth(c.pts.filter((_,q)=>q%2===0))} fill="var(--bone)" fillOpacity="0.8"/>}
               </g>
             ))}
-            {/* over the goal: wash the whole world red (under the shading so it stays spherical) */}
+            {/* at/over the goal: wash the whole world red (under the shading so it stays spherical) */}
             {alert && <circle cx={cx} cy={cy} r={r} fill="var(--danger)" opacity="0.45"/>}
             {shading}
           </g>
           {alert
             ? <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--danger)" strokeOpacity="0.95" strokeWidth="1.6"/>
             : outline}
-          {labels && namedLand.map(c => (
-            <text key={'t'+c.i} x={c.px.toFixed(2)} y={c.py.toFixed(2)} textAnchor="middle" dominantBaseline="middle" opacity={c.alpha.toFixed(2)}
+          {labels && named.map(c => (
+            <text key={'t'+c.k} x={c.px.toFixed(2)} y={c.py.toFixed(2)} textAnchor="middle" dominantBaseline="middle" opacity={c.alpha.toFixed(2)}
               fontFamily="var(--font-mono)" fontSize={FONT.toFixed(1)} fontWeight="700" letterSpacing="0.5"
               fill="var(--bone)" stroke="var(--bg)" strokeWidth={(FONT*0.32).toFixed(1)} paintOrder="stroke" strokeLinejoin="round">{c.text}</text>
           ))}
@@ -966,7 +1041,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
           </div>
         </div>
         <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:6,paddingTop:4}}>
-          <DonutChart data={donutData} size={148} war alert={totalEx > totalIn} whole={totalIn} ocean="var(--bone)"/>
+          <DonutChart data={donutData} size={148} war alert={totalEx > totalIn} whole={totalIn} ocean="var(--bone)" landNeutral="oklch(0.50 0.02 250)" seed={monthLabel}/>
           {donutData.length>0 && (
             <div style={{display:'flex',flexDirection:'column',gap:3}}>
               {donutData.slice(0,4).map((d,i)=>(
@@ -2149,7 +2224,7 @@ const HealthCard = ({ cardProps = {} } = {}) => {
         {/* Donut + calorie bar (positioned BELOW the search row) */}
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 10 }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-            <DonutChart data={macroGlobe} size={92} war labels={false} alert={totalCal > calGoal} whole={calGoal} />
+            <DonutChart data={macroGlobe} size={92} war labels={false} alert={totalCal > calGoal} whole={calGoal} seed={viewDate} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               {macroData.map(({ label, grams, color }) => (
                 <div key={label} style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
