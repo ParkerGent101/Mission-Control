@@ -156,6 +156,10 @@
       "Vitamins": false,
       "water": true,
       "stretching": true
+    },
+    "2026-06-16": {
+      "Creatine": true,
+      "Vitamins": true
     }
   },
   "weight": {
@@ -622,6 +626,15 @@
         "protein": 6,
         "carbs": 6,
         "fat": 15
+      }
+    ],
+    "2026-06-15": [
+      {
+        "name": "Snacks",
+        "calories": 2670,
+        "protein": 110,
+        "carbs": 320,
+        "fat": 115
       }
     ]
   },

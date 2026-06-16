@@ -601,7 +601,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
           </div>
         </div>
         <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:6,paddingTop:4}}>
-          <DonutChart data={donutData} size={148} war alert={totalEx > totalIn} whole={totalIn} ocean="var(--bone)" landNeutral="oklch(0.50 0.02 250)" seed={monthLabel}/>
+          <DonutChart data={donutData} size={180} war alert={totalEx > totalIn} whole={totalIn} ocean="var(--bone)" landNeutral="oklch(0.50 0.02 250)" seed={monthLabel}/>
           {donutData.length>0 && (
             <div style={{display:'flex',flexDirection:'column',gap:3}}>
               {donutData.slice(0,4).map((d,i)=>(
@@ -1276,7 +1276,6 @@ const HealthCard = ({ cardProps = {} } = {}) => {
     d.setDate(d.getDate() + workoutOffset);
     return localDateStr(d);
   })();
-  const [rehabDone, setRehabDone]     = useState({});
   const [coreDone, setCoreDone]       = useState(false);
   const [habitList, setHabitList]     = useState([]);
   const [todayHabits, setTodayHabits] = useState({});
@@ -1417,8 +1416,6 @@ const HealthCard = ({ cardProps = {} } = {}) => {
     setFoodLog(foods);
     // Water: that day's oz, or 0
     setWater((rawHealth.water || {})[viewDate] || 0);
-    // Elbow rehab: persisted per viewed day
-    setRehabDone((rawHealth.rehab || {})[viewDate] || {});
     // Core (workout section, not a habit): persisted per viewed day
     setCoreDone(!!(rawHealth.core || {})[viewDate]);
   }, [rawHealth, viewDate]);
@@ -1574,19 +1571,6 @@ const HealthCard = ({ cardProps = {} } = {}) => {
       apply(!newVal);
       toastErr("Couldn’t update that habit — try again.");
     }
-  };
-
-  const rehabKey = (ex, index) => ex.id || ex.name || String(index);
-
-  const toggleRehab = async (ex, index) => {
-    const key = rehabKey(ex, index);
-    const done = !rehabDone[key];
-    setRehabDone(p => ({ ...p, [key]: done }));
-    await fetch('/api/health/rehab', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, done, date: viewDate }) })
-      .then(r => { if (!r.ok) throw 0; })
-      .catch(() => toastErr("Couldn’t update that exercise — reloading."));
-    setTimeout(load, 300);
   };
 
   const toggleCore = async () => {
@@ -1802,7 +1786,7 @@ const HealthCard = ({ cardProps = {} } = {}) => {
         {/* Donut + calorie bar (positioned BELOW the search row) */}
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 10 }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-            <DonutChart data={macroGlobe} size={92} war labels={false} alert={totalCal > calGoal} whole={calGoal} seed={viewDate} landNeutral="oklch(0.50 0.15 312)" />
+            <DonutChart data={macroGlobe} size={130} war labels={false} alert={totalCal > calGoal} whole={calGoal} seed={viewDate} landNeutral="oklch(0.50 0.15 312)" />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               {macroData.map(({ label, grams, color }) => (
                 <div key={label} style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
@@ -2035,13 +2019,11 @@ const HealthCard = ({ cardProps = {} } = {}) => {
             <span>Elbow Rehab · Daily</span><span className="line" />
             <span className="muted-2 mono" style={{ fontSize: 9.5 }}>stay ≤3/10 pain</span>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             {program.elbow_rehab.map((ex, i) => (
-              <div key={rehabKey(ex, i)} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 11 }}>
-                <Checkbox checked={!!rehabDone[rehabKey(ex, i)]} onClick={() => toggleRehab(ex, i)} />
-                <span style={{ textDecoration: rehabDone[rehabKey(ex, i)] ? 'line-through' : 'none', color: rehabDone[rehabKey(ex, i)] ? 'var(--ink-4)' : 'inherit' }}>
-                  {ex.name} — {ex.sets}×{ex.reps}
-                </span>
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, fontSize: 11, alignItems: 'center', padding: '2px 0', borderBottom: '1px solid var(--line-soft)' }}>
+                <span>{ex.name}</span>
+                <span className="mono muted" style={{ fontSize: 10 }}>{ex.sets}×{ex.reps}</span>
               </div>
             ))}
           </div>

@@ -16,6 +16,10 @@ $REGION     = "us-central1"
 $SERVICE    = "mission-control"
 $BUCKET     = "parker-mission-control-data"
 
+# Free Plaid accounts can run Mission Control against Sandbox test data. Set this to
+# "production" only when you have Plaid Production access and have stored that secret.
+$PLAID_ENV = "sandbox"
+
 # OAuth banks (Fidelity, Chase, etc.): register this EXACT url as an allowed redirect
 # URI in the Plaid dashboard FIRST, then set it here. Leave "" until registered - an
 # unregistered redirect URI makes every bank link fail, not just OAuth ones.
@@ -62,7 +66,7 @@ if ($Setup) {
         if ($LASTEXITCODE -ne 0) { gcloud secrets versions add plaid-client-id --data-file=$tmp }
         Remove-Item $tmp
 
-        $plaidSecret = Read-Host "Paste your PLAID_SECRET (production)"
+        $plaidSecret = Read-Host "Paste your PLAID_SECRET ($PLAID_ENV)"
         $tmp = [System.IO.Path]::GetTempFileName()
         [System.IO.File]::WriteAllText($tmp, $plaidSecret.Trim())
         gcloud secrets create plaid-secret --data-file=$tmp 2>$null
@@ -94,7 +98,7 @@ if ($SkipData) {
 }
 
 # Env vars: append the Plaid OAuth redirect URI only when it's been configured above.
-$envVars = "DATA_DIR=/data,FINANCE_SHEET_ID=1UaFkSQ3wwrPt6pfZIfnNrlMQmerv-ZQ52KYyCF5rIvo,HEALTH_SHEET_ID=1IaAphdKbTYrX3OHL_CDsFieB1bi-H_DznRHdzaQwDfk,FINANCE_OWNER_EMAIL=parkergent7@gmail.com,PLAID_ENV=production"
+$envVars = "DATA_DIR=/data,FINANCE_SHEET_ID=1UaFkSQ3wwrPt6pfZIfnNrlMQmerv-ZQ52KYyCF5rIvo,HEALTH_SHEET_ID=1IaAphdKbTYrX3OHL_CDsFieB1bi-H_DznRHdzaQwDfk,FINANCE_OWNER_EMAIL=parkergent7@gmail.com,PLAID_ENV=$PLAID_ENV"
 if ($PLAID_REDIRECT_URI) { $envVars += ",PLAID_REDIRECT_URI=$PLAID_REDIRECT_URI" }
 
 # Only bind Plaid secrets if they exist in Secret Manager, so a deploy never fails

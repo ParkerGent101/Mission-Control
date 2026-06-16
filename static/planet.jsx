@@ -277,7 +277,6 @@ const PL_paint = (ctx, W, H, world, spans, conq, pal, hatches) => {
         PL_coast(ctx, frontPts, dx); ctx.fillStyle = frontOwner.color; ctx.fill();
         PL_coast(ctx, frontPts, dx); fillHatch(frontOwner.hatch, dx);
         PL_coast(ctx, frontPts, dx); ctx.lineWidth = 2.2; ctx.strokeStyle = pal.bone; ctx.globalAlpha = 0.9; ctx.stroke(); ctx.globalAlpha = 1;
-        if (localConq > 0.03) PL_teeth(ctx, frontPts.filter((_, q) => q % 2 === 0), dx, Math.max(4, H * 0.018), pal.bone);
       }
       // topographic contour lines (idea1 terrain scan) — inner terrace rings over the land
       ctx.lineWidth = Math.max(0.7, H * 0.0014); ctx.strokeStyle = (owner || straddles) ? pal.bone : pal.accent2; ctx.globalAlpha = 0.4;
@@ -289,83 +288,298 @@ const PL_paint = (ctx, W, H, world, spans, conq, pal, hatches) => {
       ctx.globalAlpha = (owner || straddles) ? 0.95 : 0.8; ctx.stroke(); ctx.globalAlpha = 1;
     });
   });
-  world.seas.forEach(sea => copies.forEach(dx => {
-    PL_coast(ctx, sea.pts, dx); ctx.fillStyle = pal.ocean; ctx.fill();
-    PL_coast(ctx, sea.pts, dx); ctx.lineWidth = 1.4; ctx.strokeStyle = pal.ink4; ctx.globalAlpha = 0.55; ctx.stroke(); ctx.globalAlpha = 1;
-  }));
 };
 
-// ─── orbital bombardment: a deterministic salvo of ballistic missiles + beams over the globe ─
-const PL_buildFire = (seed, cx, cy, r, poolColors, dangerHex) => {
+// ─── surface war: faction salvos fired FROM conquered land toward enemy ground ──────────────
+// Strikes anchor to CONTINENTS, not random disc points: each shot launches from a faction-held
+// continent and lands on enemy ground — the unclaimed purple Tyranid infestation, or a RIVAL
+// faction's land — coloured by the FIRING faction. The Tyranid ground is never a source, only a
+// target. Endpoints are continent centroids projected through the spinning sphere each frame, so
+// a shot tracks the land it belongs to and only shows while both ends face us. A small fixed pool
+// with seeded timing keeps it deterministic; `intensity` gates how many fire at once.
+
+// project a sphere-surface point (lat/lon°) through the spinning mesh + ortho camera to scope px.
+// Mirrors three.js SphereGeometry's UV→position and the equirectangular texture mapping, so a
+// continent's projected centroid sits exactly on its painted territory. front = comfortably faces us.
+const PL_project = (latC, lonC, rotY, cx, cy, r) => {
+  const phi = lonC * PL_D, cl = Math.cos(latC * PL_D);
+  const x = -Math.cos(phi) * cl, y = Math.sin(latC * PL_D), z = Math.sin(phi) * cl;
+  const xr = x * Math.cos(rotY) + z * Math.sin(rotY), zr = -x * Math.sin(rotY) + z * Math.cos(rotY);
+  return { x: cx + xr * r, y: cy - y * r, z: zr, front: zr > 0.12 };
+};
+// who holds each continent at the eased conquered fraction — a span (faction) or null (= unclaimed
+// purple Tyranid ground). Same ownership rule the texture paint uses.
+const PL_ownerByContinent = (world, spans, conq) => world.continents.map(c => {
+  const mid = (c.a + c.b) / 2, straddles = c.a < conq && c.b > conq;
+  if (c.b <= conq) return PL_ownerAt(spans, Math.min(mid, conq - 1e-6));
+  if (straddles) return PL_ownerAt(spans, Math.min(conq - 1e-6, c.b)) || spans[spans.length - 1] || null;
+  return null;
+});
+
+const PL_buildFire = (seed) => {
   const fr = mulberry32(hashStr('mc-war-fire|' + (seed || todayStr())));
-  const pick = () => poolColors.length ? poolColors[Math.floor(fr() * poolColors.length)] : dangerHex;
   const fire = [];
   for (let s = 0; s < 6; s++) {                                                     // a fixed pool; intensity gates how many fire
-    const a0 = fr() * Math.PI * 2, rad0 = (0.22 + fr() * 0.6) * r;
-    const a1 = a0 + (0.55 + fr() * 0.7) * Math.PI * (fr() < 0.5 ? 1 : -1), rad1 = (0.22 + fr() * 0.6) * r;
-    const S = [cx + Math.cos(a0) * rad0, cy + Math.sin(a0) * rad0];
-    const T = [cx + Math.cos(a1) * rad1, cy + Math.sin(a1) * rad1];
-    const mx = (S[0] + T[0]) / 2, my = (S[1] + T[1]) / 2, chord = Math.hypot(T[0] - S[0], T[1] - S[1]) || 1;
-    let ox = mx - cx, oy = my - cy, ol = Math.hypot(ox, oy);
-    if (ol < 1e-3) { ox = -(T[1] - S[1]); oy = T[0] - S[0]; ol = chord; }
-    const lift = chord * 0.22 + r * 0.14, P = [mx + (ox / ol) * lift, my + (oy / ol) * lift];
-    const beam = fr() < 0.30, flight = 1150 + fr() * 850;
-    fire.push({ s, S, P, T, flight, beam, beamDur: 260 + fr() * 170, baseGap: 5200 + fr() * 4200, phase: fr() * 8000, col: pick() });
+    const flight = 1150 + fr() * 850, beam = fr() < 0.28, cycle = 3200 + fr() * 3800; // cycle FIXED per channel → stable picks
+    fire.push({ s, flight, beam, beamDur: 260 + fr() * 170, cycle, phase: fr() * 8000, _pi: -1, valid: false });
   }
   return fire;
 };
 const PL_bez = (A, B, C, p) => { const u = 1 - p; return [u * u * A[0] + 2 * u * p * B[0] + p * p * C[0], u * u * A[1] + 2 * u * p * B[1] + p * p * C[1]]; };
 const PL_easeOut = (p) => 1 - (1 - p) * (1 - p);                                     // gentle deceleration on flight/impact
-const PL_drawFx = (ctx, t, fire, size, intensity, alertMix, reduced, dangerHex, limbHex, cx, cy, r) => {
+// deterministic [0,1) from two ints — the per-channel, per-cycle pick stream (no Math.random)
+const PL_rand2 = (a, b) => { let h = (Math.imul(a | 0, 374761393) + Math.imul(b | 0, 668265263)) >>> 0; h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+
+// ─── orbital fleet ───────────────────────────────────────────────────────────────────────
+// A few capital ships on a tilted low orbit (seeded per day). Each fires a lance down onto the
+// purple Tyranid ground every several seconds. Pure 2D vector on the fx overlay (no WebGL).
+const PL_buildFleet = (seed) => {
+  const fr = mulberry32(hashStr('mc-war-fleet|' + (seed || todayStr())));
+  const ships = [];
+  for (let i = 0; i < 3; i++) ships.push({ i, phase: fr() * Math.PI * 2, speed: 0.015 + fr() * 0.015,
+    scale: 0.85 + fr() * 0.5, lancePhase: fr() * 9000, lanceGap: 6000 + fr() * 5000, lanceDur: 650 + fr() * 450, tgtK: -1, _li: -1 });
+  return { ships };
+};
+// a capital-ship silhouette (bone hull, dark edge, engine glow at the stern), nose along travel
+const PL_ship = (ctx, sx, sy, ang, len, hull, glow, size) => {
+  const W = len * 0.34;
+  ctx.save(); ctx.translate(sx, sy); ctx.rotate(ang);
+  ctx.beginPath();
+  ctx.moveTo(len * 0.5, 0); ctx.lineTo(len * 0.1, -W * 0.5); ctx.lineTo(-len * 0.5, -W * 0.42);
+  ctx.lineTo(-len * 0.5, W * 0.42); ctx.lineTo(len * 0.1, W * 0.5); ctx.closePath();
+  ctx.fillStyle = hull; ctx.fill();
+  ctx.lineWidth = Math.max(0.6, size * 0.005); ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.stroke();
+  ctx.beginPath(); ctx.arc(-len * 0.5, 0, W * 0.34, 0, 7); ctx.fillStyle = glow; ctx.shadowColor = glow; ctx.shadowBlur = size * 0.03; ctx.fill(); ctx.shadowBlur = 0;
+  ctx.restore();
+};
+
+// ─── Tyranid counter-attack ──────────────────────────────────────────────────────────────
+// The unclaimed ground is never a rocket source — but it fights back ORGANICALLY: lobbed
+// bio-plasma globs from neutral front-facing land onto faction-held territory. Lumpy wobbling
+// blobs, a spore trail, and an acid-splatter impact — visibly NOT a mechanical shell. Coloured
+// from the ground itself (pal.landN) so on Health it reads as the purple Tyranid infestation.
+const PL_buildSpores = (seed) => {
+  const fr = mulberry32(hashStr('mc-war-spore|' + (seed || todayStr())));
+  const spores = [];
+  for (let s = 0; s < 4; s++) {                                                     // heavier + fewer than faction rockets
+    const flight = 1500 + fr() * 900, cycle = 4200 + fr() * 4200;
+    spores.push({ s, flight, cycle, splat: 600 + fr() * 260, phase: fr() * 9000, _pi: -1, valid: false });
+  }
+  return { spores };
+};
+// a wobbling organic outline (sinusoidal radius) — the bio-plasma "blob" silhouette
+const PL_blob = (ctx, x, y, rad, ph, lobes) => {
+  const N = 20; ctx.beginPath();
+  for (let i = 0; i <= N; i++) {
+    const a = (i / N) * Math.PI * 2;
+    const rr = rad * (1 + 0.24 * Math.sin(lobes * a + ph) + 0.12 * Math.sin(2 * lobes * a - ph * 1.3));
+    i ? ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr) : ctx.moveTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+  }
+  ctx.closePath();
+};
+// a glowing bio-plasma glob: lumpy body + a brighter inner core
+const PL_glob = (ctx, x, y, rad, ph, body, core, size) => {
+  ctx.save();
+  ctx.shadowColor = body; ctx.shadowBlur = size * 0.045;
+  ctx.fillStyle = body; ctx.globalAlpha = 0.92; PL_blob(ctx, x, y, rad, ph, 3); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = core; ctx.globalAlpha = 0.95; PL_blob(ctx, x, y, rad * 0.5, -ph * 1.2, 2); ctx.fill();
+  ctx.restore(); ctx.globalAlpha = 1;
+};
+
+const PL_drawFx = (ctx, t, fire, size, intensity, alertMix, reduced, dangerHex, limbHex, cx, cy, r, world, rotY, spans, conq, fleet, accentHex, spores, tyrHex) => {
   const dpr = ctx._dpr || 1;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, size, size);
   // crisp limb ring (carries the eased green→red alert tint), sells the sphere edge
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7);
   ctx.lineWidth = 1.4; ctx.strokeStyle = PL_mix(limbHex, dangerHex, alertMix); ctx.globalAlpha = 0.9; ctx.stroke(); ctx.globalAlpha = 1;
-  const IMPACT = 560, SLOTS = Math.round(2 + intensity * 2.2);
+
+  // resolve the battlefield: who holds each continent, and which ones currently face us. Launch
+  // sites = faction-held + front; targets = ANY front continent not held by the firing faction
+  // (so factions hit the purple Tyranid ground AND each other; the ground never launches).
+  const conts = (world && world.continents) || [];
+  const owners = (conts.length && spans) ? PL_ownerByContinent(world, spans, conq) : [];
+  const proj = conts.map(c => PL_project(c.latC, c.lonC, rotY, cx, cy, r));
+  const srcIdx = [], frontIdx = [];
+  for (let i = 0; i < conts.length; i++) { if (!proj[i].front) continue; frontIdx.push(i); if (owners[i]) srcIdx.push(i); }
+
+  const IMPACT = 560, SLOTS = Math.max(1, Math.round(1 + intensity * 1.1));
   const arc = (A, B, C, p0, p1, n, w, col, alpha) => {
     ctx.beginPath(); for (let i = 0; i <= n; i++) { const q = PL_bez(A, B, C, p0 + (p1 - p0) * (i / n)); i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); }
     ctx.lineWidth = w; ctx.strokeStyle = col; ctx.globalAlpha = alpha; ctx.lineCap = 'round'; ctx.stroke(); ctx.globalAlpha = 1;
   };
   fire.forEach((m, idx) => {
-    if (idx >= SLOTS && !reduced) return;
-    const col = alertMix > 0.5 ? dangerHex : m.col;
+    const period = Math.max(m.beam ? 2600 : m.flight + IMPACT + 600, m.cycle);
+    const pi = Math.floor((t + m.phase) / period);
+    if (m._pi !== pi) {                                                             // new cycle → choose a fresh shot
+      m._pi = pi; m.valid = false;
+      if (srcIdx.length && (idx < SLOTS || reduced)) {
+        const sI = srcIdx[Math.floor(PL_rand2(m.s + 11, pi) * srcIdx.length)], F = owners[sI];
+        const enemies = frontIdx.filter(j => j !== sI && (!owners[j] || owners[j].color !== F.color));
+        if (enemies.length) {
+          const tI = enemies[Math.floor(PL_rand2(m.s + 23, pi) * enemies.length)];
+          m.src = { lat: conts[sI].latC, lon: conts[sI].lonC }; m.tgt = { lat: conts[tI].latC, lon: conts[tI].lonC }; m.col = F.color; m.valid = true;
+        }
+      }
+    }
+    if (!m.valid || (idx >= SLOTS && !reduced)) return;
+
+    const sp = PL_project(m.src.lat, m.src.lon, rotY, cx, cy, r), tp = PL_project(m.tgt.lat, m.tgt.lon, rotY, cx, cy, r);
+    if (sp.z <= 0.03 || tp.z <= 0.03) return;                                       // a shot only shows while in view
+    const S = [sp.x, sp.y], T = [tp.x, tp.y], col = alertMix > 0.5 ? dangerHex : m.col;
+    const mx = (S[0] + T[0]) / 2, my = (S[1] + T[1]) / 2, chord = Math.hypot(T[0] - S[0], T[1] - S[1]) || 1;
+    let ox = mx - cx, oy = my - cy, ol = Math.hypot(ox, oy);
+    if (ol < 1e-3) { ox = -(T[1] - S[1]); oy = T[0] - S[0]; ol = chord; }
+    const lift = chord * 0.20 + r * 0.10, P = [mx + (ox / ol) * lift, my + (oy / ol) * lift];
+
     if (reduced) {                                                                  // static fallback
-      arc(m.S, m.P, m.T, 0, 1, 18, Math.max(0.8, size * 0.008), col, 0.5);
-      ctx.beginPath(); ctx.arc(m.T[0], m.T[1], Math.max(1.4, size * 0.014), 0, 7); ctx.fillStyle = col; ctx.globalAlpha = 0.8; ctx.fill(); ctx.globalAlpha = 1;
+      arc(S, P, T, 0, 1, 18, Math.max(0.8, size * 0.008), col, 0.5);
+      ctx.beginPath(); ctx.arc(T[0], T[1], Math.max(1.4, size * 0.014), 0, 7); ctx.fillStyle = col; ctx.globalAlpha = 0.8; ctx.fill(); ctx.globalAlpha = 1;
       return;
     }
-    const period = Math.max(m.beam ? 2600 : m.flight + IMPACT + 600, m.baseGap / (0.55 + intensity * 0.55));
     const tt = (t + m.phase) % period;
     ctx.save(); ctx.shadowColor = col;
     if (m.beam) {
       if (tt < m.beamDur) {
         const k = tt / m.beamDur, op = 1 - k;
         ctx.shadowBlur = size * 0.05;
-        ctx.beginPath(); ctx.moveTo(m.S[0], m.S[1]); ctx.lineTo(m.T[0], m.T[1]);
+        ctx.beginPath(); ctx.moveTo(S[0], S[1]); ctx.lineTo(T[0], T[1]);
         ctx.lineWidth = Math.max(1, size * 0.012 * op); ctx.strokeStyle = col; ctx.globalAlpha = 0.5 + op * 0.45; ctx.lineCap = 'round'; ctx.stroke();
-        ctx.shadowBlur = 0; ctx.beginPath(); ctx.moveTo(m.S[0], m.S[1]); ctx.lineTo(m.T[0], m.T[1]);
+        ctx.shadowBlur = 0; ctx.beginPath(); ctx.moveTo(S[0], S[1]); ctx.lineTo(T[0], T[1]);
         ctx.lineWidth = Math.max(0.5, size * 0.004); ctx.strokeStyle = limbHex; ctx.globalAlpha = op * 0.85; ctx.stroke(); ctx.globalAlpha = 1;
-        ctx.beginPath(); ctx.arc(m.T[0], m.T[1], Math.max(1.5, size * 0.02) * op, 0, 7); ctx.fillStyle = limbHex; ctx.globalAlpha = op; ctx.fill(); ctx.globalAlpha = 1;
+        ctx.beginPath(); ctx.arc(T[0], T[1], Math.max(1.5, size * 0.02) * op, 0, 7); ctx.fillStyle = limbHex; ctx.globalAlpha = op; ctx.fill(); ctx.globalAlpha = 1;
       }
     } else if (tt < m.flight) {                                                     // arcing warhead + comet trail
-      const p = PL_easeOut(tt / m.flight), tail = Math.max(0, p - 0.45), h = PL_bez(m.S, m.P, m.T, p), hr = Math.max(1.3, size * 0.014);
-      ctx.shadowBlur = size * 0.045; arc(m.S, m.P, m.T, tail, p, 14, Math.max(0.8, size * 0.008), col, 0.42);
-      ctx.shadowBlur = 0; arc(m.S, m.P, m.T, tail + (p - tail) * 0.55, p, 9, Math.max(1, size * 0.012), col, 0.9);
-      arc(m.S, m.P, m.T, tail + (p - tail) * 0.72, p, 5, Math.max(0.5, size * 0.0045), limbHex, 0.85);
+      const p = PL_easeOut(tt / m.flight), tail = Math.max(0, p - 0.45), h = PL_bez(S, P, T, p), hr = Math.max(1.3, size * 0.014);
+      ctx.shadowBlur = size * 0.045; arc(S, P, T, tail, p, 14, Math.max(0.8, size * 0.008), col, 0.42);
+      ctx.shadowBlur = 0; arc(S, P, T, tail + (p - tail) * 0.55, p, 9, Math.max(1, size * 0.012), col, 0.9);
+      arc(S, P, T, tail + (p - tail) * 0.72, p, 5, Math.max(0.5, size * 0.0045), limbHex, 0.85);
       ctx.beginPath(); ctx.arc(h[0], h[1], hr, 0, 7); ctx.fillStyle = col; ctx.fill();
       ctx.beginPath(); ctx.arc(h[0], h[1], hr * 0.42, 0, 7); ctx.fillStyle = limbHex; ctx.fill();
     } else {                                                                        // impact: expanding ring + bloom
       const it = tt - m.flight;
       if (it < IMPACT) {
         const k = PL_easeOut(it / IMPACT), rad = Math.max(1.5, size * 0.012) + k * size * 0.07, op = 1 - k;
-        ctx.beginPath(); ctx.arc(m.T[0], m.T[1], rad, 0, 7); ctx.lineWidth = Math.max(1, size * 0.012 * op); ctx.strokeStyle = col; ctx.globalAlpha = op; ctx.stroke();
-        ctx.shadowBlur = size * 0.05; ctx.beginPath(); ctx.arc(m.T[0], m.T[1], Math.max(1.6, size * 0.022) * op, 0, 7); ctx.fillStyle = limbHex; ctx.globalAlpha = op; ctx.fill(); ctx.globalAlpha = 1;
+        ctx.beginPath(); ctx.arc(T[0], T[1], rad, 0, 7); ctx.lineWidth = Math.max(1, size * 0.012 * op); ctx.strokeStyle = col; ctx.globalAlpha = op; ctx.stroke();
+        ctx.shadowBlur = size * 0.05; ctx.beginPath(); ctx.arc(T[0], T[1], Math.max(1.6, size * 0.022) * op, 0, 7); ctx.fillStyle = limbHex; ctx.globalAlpha = op; ctx.fill(); ctx.globalAlpha = 1;
       }
     }
     ctx.restore();
   });
+
+  // fleet orbit (shared with the render block below): semi-axes + a ship's live screen position.
+  // `behind` = hidden over the top of the planet, so the Tyranids can't reach it with a lob.
+  const flA = size * 0.47, flB = size * 0.34;
+  const PL_shipPos = (sh) => {
+    const th = sh.phase + (t / 1000) * sh.speed, sn = Math.sin(th);
+    const sx = cx + flA * Math.cos(th), sy = cy + flB * sn;
+    return { sx, sy, sn, behind: sn < -0.02 && Math.hypot(sx - cx, sy - cy) < r * 0.97 };
+  };
+
+  // ── Tyranid organic counter-attack: the unclaimed (purple) front-facing ground NEVER launches a
+  // rocket, but it lobs bio-plasma globs BACK — onto faction-held land if any faces us, otherwise UP
+  // at the orbiting fleet that's bombarding it. Wobbling blob + spore trail + acid splatter, coloured
+  // from the ground itself (tyrHex) so it reads as the infestation hitting back. A fully-infested world
+  // (no faction land at all) fights hardest: every spore channel goes active against the ships.
+  const neutralFront = frontIdx.filter(j => !owners[j]);
+  const hasFleet = !!(fleet && fleet.ships && fleet.ships.length);
+  if (spores && spores.spores && neutralFront.length && (srcIdx.length || hasFleet)) {
+    const allTyranid = !srcIdx.length;                                            // nothing conquered → spit skyward, full barrage
+    const SP_SLOTS = allTyranid ? spores.spores.length : Math.max(1, Math.round(intensity * 0.9));
+    const tyrCore = PL_mix(tyrHex, limbHex, 0.55);
+    spores.spores.forEach((m, idx) => {
+      const period = Math.max(m.flight + m.splat + 700, m.cycle);
+      const pi = Math.floor((t + m.phase) / period);
+      if (m._pi !== pi) {                                                          // new cycle → pick a fresh lob (neutral land → faction land OR a ship)
+        m._pi = pi; m.valid = false; m.tgtShip = -1;
+        if (idx < SP_SLOTS || reduced) {
+          const sI = neutralFront[Math.floor(PL_rand2(m.s + 41, pi) * neutralFront.length)];
+          m.src = { lat: conts[sI].latC, lon: conts[sI].lonC };
+          if (srcIdx.length) {                                                     // faction land to hit
+            const tI = srcIdx[Math.floor(PL_rand2(m.s + 57, pi) * srcIdx.length)];
+            m.tgt = { lat: conts[tI].latC, lon: conts[tI].lonC }; m.valid = true;
+          } else if (hasFleet) {                                                   // no land → target a ship in orbit
+            m.tgtShip = Math.floor(PL_rand2(m.s + 73, pi) * fleet.ships.length); m.valid = true;
+          }
+        }
+      }
+      if (!m.valid || (idx >= SP_SLOTS && !reduced)) return;
+      const sp = PL_project(m.src.lat, m.src.lon, rotY, cx, cy, r);
+      if (sp.z <= 0.03) return;                                                    // source rotated out of view
+      let T;
+      if (m.tgtShip >= 0) {                                                        // lob UP at the orbiting ship (live position)
+        const pos = PL_shipPos(fleet.ships[m.tgtShip]);
+        if (pos.behind) return;                                                    // can't reach a ship hidden behind the planet
+        T = [pos.sx, pos.sy];
+      } else {
+        const tp = PL_project(m.tgt.lat, m.tgt.lon, rotY, cx, cy, r);
+        if (tp.z <= 0.03) return;
+        T = [tp.x, tp.y];
+      }
+      const S = [sp.x, sp.y];
+      const mx = (S[0] + T[0]) / 2, my = (S[1] + T[1]) / 2, chord = Math.hypot(T[0] - S[0], T[1] - S[1]) || 1;
+      let ox = mx - cx, oy = my - cy, ol = Math.hypot(ox, oy);
+      if (ol < 1e-3) { ox = -(T[1] - S[1]); oy = T[0] - S[0]; ol = chord; }
+      const lift = chord * 0.30 + r * 0.16, P = [mx + (ox / ol) * lift, my + (oy / ol) * lift];   // heavier lob arc than rockets
+      const gr = Math.max(1.6, size * 0.019);
+      if (reduced) {                                                              // static fallback: a few trail dots + the glob at rest on the target
+        ctx.globalAlpha = 0.45; ctx.fillStyle = tyrHex;
+        for (let k = 0; k <= 4; k++) { const q = PL_bez(S, P, T, k / 4); ctx.beginPath(); ctx.arc(q[0], q[1], gr * 0.4, 0, 7); ctx.fill(); }
+        ctx.globalAlpha = 1; PL_glob(ctx, T[0], T[1], gr, m.s, tyrHex, tyrCore, size);
+        return;
+      }
+      const tt = (t + m.phase) % period;
+      if (tt < m.flight) {                                                        // lobbing glob + dribbling spore trail
+        const p = PL_easeOut(tt / m.flight), h = PL_bez(S, P, T, p), ph = (t + m.phase) * 0.012 + m.s;
+        for (let k = 1; k <= 3; k++) { const q = PL_bez(S, P, T, Math.max(0, p - k * 0.07)); ctx.globalAlpha = 0.3 * (1 - k / 4); ctx.fillStyle = tyrHex; ctx.beginPath(); ctx.arc(q[0], q[1], gr * (0.55 - k * 0.08), 0, 7); ctx.fill(); }
+        ctx.globalAlpha = 1; PL_glob(ctx, h[0], h[1], gr, ph, tyrHex, tyrCore, size);
+      } else {                                                                    // acid splatter on impact
+        const it = tt - m.flight;
+        if (it < m.splat) {
+          const k = PL_easeOut(it / m.splat), op = 1 - k;
+          ctx.save(); ctx.shadowColor = tyrHex; ctx.shadowBlur = size * 0.04;
+          ctx.globalAlpha = op * 0.45; ctx.fillStyle = tyrHex; ctx.beginPath(); ctx.arc(T[0], T[1], Math.max(2, size * 0.02) + k * size * 0.035, 0, 7); ctx.fill();
+          ctx.shadowBlur = 0;
+          for (let b = 0; b < 6; b++) { const a = b / 6 * Math.PI * 2 + m.s, d = k * size * 0.06; ctx.globalAlpha = op * 0.85; ctx.fillStyle = b % 2 ? tyrCore : tyrHex; ctx.beginPath(); ctx.arc(T[0] + Math.cos(a) * d, T[1] + Math.sin(a) * d, Math.max(1, size * 0.011) * op, 0, 7); ctx.fill(); }
+          ctx.globalAlpha = 1; ctx.restore();
+        }
+      }
+    });
+  }
+
+  // ── orbital fleet: ships ride a tilted low orbit (A wide, B short). On the near/bottom arc they
+  // cross in front of the planet; over the top they slip behind it. Each fires a lance straight
+  // down onto the purple Tyranid ground (front-facing neutral land) every several seconds.
+  if (fleet && fleet.ships) {
+    const A = flA, B = flB;                                                       // higher orbit in the freed annulus; ships ring outside the (smaller) limb, dip behind over the top
+    const tgtPool = neutralFront.length ? neutralFront : frontIdx;                // reuse the hoisted neutralFront
+    fleet.ships.forEach(sh => {
+      const th = sh.phase + (t / 1000) * sh.speed, sn = Math.sin(th);
+      const sx = cx + A * Math.cos(th), sy = cy + B * sn, dist = Math.hypot(sx - cx, sy - cy);
+      const behind = sn < -0.02 && dist < r * 0.97;                               // hidden behind the planet over the top
+      if (!reduced && tgtPool.length && !behind) {                               // lance bombardment from this ship
+        const li = Math.floor((t + sh.lancePhase) / sh.lanceGap);
+        if (sh._li !== li) { sh._li = li; sh.tgtK = tgtPool[Math.floor(PL_rand2(sh.i + 31, li) * tgtPool.length)]; }
+        const lt = (t + sh.lancePhase) % sh.lanceGap, tp = sh.tgtK >= 0 ? proj[sh.tgtK] : null;
+        if (tp && tp.z > 0.03 && lt < sh.lanceDur) {
+          const op = Math.sin(Math.PI * (lt / sh.lanceDur)), lcol = alertMix > 0.5 ? dangerHex : accentHex;
+          ctx.save(); ctx.shadowColor = lcol; ctx.shadowBlur = size * 0.05;
+          ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(tp.x, tp.y);
+          ctx.lineWidth = Math.max(1, size * 0.014 * op); ctx.strokeStyle = lcol; ctx.globalAlpha = 0.5 * op; ctx.lineCap = 'round'; ctx.stroke();
+          ctx.shadowBlur = 0; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(tp.x, tp.y);
+          ctx.lineWidth = Math.max(0.5, size * 0.005); ctx.strokeStyle = limbHex; ctx.globalAlpha = 0.9 * op; ctx.stroke();
+          ctx.beginPath(); ctx.arc(tp.x, tp.y, Math.max(1.5, size * 0.028) * op, 0, 7); ctx.fillStyle = limbHex; ctx.shadowColor = lcol; ctx.shadowBlur = size * 0.05; ctx.globalAlpha = op; ctx.fill();
+          ctx.globalAlpha = 1; ctx.shadowBlur = 0; ctx.restore();
+        }
+      }
+      if (behind) return;
+      const ang = Math.atan2(B * Math.cos(th), -A * sn), len = Math.max(7, size * 0.085) * sh.scale;
+      ctx.globalAlpha = sn < 0 ? 0.6 : 1;                                          // far (top) arc dimmer for depth
+      PL_ship(ctx, sx, sy, ang, len, dangerHex, limbHex, size);                    // red hull, white-hot engine glow
+      ctx.globalAlpha = 1;
+    });
+  }
 };
 
 // ─── scanner-scope HUD chrome (static vector overlay) ────────────────────────────────────
@@ -686,7 +900,7 @@ const WarPlanet = (props) => {
     const glCanvas = glRef.current, fxCanvas = fxRef.current;
     if (!THREE || !glCanvas || !fxCanvas) { S.current.noGL = !THREE; return; }
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const r = size * 0.37, cx = size / 2, cy = size / 2;
+    const r = size * 0.38, cx = size / 2, cy = size / 2;
 
     // palette resolved from the live theme (or harness vars) → hex for three + canvas
     const pal = {
@@ -715,7 +929,7 @@ const WarPlanet = (props) => {
     else if ('outputEncoding' in renderer) renderer.outputEncoding = THREE.sRGBEncoding;
 
     const scene = new THREE.Scene();
-    const fH = 1 / 0.74;                                                            // ortho half-frustum → sphere = 0.37·size
+    const fH = 1 / 0.76;                                                            // ortho half-frustum → sphere = 0.38·size (smaller, leaves an annulus for the fleet)
     const cam = new THREE.OrthographicCamera(-fH, fH, fH, -fH, 0.1, 10); cam.position.set(0, 0, 3); cam.lookAt(0, 0, 0);
 
     const tex = new THREE.CanvasTexture(texCanvas);
@@ -750,14 +964,15 @@ const WarPlanet = (props) => {
     fxCanvas.width = size * dpr; fxCanvas.height = size * dpr; fxCanvas.style.width = fxCanvas.style.height = size + 'px';
     const fctx = fxCanvas.getContext('2d'); fctx._dpr = dpr;
 
-    const facHues = (data || []).filter(d => !d.neutral && d.value > 0).map(d => PL_resolve(d.color)).filter(Boolean);
-    const fire = PL_buildFire(seed, cx, cy, r, facHues, pal.danger);
+    const fire = PL_buildFire(seed);                                               // strikes anchor to live territory; colour comes from the firing faction's span
+    const fleet = PL_buildFleet(seed);                                             // orbital capital ships + their lance bombardment
+    const spores = PL_buildSpores(seed);                                           // Tyranid organic counter-attack: neutral ground lobs bio-plasma back
 
     const st = S.current;
     st.renderer = renderer; st.scene = scene; st.cam = cam; st.mesh = mesh; st.mat = mat;
     st.atmoMat = atmoMat; st.tex = tex; st.heightTex = heightTex; st.normalTex = normalTex; st.geo = geo; st.atmo = atmo; st.tctx = tctx; st.TW = TW; st.TH = TH;
     st.renderFrame = renderFrame; st.rt = rt; st.bayerTex = bayerTex; st.postMat = postMat; st.quad = quad;
-    st.world = world; st.pal = pal; st.hatches = hatches; st.fire = fire; st.fctx = fctx;
+    st.world = world; st.pal = pal; st.hatches = hatches; st.fire = fire; st.fleet = fleet; st.spores = spores; st.fctx = fctx;
     st.cx = cx; st.cy = cy; st.r = r; st.size = size; st.dpr = dpr; st.noGL = false;
     st.conqDisplay = conqTarget; st.conqTarget = conqTarget;
     st.alertMix = alert ? 1 : 0; st.alertTarget = alert ? 1 : 0;
@@ -785,14 +1000,14 @@ const WarPlanet = (props) => {
       mesh.rotation.y += dt * SPIN; atmo.rotation.y = mesh.rotation.y;
       renderFrame();
       const intensity = (st.alertTarget ? 1.0 : 0.45) + st.conqDisplay * 0.9;
-      PL_drawFx(fctx, t, fire, size, intensity, st.alertMix, false, pal.danger, pal.bone, cx, cy, r);
+      PL_drawFx(fctx, t, fire, size, intensity, st.alertMix, false, pal.danger, pal.bone, cx, cy, r, st.world, mesh.rotation.y, st.spans, st.conqDisplay, st.fleet, pal.accent, st.spores, pal.landN);
       raf = requestAnimationFrame(frame);
     };
 
     if (reduced) {
       mesh.rotation.y = 0.5; renderFrame();
       const intensity = (st.alertTarget ? 1.0 : 0.45) + st.conqDisplay * 0.9;
-      PL_drawFx(fctx, 0, fire, size, intensity, st.alertMix, true, pal.danger, pal.bone, cx, cy, r);
+      PL_drawFx(fctx, 0, fire, size, intensity, st.alertMix, true, pal.danger, pal.bone, cx, cy, r, st.world, mesh.rotation.y, st.spans, st.conqDisplay, st.fleet, pal.accent, st.spores, pal.landN);
     } else {
       const onVis = () => { if (document.hidden) { if (raf) cancelAnimationFrame(raf), raf = 0; } else if (!raf) { last = 0; raf = requestAnimationFrame(frame); } };
       document.addEventListener('visibilitychange', onVis);
@@ -823,7 +1038,9 @@ const WarPlanet = (props) => {
       st.applyAlert && st.applyAlert(); st.repaint && st.repaint();
       st.renderFrame();
       const intensity = (st.alertTarget ? 1.0 : 0.45) + st.conqDisplay * 0.9;
-      PL_drawFx(st.fctx, 0, st.fire, st.size, intensity, st.alertMix, true, st.pal.danger, st.pal.bone, st.cx, st.cy, st.r);
+      st.fire.forEach(m => { m._pi = -1; });                                          // ownership changed → re-pick on redraw
+      st.spores && st.spores.spores.forEach(m => { m._pi = -1; });
+      PL_drawFx(st.fctx, 0, st.fire, st.size, intensity, st.alertMix, true, st.pal.danger, st.pal.bone, st.cx, st.cy, st.r, st.world, st.mesh ? st.mesh.rotation.y : 0.5, st.spans, st.conqDisplay, st.fleet, st.pal.accent, st.spores, st.pal.landN);
     }
     // eslint-disable-next-line
   }, [dataSig, alert]);
@@ -840,7 +1057,7 @@ const WarPlanet = (props) => {
       <div aria-hidden="true" style={{ position: 'absolute', inset: '-8%', background: atmoCss, opacity: alert ? 0.4 : 0.22, filter: 'blur(3px)', transition: 'opacity .4s ease', pointerEvents: 'none' }} />
       <canvas key={'gl|' + glKey} ref={glRef} width={size} height={size} style={{ position: 'absolute', inset: 0, width: size, height: size, display: 'block' }} />
       <canvas key={'fx|' + glKey} ref={fxRef} style={{ position: 'absolute', inset: 0, width: size, height: size, display: 'block' }} />
-      <PL_Hud size={size} accent2={accent2} />
+      <PL_Hud size={size} accent2={accent2} grid={false} />
     </div>
   );
 };
