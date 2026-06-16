@@ -74,6 +74,9 @@
 
     <div class="row-title">Scope frame · standalone chrome</div>
     <div class="grid" id="row-frame"></div>
+
+    <div class="row-title">Scope frame · fluid (calendar month grid + density bars)</div>
+    <div class="grid" id="row-fluid"></div>
   </div>
 
   <!-- libs: React + three.js UMD (global THREE) + Babel, as the app loads them -->
@@ -178,6 +181,34 @@
       { lbl: 'circle', comp: ScopeFrame, props: { size: 130, accent2: resolve('var(--accent-2)'), shape: 'circle' } },
       { lbl: 'square', comp: ScopeFrame, props: { size: 130, accent2: resolve('var(--accent-2)'), shape: 'square' } },
     ]);
+
+    // ── ScopeFrameFluid — responsive rectangular frame wrapping a mock calendar month grid ──
+    const SFF = window.MCViz.ScopeFrameFluid;
+    const BAR = ['var(--accent)', 'var(--accent-2)', 'var(--warn)', 'var(--danger)', 'var(--violet)', 'var(--info)'];
+    const FluidDemo = () => {
+      const cells = Array.from({ length: 35 }, (_, i) => (i < 3 || i > 31) ? 0 : (i % 7 === 0 ? 5 : i % 3 === 0 ? 2 : i % 4 === 0 ? 8 : i % 5 === 0 ? 1 : 0));
+      const grid = (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 3 }}>
+          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => <div key={'h' + i} style={{ textAlign: 'center', color: 'var(--ink-4)', fontFamily: 'var(--font-mono)', fontSize: 10.5, paddingBottom: 4 }}>{d}</div>)}
+          {cells.map((n, i) => (
+            <div key={i} style={{ minHeight: 48, padding: '5px 4px', borderRadius: 6, background: n ? 'var(--surface-2)' : 'transparent', border: '1px solid transparent' }}>
+              <div className="mono" style={{ fontSize: 12, textAlign: 'center', color: 'var(--ink-3)' }}>{i + 1}</div>
+              <div style={{ display: 'flex', gap: 2, flexWrap: 'nowrap', justifyContent: 'center', alignItems: 'flex-end', marginTop: 4, height: 9 }}>
+                {Array.from({ length: Math.min(6, n) }).map((_, j) => <span key={j} style={{ width: 3, height: 9, borderRadius: 1, background: BAR[(i + j) % BAR.length], boxShadow: `0 0 3px ${BAR[(i + j) % BAR.length]}` }} />)}
+                {n > 6 && <span className="mono" style={{ fontSize: 8, color: 'var(--ink-4)', marginLeft: 1 }}>+{n - 6}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+      return SFF ? <SFF accent="var(--accent-2)">{grid}</SFF> : grid;
+    };
+    const frow = document.getElementById('row-fluid');
+    const fcard = document.createElement('div'); fcard.className = 'card'; fcard.style.width = '380px'; fcard.style.alignItems = 'stretch';
+    const fhost = document.createElement('div'); fhost.style.width = '100%';
+    const flbl = document.createElement('div'); flbl.className = 'lbl'; flbl.textContent = 'month grid · framed + density bars';
+    fcard.appendChild(fhost); fcard.appendChild(flbl); frow.appendChild(fcard);
+    ReactDOM.createRoot(fhost).render(React.createElement(FluidDemo));
   })();
   </script>
 </body>

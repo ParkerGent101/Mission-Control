@@ -353,16 +353,6 @@
     .grid > * { grid-column: span 12 !important; }
   }
 
-  /* ─── Agenda grid ──────────────────────── */
-  .agenda-grid {
-    display: grid;
-    grid-template-columns: 1.1fr 1.1fr 1fr;
-  }
-  @media (max-width: 900px) {
-    .agenda-grid { grid-template-columns: 1fr; }
-    .agenda-grid > div { border-right: none !important; border-bottom: 1px solid var(--line-soft); }
-    .agenda-grid > div:last-child { border-bottom: none; }
-  }
 
   /* ─── Talk grid ─────────────────────────── */
   .talk-grid {
@@ -511,7 +501,6 @@
     /* Bigger touch targets */
     .btn { padding: 7px 12px; min-height: 36px; }
     .txn { padding: 8px 2px; }
-    .agenda-row { padding: 8px 4px; gap: 8px; }
     .checkbox { width: 22px; height: 22px; }
 
     /* Finance */
@@ -773,17 +762,6 @@
   .mini-bar { height: 4px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin-top: 4px; grid-column: 1 / -1; }
   .mini-bar .fill { height: 100%; transition: width .4s ease; }
 
-  .agenda-row {
-    display: grid;
-    grid-template-columns: 64px 22px 1fr auto;
-    gap: 10px;
-    align-items: center;
-    padding: 7px 8px;
-    border-radius: var(--r);
-  }
-  .agenda-row:hover { background: var(--surface-2); }
-  .agenda-time { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); }
-  .agenda-row.done .agenda-label { color: var(--ink-3); text-decoration: line-through; }
 
   .checkbox {
     width: 16px; height: 16px;
@@ -1274,19 +1252,12 @@
   }
   .brief-x:hover { color: var(--ink); background: var(--surface-2); }
 
-  /* ─── Today hub ─────────────────────────────────────────────── */
-  .today-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 20px;
-  }
 
   @media (max-width: 768px) {
     .talk-bar {
       bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 8px);
       left: 10px; right: 10px;
     }
-    .today-grid { grid-template-columns: 1fr; }
     .finance-body { grid-template-columns: 1fr !important; }
   }
 

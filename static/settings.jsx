@@ -20,12 +20,9 @@ const ST_SECTIONS = [
 ];
 
 const MODULE_LIST = [
-  { id: "agenda",   label: "Today / Agenda",   icon: "calendar" },
   { id: "finance",  label: "Finance",           icon: "wallet" },
   { id: "band",     label: "Band",              icon: "music" },
   { id: "health",   label: "Health & Fitness",  icon: "heart" },
-  { id: "work",     label: "Work",              icon: "briefcase" },
-  { id: "activity", label: "Activity Log",      icon: "clock" },
   { id: "calendar", label: "Calendar",          icon: "calendar" },
 ];
 
@@ -463,13 +460,6 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
           ./data/
         </span>
       </FieldRow>
-      <FieldRow label="Activity Log" desc="SQLite log of recent actions (last 500 entries).">
-        <button className="btn" onClick={async () => {
-          await fetch('/api/activity', { method: 'DELETE' });
-          window.__toast?.('Activity log cleared', 'success');
-        }}>Clear log</button>
-      </FieldRow>
-
       <SectionHead style={{ marginTop: 24 }}>Danger Zone</SectionHead>
       <div className="st-danger-zone">
         <FieldRow label="Reset All Data"

@@ -436,6 +436,62 @@ const PL_ScopeFrame = (props) => {
 // back-compat alias: WarPlanet renders <PL_Hud size accent2 /> as a bare overlay (square, no children).
 const PL_Hud = PL_ScopeFrame;
 
+// ─── responsive rectangular scope frame (fluid) ──────────────────────────────────────────
+// Same scanner-scope furniture as PL_ScopeFrame, but it SIZES TO ITS CONTAINER (ResizeObserver)
+// and supports a non-square rectangle — for framing fluid layouts like the calendar month grid.
+// Drawn in real pixels (viewBox == px box, so no non-uniform stretch → corners/ticks stay crisp).
+// The overlay is pointer-events:none so the wrapped content stays clickable. No interior grid by
+// default (the wrapped content usually IS the grid); `pad` insets the content so the border/ticks
+// sit just outside it. Static (no animation) so nothing to pause / reduce-motion.
+const ScopeFrameFluid = (props) => {
+  const { accent, children } = props;
+  const ticks = props.ticks !== false, corners = props.corners !== false, border = props.border !== false;
+  const crosshair = props.crosshair === true;            // default OFF — busy over a grid
+  const pad = props.pad != null ? props.pad : 11;        // CSS inset between the frame and the content
+  const wrapRef = usePLRef(null);
+  const [dim, setDim] = usePL({ w: 0, h: 0 });
+  usePLEffect(() => {
+    const el = wrapRef.current; if (!el) return;
+    const measure = () => setDim({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    if (!window.ResizeObserver) return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const a2 = PL_resolve(accent || 'var(--accent-2)');
+  const { w, h } = dim;
+  const F = (n) => n.toFixed(1);
+  let svg = null;
+  if (w > 1 && h > 1) {
+    const m = Math.min(w, h);
+    const ip = Math.max(2, m * 0.022), x0 = ip, y0 = ip, x1 = w - ip, y1 = h - ip;
+    const bezR = Math.max(1, m * 0.01), cx = w / 2, cy = h / 2;
+    const tickN = 16, tx = (x1 - x0) / tickN, ty = (y1 - y0) / tickN;
+    svg = (
+      <svg width={w} height={h} viewBox={`0 0 ${F(w)} ${F(h)}`} style={{ position: 'absolute', inset: 0, overflow: 'visible', pointerEvents: 'none' }}>
+        {crosshair && <g stroke={a2} strokeOpacity="0.4" strokeWidth="0.8">
+          <line x1={F(x0)} y1={F(cy)} x2={F(x1)} y2={F(cy)} /><line x1={F(cx)} y1={F(y0)} x2={F(cx)} y2={F(y1)} />
+        </g>}
+        {ticks && <g stroke={a2} strokeOpacity="0.55">
+          {Array.from({ length: tickN + 1 }, (_, i) => { const x = x0 + tx * i, b = i % 4 === 0, hh = b ? m * 0.028 : m * 0.015; return <g key={'th' + i}>
+            <line x1={F(x)} y1={F(y1)} x2={F(x)} y2={F(y1 - hh)} strokeWidth={b ? 0.9 : 0.5} /><line x1={F(x)} y1={F(y0)} x2={F(x)} y2={F(y0 + hh)} strokeWidth={b ? 0.9 : 0.5} /></g>; })}
+          {Array.from({ length: tickN + 1 }, (_, i) => { const y = y0 + ty * i, b = i % 4 === 0, hh = b ? m * 0.028 : m * 0.015; return <g key={'tv' + i}>
+            <line x1={F(x0)} y1={F(y)} x2={F(x0 + hh)} y2={F(y)} strokeWidth={b ? 0.9 : 0.5} /><line x1={F(x1)} y1={F(y)} x2={F(x1 - hh)} y2={F(y)} strokeWidth={b ? 0.9 : 0.5} /></g>; })}
+        </g>}
+        {border && <g fill="none" stroke={a2}>
+          <rect x={F(x0)} y={F(y0)} width={F(x1 - x0)} height={F(y1 - y0)} rx={F(bezR)} ry={F(bezR)} strokeOpacity="0.7" strokeWidth="1.3" />
+          <rect x={F(x0 + 3)} y={F(y0 + 3)} width={F(x1 - x0 - 6)} height={F(y1 - y0 - 6)} rx={F(Math.max(0.5, bezR - 1))} ry={F(Math.max(0.5, bezR - 1))} strokeOpacity="0.3" strokeWidth="0.6" />
+        </g>}
+        {corners && (() => { const cm = Math.max(4, m * 0.045), o = Math.max(7, m * 0.06);
+          const plus = (x, y) => `M${F(x - cm)} ${F(y)}H${F(x + cm)}M${F(x)} ${F(y - cm)}V${F(y + cm)}`;
+          return <path d={[plus(x0 + o, y0 + o), plus(x1 - o, y0 + o), plus(x0 + o, y1 - o), plus(x1 - o, y1 - o)].join(' ')} fill="none" stroke={a2} strokeOpacity="0.85" strokeWidth="1.1" strokeLinecap="round" />; })()}
+      </svg>
+    );
+  }
+  return <div ref={wrapRef} style={{ position: 'relative', padding: pad }}>{children}{svg}</div>;
+};
+
 // ─── radial scanner (2D canvas radar) — no WebGL ─────────────────────────────────────────
 // A circular scope wearing the ScopeFrame circle chrome, with markers plotted at (angle 0..1
 // clockwise from top, radius 0..1), an optional rotating sweep, and/or a fixed "you are here"
@@ -810,4 +866,4 @@ const DonutChart = (props) => {
 // The same scanner-scope language the war planet wears, made available to the module cards so
 // the rest of the app reads as instruments too — all 2D (no extra WebGL contexts). Cards must
 // read window.MCViz LAZILY (inside render/effects): modules.jsx is parsed BEFORE this file.
-window.MCViz = { ScopeFrame: PL_ScopeFrame, RadialScope, ReactorGauge, resolve: PL_resolve, mix: PL_mix, clamp01: PL_clamp01 };
+window.MCViz = { ScopeFrame: PL_ScopeFrame, ScopeFrameFluid, RadialScope, ReactorGauge, resolve: PL_resolve, mix: PL_mix, clamp01: PL_clamp01 };

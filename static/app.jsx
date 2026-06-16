@@ -96,35 +96,6 @@ const parseCommand = (text) => {
                module: 'health', summary: `Habit toggled: ${args.join(' ')}` };
   }
 
-  /* ── work ── */
-  if (cmd === 'work' && rest.length) {
-    const [act, ...args] = rest;
-    const a = act.toLowerCase();
-    if (a === 'add' && args.length) {
-      const title    = args[0];
-      const priority = args.find(v => _PRIS.includes(v.toLowerCase()))?.toLowerCase() || 'normal';
-      const project  = args.find((v, i) => i > 0 && !_PRIS.includes(v.toLowerCase())) || '';
-      return { endpoint: '/api/work', method: 'POST', body: { title, project, priority },
-               module: 'work', summary: `Work task: ${title}` };
-    }
-    if (a === 'done' && args[0] && !isNaN(+args[0]))
-      return { endpoint: `/api/work/${args[0]}/done`, method: 'POST', body: {},
-               module: 'work', summary: `Work task #${args[0]} done` };
-  }
-
-  /* ── agenda ── */
-  if (cmd === 'agenda' && rest.length) {
-    const atIdx = rest.findIndex(t => t.toLowerCase() === 'at');
-    let label = rest.join(' '), time = '', tag = 'Personal';
-    if (atIdx > 0 && rest[atIdx+1]) {
-      label = rest.slice(0, atIdx).join(' ');
-      time = rest[atIdx+1];
-      tag = rest.slice(atIdx+2).join(' ') || 'Personal';
-    }
-    return { endpoint: '/api/agenda', method: 'POST', body: { label, time, tag },
-             module: 'agenda', summary: `Agenda: ${label}${time ? ' at ' + time : ''}` };
-  }
-
   /* ── remind ── */
   if (cmd === 'remind' && rest.length >= 2) {
     const onIdx = rest.findIndex(t => t.toLowerCase() === 'on');
@@ -184,17 +155,11 @@ const HELP_CMDS = [
     { cmd: 'health water 16',             desc: 'add ounces' },
     { cmd: 'health habit Lift',           desc: 'toggle habit done' },
   ]},
-  { group: 'Work', items: [
-    { cmd: 'work add "Fix SharePoint" GLS high' },
-    { cmd: 'work done 12',                desc: 'complete task #12' },
-    { cmd: 'priorities: high normal low', desc: '(last word)' },
-  ]},
   { group: 'Band', items: [
     { cmd: 'band show 2026-07-04 "Show Name" "Venue" "Rogers"' },
     { cmd: 'band contact "John Smith" "The Venue" Fayetteville' },
   ]},
   { group: 'More', items: [
-    { cmd: 'agenda "Team standup" at 09:00 Work' },
     { cmd: 'remind "Oil change" on 2026-06-15' },
   ]},
 ];
