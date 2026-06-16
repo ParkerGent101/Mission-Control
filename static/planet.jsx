@@ -259,33 +259,49 @@ const PL_paint = (ctx, W, H, world, spans, conq, pal, hatches) => {
   const copies = [-W, 0, W];
   ctx.lineJoin = 'round';
   world.continents.forEach(c => {
-    const mid = (c.a + c.b) / 2;
-    const owner = c.b <= conq ? PL_ownerAt(spans, Math.min(mid, conq - 1e-6)) : null;
+    // How much of THIS continent's conquest-range [c.a, c.b] is taken: a straddler is partly taken
+    // (its conquered island is centroid-scaled by √localConq so AREA grows linearly with conquest).
+    const e = Math.min(c.b, conq);                                                  // conquered up to here within [c.a, c.b]
+    const conquered = c.a < conq;
     const straddles = c.a < conq && c.b > conq;
     const localConq = straddles ? (conq - c.a) / (c.b - c.a) : 0;
-    const frontOwner = straddles ? (PL_ownerAt(spans, Math.min(conq - 1e-6, c.b)) || spans[spans.length - 1] || null) : null;
-    const fsc = straddles ? Math.sqrt(PL_clamp01(localConq)) : 0;
-    const frontPts = straddles ? c.pts.map(p => [c.cxp + (p[0] - c.cxp) * fsc, c.cyp + (p[1] - c.cyp) * fsc]) : null;
+    const baseScale = conquered ? (straddles ? Math.sqrt(PL_clamp01(localConq)) : 1) : 0;
+    // Split the conquered land among factions by AREA = their share of the conquered span. The macro/
+    // category spans that overlap this continent's conquered range each get a concentric ring; ring
+    // area = baseScale²·frac, so total land per faction == its calorie/spend share (disjoint across
+    // continents, but proportional overall — so protein/carbs/fat ALL read even with one continent taken).
+    const rangeLen = Math.max(1e-9, e - c.a);
+    const segs = conquered ? spans.map(s => {
+      const ov = Math.min(s.end, e) - Math.max(s.start, c.a);
+      return ov > 1e-9 ? { color: s.color, hatch: s.hatch, frac: ov / rangeLen } : null;
+    }).filter(Boolean) : [];
+    const scaleC = (s) => c.pts.map(p => [c.cxp + (p[0] - c.cxp) * s, c.cyp + (p[1] - c.cyp) * s]);
     const fillHatch = (idx, dx) => { const pat = ctx.createPattern(hatches[idx], 'repeat'); if (pat) { ctx.fillStyle = pat; ctx.fill(); } };
     const rings = PL_insets(c.pts, c.cxp, c.cyp);                                    // terrace contour lines
     copies.forEach(dx => {
-      // base unclaimed terrain + thin inter-country border
+      // base unclaimed terrain (purple Tyranid ground) + thin inter-country border
       PL_coast(ctx, c.pts, dx); ctx.fillStyle = pal.landN; ctx.fill();
       ctx.lineWidth = 1.6; ctx.strokeStyle = pal.bg; ctx.stroke();
-      if (owner) { PL_coast(ctx, c.pts, dx); ctx.fillStyle = owner.color; ctx.fill(); PL_coast(ctx, c.pts, dx); fillHatch(owner.hatch, dx); }
-      if (straddles && frontOwner && localConq > 0.004) {
-        PL_coast(ctx, frontPts, dx); ctx.fillStyle = frontOwner.color; ctx.fill();
-        PL_coast(ctx, frontPts, dx); fillHatch(frontOwner.hatch, dx);
-        PL_coast(ctx, frontPts, dx); ctx.lineWidth = 2.2; ctx.strokeStyle = pal.bone; ctx.globalAlpha = 0.9; ctx.stroke(); ctx.globalAlpha = 1;
+      // conquered land: nested overpaint, outer→inner, each faction a ring of proportional area
+      if (segs.length && baseScale > 0.02) {
+        let cum = 0;
+        segs.forEach(seg => {
+          const sIn = baseScale * Math.sqrt(Math.max(0, 1 - cum));
+          if (sIn >= 0.02) { const pts = scaleC(sIn); PL_coast(ctx, pts, dx); ctx.fillStyle = seg.color; ctx.fill(); PL_coast(ctx, pts, dx); fillHatch(seg.hatch, dx); }
+          cum += seg.frac;
+        });
+        if (straddles && localConq > 0.004) {                                       // battle-front outline around the conquered island
+          PL_coast(ctx, scaleC(baseScale), dx); ctx.lineWidth = 2.2; ctx.strokeStyle = pal.bone; ctx.globalAlpha = 0.9; ctx.stroke(); ctx.globalAlpha = 1;
+        }
       }
       // topographic contour lines (idea1 terrain scan) — inner terrace rings over the land
-      ctx.lineWidth = Math.max(0.7, H * 0.0014); ctx.strokeStyle = (owner || straddles) ? pal.bone : pal.accent2; ctx.globalAlpha = 0.4;
+      ctx.lineWidth = Math.max(0.7, H * 0.0014); ctx.strokeStyle = conquered ? pal.bone : pal.accent2; ctx.globalAlpha = 0.4;
       for (let i = 1; i < rings.length; i++) { PL_coast(ctx, rings[i], dx); ctx.stroke(); }
       ctx.globalAlpha = 1;
       // coastline / national border
       PL_coast(ctx, c.pts, dx);
-      ctx.lineWidth = (owner || straddles) ? 2.4 : 1.8; ctx.strokeStyle = (owner || straddles) ? pal.bone : pal.ink3;
-      ctx.globalAlpha = (owner || straddles) ? 0.95 : 0.8; ctx.stroke(); ctx.globalAlpha = 1;
+      ctx.lineWidth = conquered ? 2.4 : 1.8; ctx.strokeStyle = conquered ? pal.bone : pal.ink3;
+      ctx.globalAlpha = conquered ? 0.95 : 0.8; ctx.stroke(); ctx.globalAlpha = 1;
     });
   });
 };
