@@ -976,7 +976,8 @@ const WarPlanet = (props) => {
     st.cx = cx; st.cy = cy; st.r = r; st.size = size; st.dpr = dpr; st.noGL = false;
     st.conqDisplay = conqTarget; st.conqTarget = conqTarget;
     st.alertMix = alert ? 1 : 0; st.alertTarget = alert ? 1 : 0;
-    st.spans = PL_faceSpans(data, st.conqDisplay);
+    st.data = data;                                                                // latest factions — the easing frame reads this, NOT the (stale) setup-closure `data`
+    st.spans = PL_faceSpans(st.data, st.conqDisplay);
     st.paused = false;
 
     const repaint = () => { PL_paint(tctx, TW, TH, world, st.spans, st.conqDisplay, pal, hatches); tex.needsUpdate = true; };
@@ -994,7 +995,7 @@ const WarPlanet = (props) => {
     const frame = (t) => {
       const dt = last ? Math.min(0.05, (t - last) / 1000) : 0.016; last = t;
       const kc = 1 - Math.exp(-dt / 0.18);
-      if (Math.abs(st.conqDisplay - st.conqTarget) > 0.0005) { st.conqDisplay += (st.conqTarget - st.conqDisplay) * kc; st.spans = PL_faceSpans(data, st.conqDisplay); repaint(); }
+      if (Math.abs(st.conqDisplay - st.conqTarget) > 0.0005) { st.conqDisplay += (st.conqTarget - st.conqDisplay) * kc; st.spans = PL_faceSpans(st.data, st.conqDisplay); repaint(); }
       const ka = 1 - Math.exp(-dt / 0.28);
       if (Math.abs(st.alertMix - st.alertTarget) > 0.002) { st.alertMix += (st.alertTarget - st.alertMix) * ka; applyAlert(); }
       mesh.rotation.y += dt * SPIN; atmo.rotation.y = mesh.rotation.y;
@@ -1031,7 +1032,8 @@ const WarPlanet = (props) => {
     const st = S.current; if (!st || !st.renderer) return;
     st.conqTarget = conqTarget;
     st.alertTarget = alert ? 1 : 0;
-    st.spans = PL_faceSpans(data, st.conqDisplay);
+    st.data = data;                                                                // keep the easing frame painting the CURRENT macros
+    st.spans = PL_faceSpans(st.data, st.conqDisplay);
     if (st.repaint) st.repaint();
     if (reduced) {                                                                  // no loop to ease — settle + redraw once
       st.conqDisplay = conqTarget; st.alertMix = alert ? 1 : 0; st.spans = PL_faceSpans(data, st.conqDisplay);
