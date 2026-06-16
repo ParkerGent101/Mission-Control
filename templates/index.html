@@ -1689,6 +1689,46 @@
   .hud-x.bl { bottom: 34px; left: 12px; }
   .hud-x.br { bottom: 34px; right: 12px; }
   @media (max-width: 768px) { .hud-x { display: none; } }
+
+  /* ── Scanner readout — a CRT cogitator terminal for log/feed/telemetry lists. A recessed
+     phosphor pane with its own fine scanlines (drawn OVER the rows, multiply-blended) and a
+     blinking command caret. All colours come from existing vars; honours reduced-motion.
+     Used by the Activity feed + TCPG logs. */
+  .scope-readout {
+    position: relative; overflow: hidden;
+    background: rgba(0,0,0,0.32);
+    border: 1px solid var(--gold-soft);
+    border-radius: var(--r);
+    box-shadow: inset 0 0 18px color-mix(in oklch, var(--accent-2) 12%, transparent),
+                inset 0 1px 3px rgba(0,0,0,0.6);
+    font-family: var(--font-mono);
+    padding: 8px 10px;
+  }
+  .scope-readout::before {
+    content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+    background: repeating-linear-gradient(180deg, rgba(0,0,0,0.30) 0 1px, transparent 1px 3px);
+    mix-blend-mode: multiply; opacity: 0.55;
+  }
+  .scope-row {
+    position: relative; z-index: 1;
+    display: grid; grid-template-columns: 46px 16px 1fr; align-items: baseline; gap: 8px;
+    padding: 2px 0; font-size: 11px; line-height: 1.55;
+  }
+  .scope-row .ts { color: var(--ink-3); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+  .scope-row .ic { display: inline-flex; align-items: center; justify-content: center; transform: translateY(2px); }
+  .scope-group {
+    position: relative; z-index: 1;
+    margin: 8px 0 3px; font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--ink-3); border-bottom: 1px solid var(--line-soft); padding-bottom: 3px;
+  }
+  .scope-group:first-child { margin-top: 0; }
+  .scope-caret {
+    display: inline-block; width: 7px; height: 12px; vertical-align: -1px; margin-left: 2px;
+    background: var(--accent-2); box-shadow: 0 0 6px color-mix(in oklch, var(--accent-2) 60%, transparent);
+    animation: scopeBlink 1.1s steps(1) infinite;
+  }
+  @keyframes scopeBlink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .scope-caret { animation: none; } }
 </style>
 </head>
 <body>

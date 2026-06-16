@@ -212,6 +212,19 @@ const AgendaCard = () => {
   const morning   = items.filter(i => parseInt(i.time) < 12);
   const afternoon = items.filter(i => parseInt(i.time) >= 12);
 
+  // 24h orbital day-cycle scope: each item is a blip at angle = time-of-day, radius stepped by
+  // tag; a fixed "you are here" needle + elapsed wedge mark the current time. (lazy MCViz read)
+  const nowFrac = (() => { const d = new Date(); return (d.getHours() * 60 + d.getMinutes()) / 1440; })();
+  const SCOPE_TAG_VAR = { mint: "var(--accent-2)", info: "var(--info)", violet: "var(--violet)", amber: "var(--accent)", red: "var(--danger)" };
+  const TAG_RADIUS = { Work: 0.84, IT: 0.84, band: 0.5, Cal: 0.66, Personal: 0.66 };
+  const agendaMarkers = items.map(it => {
+    const parts = (it.time || "").split(":");
+    const mins = (parseInt(parts[0]) || 0) * 60 + (parseInt(parts[1]) || 0);
+    const overdue = it.date && it.date < today;
+    return { angle: mins / 1440, radius: TAG_RADIUS[it.tag] || 0.74, color: overdue ? "var(--danger)" : (SCOPE_TAG_VAR[it.color] || "var(--accent)"), pulse: !!overdue, size: 2.6 };
+  });
+  const RS = (window.MCViz || {}).RadialScope;
+
   return (
     <Card id="agenda" num="01" title={`Today — ${new Date().toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}`} span={12}
       right={<>
@@ -263,6 +276,16 @@ const AgendaCard = () => {
           })}
         </div>
         <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+          {RS && items.length > 0 && (
+            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              <RS size={96} markers={agendaMarkers} sweepFrom={nowFrac} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="muted-2 mono" style={{ fontSize: 10.5, letterSpacing: ".08em" }}>DAY CYCLE</div>
+                <div className="num" style={{ fontSize: 18, fontWeight: 500 }}>{new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}</div>
+                <div className="muted mono" style={{ fontSize: 10.5 }}>{items.length} on the clock</div>
+              </div>
+            </div>
+          )}
           <div>
             <div className="row" style={{ justifyContent: "space-between", marginBottom: 4 }}>
               <span className="muted-2 mono" style={{ fontSize: 10.5, letterSpacing: ".08em" }}>CALORIES</span>
@@ -1119,6 +1142,20 @@ const BandCard = ({ cardProps = {} } = {}) => {
   const nextGig = gigs[0];
   const overdue = contacts.filter(c=>c.status==='follow up'||c.status==='not contacted').length;
 
+  // "Tour deployment" radar: booked shows are violet blips — radius = time-to-show (inner =
+  // sooner), next show pulses; prospect venues ride the outer rim. Idle sweep scans them. (lazy)
+  const RS = (window.MCViz || {}).RadialScope;
+  const TOUR_HORIZON = 90;
+  const bandMarkers = gigs.slice(0, 12).map((g, i) => ({
+    angle: (i + 0.5) / Math.max(1, Math.min(12, gigs.length)),
+    radius: 0.30 + Math.min(1, Math.max(0, g.days) / TOUR_HORIZON) * 0.55,
+    color: 'var(--violet)', pulse: i === 0, size: i === 0 ? 3.4 : 2.6,
+  }));
+  const prospects = (contacts || []).filter(c => (c.status || '').toLowerCase() !== 'booked').slice(0, 10);
+  const prospectMarkers = prospects.map((c, i) => ({
+    angle: (i + 0.5) / Math.max(1, prospects.length), radius: 0.92, color: 'var(--accent-2)', size: 1.8,
+  }));
+
   return (
     <Card {...cardProps} id="band" num="03" title="Band — Coming Up Aces" span={cardProps.span || 5}
       right={<>
@@ -1178,6 +1215,16 @@ const BandCard = ({ cardProps = {} } = {}) => {
           <div style={{display:'flex',gap:6,justifyContent:'flex-end'}}>
             <button className="btn primary" onClick={saveEditShow} disabled={pushing} style={{fontSize:11}}>{pushing?'saving…':'Save show'}</button>
             <button className="btn ghost" onClick={()=>setEditShowIdx(null)} style={{fontSize:11}}>✕</button>
+          </div>
+        </div>
+      )}
+      {RS && (gigs.length > 0 || prospectMarkers.length > 0) && (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--line-soft)' }}>
+          <RS size={150} markers={[...bandMarkers, ...prospectMarkers]} sweep sweepPeriod={8000} />
+          <div className="row" style={{ gap: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
+            <span className="mono muted-2" style={{ fontSize: 9.5, display: 'flex', alignItems: 'center', gap: 4 }}><span className="dot violet" />{gigs.length} booked</span>
+            <span className="mono muted-2" style={{ fontSize: 9.5, display: 'flex', alignItems: 'center', gap: 4 }}><span className="dot" />{prospects.length} prospect{prospects.length === 1 ? '' : 's'}</span>
+            <span className="mono muted-2" style={{ fontSize: 9.5 }}>inner = sooner</span>
           </div>
         </div>
       )}
@@ -2392,10 +2439,45 @@ const WorkCard = () => {
 
   const byProject = allTasks.reduce((acc,t) => { const p = t.project||'General'; (acc[p]=acc[p]||[]).push(t); return acc; }, {});
 
+  // "Campaign theater" scope: each project is an angular sector, each open task a blip — radius
+  // by priority (P0 inner → P2 outer), colour by due-proximity (overdue pulses red). (lazy MCViz)
+  const RS = (window.MCViz || {}).RadialScope;
+  const prank = (p) => { p = (p || '').toLowerCase(); if (p === 'p0' || p === 'high') return 0; if (p === 'p2' || p === 'low') return 2; return 1; };
+  const projects = Object.keys(byProject);
+  const workMarkers = [];
+  projects.forEach((proj, pi) => byProject[proj].forEach((t, ti) => {
+    const days = daysUntil(t.due_date);
+    workMarkers.push({
+      angle: (pi + (ti + 0.5) / Math.max(1, byProject[proj].length)) / Math.max(1, projects.length),
+      radius: [0.42, 0.64, 0.86][prank(t.priority)],
+      color: days == null ? 'var(--accent-2)' : days < 0 ? 'var(--danger)' : days < 7 ? 'var(--warn)' : 'var(--accent-2)',
+      pulse: days != null && days < 0, size: 2.8,
+    });
+  }));
+
   return (
     <Card id="work" num="05" title="Work" span={6}
       right={<span className="muted mono" style={{fontSize:11}}>{allTasks.length} open</span>}
     >
+      {RS && projects.length > 0 && (
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--line-soft)' }}>
+          <RS size={120} markers={workMarkers} sweep sweepPeriod={9000} />
+          <div style={{ flex: 1, display: 'grid', gap: 4, minWidth: 0 }}>
+            <div className="muted-2 mono" style={{ fontSize: 9.5, letterSpacing: '.1em', textTransform: 'uppercase' }}>Theater</div>
+            {projects.slice(0, 5).map(p => (
+              <div key={p} className="row" style={{ justifyContent: 'space-between', gap: 8 }}>
+                <span className="mono" style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--ink-2)' }}>{p}</span>
+                <span className="mono muted-2" style={{ fontSize: 10 }}>{byProject[p].length}</span>
+              </div>
+            ))}
+            <div className="row" style={{ gap: 9, marginTop: 2, flexWrap: 'wrap' }}>
+              <span className="mono muted-2" style={{ fontSize: 9, display: 'flex', alignItems: 'center', gap: 4 }}><span className="dot red" />overdue</span>
+              <span className="mono muted-2" style={{ fontSize: 9, display: 'flex', alignItems: 'center', gap: 4 }}><span className="dot" style={{ background: 'var(--warn)', boxShadow: 'none' }} />&lt;7d</span>
+              <span className="mono muted-2" style={{ fontSize: 9, display: 'flex', alignItems: 'center', gap: 4 }}><span className="dot" />ok</span>
+            </div>
+          </div>
+        </div>
+      )}
       {Object.entries(byProject).map(([proj, ptasks]) => (
         <div key={proj} style={{marginBottom:8}}>
           <div className="muted-2 mono" style={{fontSize:10,letterSpacing:'.06em',padding:'4px 0 2px',textTransform:'uppercase'}}>{proj}</div>
@@ -2515,6 +2597,9 @@ const PracticeCard = ({ cardProps = {} } = {}) => {
   const todayPlan = upcomingPlans.find(p => p.offset === 0);
   const nextPlan = upcomingPlans.find(p => p.offset > 0) || upcomingPlans[0];
   const plannedWeekMin = schedule.reduce((s, p) => s + (p.minutes || 0), 0);
+  const weekStart = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - d.getDay()); return d.toISOString().slice(0, 10); })();
+  const weekMin = sessions.filter(s => (s.date || "") >= weekStart).reduce((a, x) => a + (x.minutes || 0), 0);
+  const RG = (window.MCViz || {}).ReactorGauge;   // lazy: planet.jsx loads after this file
 
   const logSession = async (min, noteOverride = null) => {
     const m = parseInt(min || sessionMin);
@@ -2542,19 +2627,33 @@ const PracticeCard = ({ cardProps = {} } = {}) => {
         <span className="muted-2 mono" style={{ fontSize: 11 }}>🎹 Piano</span>
       }
     >
-      {/* ── Stats row ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, marginBottom: 14 }}>
-        <div className="stat-block">
-          <span className="l">Today</span>
-          <span className="v" style={{ color: todayMin > 0 ? INST_COLOR[inst] : "var(--ink-4)" }}>
-            {todayMin}<span className="muted-2" style={{ fontSize: 11, marginLeft: 3 }}>min</span>
-          </span>
-          <span className="muted-2 mono" style={{ fontSize: 10 }}>{todaySess.length} session{todaySess.length !== 1 ? "s" : ""}</span>
-        </div>
-        <div className="stat-block">
-          <span className="l">All-time</span>
-          <span className="v">{Math.round(totalMin / 60 * 10) / 10}<span className="muted-2" style={{ fontSize: 11, marginLeft: 3 }}>hrs</span></span>
-          <span className="muted-2 mono" style={{ fontSize: 10 }}>{sessions.length} sessions</span>
+      {/* ── Reactor gauge: today + week vs goal, all-time hours at the core ── */}
+      <div style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 14 }}>
+        {RG ? (
+          <RG size={118}
+            rings={[
+              { value: todayMin / Math.max(1, (todayPlan?.minutes || 30)), color: INST_COLOR[inst] },
+              { value: plannedWeekMin > 0 ? weekMin / plannedWeekMin : 0, color: "var(--accent)" },
+            ]}
+            center={{ value: Math.round(totalMin / 60 * 10) / 10, unit: "h", sub: "all-time" }}
+          />
+        ) : (
+          <div className="stat-block" style={{ minWidth: 118 }}>
+            <span className="l">All-time</span>
+            <span className="v">{Math.round(totalMin / 60 * 10) / 10}<span className="muted-2" style={{ fontSize: 11, marginLeft: 3 }}>hrs</span></span>
+            <span className="muted-2 mono" style={{ fontSize: 10 }}>{sessions.length} sessions</span>
+          </div>
+        )}
+        <div style={{ flex: 1, display: "grid", gap: 7 }}>
+          <div className="row" style={{ justifyContent: "space-between" }}>
+            <span className="mono" style={{ fontSize: 10.5, color: "var(--accent-2)", display: "flex", alignItems: "center", gap: 5 }}><span className="dot" />Today</span>
+            <span className="mono num"><span style={{ color: todayMin > 0 ? INST_COLOR[inst] : "var(--ink-3)", fontSize: 15 }}>{todayMin}</span><span className="muted-2" style={{ fontSize: 10 }}> / {todayPlan?.minutes || 30}m</span></span>
+          </div>
+          <div className="row" style={{ justifyContent: "space-between" }}>
+            <span className="mono" style={{ fontSize: 10.5, color: "var(--accent)", display: "flex", alignItems: "center", gap: 5 }}><span className="dot amber" />Week</span>
+            <span className="mono num"><span style={{ fontSize: 15 }}>{weekMin}</span><span className="muted-2" style={{ fontSize: 10 }}> / {plannedWeekMin}m</span></span>
+          </div>
+          <span className="muted-2 mono" style={{ fontSize: 10 }}>{todaySess.length} session{todaySess.length !== 1 ? "s" : ""} today · {sessions.length} all-time</span>
         </div>
       </div>
 
@@ -2629,6 +2728,12 @@ const PracticeCard = ({ cardProps = {} } = {}) => {
             style={{ flex: 1, minWidth: 80, fontSize: 11 }} />
           <button className="btn" style={{ padding: "4px 10px", fontSize: 11 }} onClick={() => logSession()}>+</button>
         </div>
+        {sessions.length >= 2 && (
+          <div style={{ marginTop: 11 }}>
+            <BarGraph3D data={sessions.slice(0, 14).map(s => s.minutes || 0).reverse()} color={INST_COLOR[inst]} height={54} />
+            <div className="muted-2 mono" style={{ fontSize: 9.5, textAlign: "right", marginTop: 1 }}>last {Math.min(14, sessions.length)} sessions · minutes</div>
+          </div>
+        )}
       </div>
     </Card>
   );
@@ -2707,35 +2812,41 @@ const ActivityCard = () => {
         ))}
       </div>
 
-      {entries.length === 0 && (
-        <div className="muted-2 mono" style={{fontSize:11,padding:'16px 0',textAlign:'center'}}>
-          No activity yet — start using modules to build history.
-        </div>
-      )}
-
-      {Object.entries(byDate).sort((a,b)=>b[0].localeCompare(a[0])).map(([date, items]) => (
-        <div key={date} style={{marginBottom:10}}>
-          <div className="section-h">
-            <span>{date===today?'Today':date===yesterday?'Yesterday':date}</span>
-            <span className="muted-2 mono" style={{fontSize:10}}>{items.length}</span>
-            <span className="line"/>
+      {/* CRT telemetry feed — same scanner-readout language as the war planet's scope */}
+      <div className="scope-readout">
+        {entries.length === 0 && (
+          <div className="scope-row" style={{gridTemplateColumns:'1fr'}}>
+            <span className="muted-2" style={{fontSize:11}}>No telemetry — start using modules to build history.</span>
           </div>
-          {items.map(e => {
-            const meta = MODULE_META[e.module] || {icon:'circle', color:'var(--ink-4)'};
-            return (
-              <div key={e.id} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0',borderBottom:'1px solid var(--line-soft)'}}>
-                <span className="mono muted-2" style={{fontSize:10,width:42,flexShrink:0}}>{e.ts.slice(11,16)}</span>
-                <Icon name={meta.icon} size={12} style={{color:meta.color,flexShrink:0}}/>
-                <div style={{flex:1,minWidth:0}}>
-                  <span style={{fontSize:11,color:'var(--ink-3)'}}>{ACTION_LABEL[e.action]||e.action} · </span>
-                  <span style={{fontSize:11}}>{e.detail}</span>
-                  {e.meta && <span className="muted-2 mono" style={{fontSize:10,marginLeft:6}}>{e.meta}</span>}
+        )}
+        {Object.entries(byDate).sort((a,b)=>b[0].localeCompare(a[0])).map(([date, items]) => (
+          <React.Fragment key={date}>
+            <div className="scope-group" style={{display:'flex',justifyContent:'space-between',alignItems:'baseline'}}>
+              <span>{date===today?'Today':date===yesterday?'Yesterday':date}</span>
+              <span style={{opacity:0.65}}>{items.length} REC</span>
+            </div>
+            {items.map(e => {
+              const meta = MODULE_META[e.module] || {icon:'circle', color:'var(--ink-4)'};
+              return (
+                <div key={e.id} className="scope-row">
+                  <span className="ts">{e.ts.slice(11,16)}</span>
+                  <span className="ic"><Icon name={meta.icon} size={11} style={{color:meta.color}}/></span>
+                  <span style={{minWidth:0}}>
+                    <span style={{color:meta.color,textTransform:'uppercase',letterSpacing:'0.04em',fontSize:10}}>{ACTION_LABEL[e.action]||e.action}</span>
+                    <span style={{color:'var(--ink-3)'}}> · </span>
+                    <span>{e.detail}</span>
+                    {e.meta && <span className="muted-2" style={{marginLeft:6}}>{e.meta}</span>}
+                  </span>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </React.Fragment>
+        ))}
+        <div className="scope-row" style={{gridTemplateColumns:'46px 1fr',marginTop:4}}>
+          <span className="ts" style={{color:'var(--accent-2)'}}>&gt;</span>
+          <span><span className="scope-caret"/></span>
         </div>
-      ))}
+      </div>
     </Card>
   );
 };
@@ -2769,6 +2880,18 @@ const TodayHub = () => {
   const habitList = habits.list || [];
   const doneCount = habitList.filter(h => habitsToday[h.id]).length;
 
+  // Same scanner instruments as the cards: a day-cycle scope over the schedule + a habits
+  // charge-gauge (each segment ≈ one habit when there are enough). (lazy MCViz read)
+  const RS = (window.MCViz || {}).RadialScope;
+  const RG = (window.MCViz || {}).ReactorGauge;
+  const nowFrac = (() => { const d = new Date(); return (d.getHours() * 60 + d.getMinutes()) / 1440; })();
+  const tagVar = (t) => t === 'band' ? 'var(--violet)' : (t === 'Work' || t === 'IT') ? 'var(--info)' : 'var(--accent-2)';
+  const hubMarkers = (agenda || []).map(item => {
+    const parts = (item.time || '').split(':');
+    const mins = (parseInt(parts[0]) || 0) * 60 + (parseInt(parts[1]) || 0);
+    return { angle: mins / 1440, radius: 0.74, color: tagVar(item.tag), size: 2.6 };
+  });
+
   const toggleHabit = async (hid) => {
     const newVal = !habitsToday[hid];
     // Optimistic first so the checkbox responds on the tap, not after the round-trip.
@@ -2794,6 +2917,11 @@ const TodayHub = () => {
         {/* Schedule */}
         <div>
           <div className="section-h"><span>Schedule</span><span className="line"/></div>
+          {RS && agenda.length > 0 && (
+            <div style={{display:'flex',justifyContent:'center',padding:'4px 0 8px'}}>
+              <RS size={104} markers={hubMarkers} sweepFrom={nowFrac} />
+            </div>
+          )}
           {agenda.length === 0
             ? <div className="muted" style={{fontSize:12,padding:'6px 0'}}>Nothing scheduled today</div>
             : agenda.map((item, i) => (
@@ -2814,6 +2942,13 @@ const TodayHub = () => {
             <span className="muted-2 mono" style={{fontSize:10}}>{doneCount}/{habitList.length}</span>
             <span className="line"/>
           </div>
+          {RG && habitList.length > 0 && (
+            <div style={{display:'flex',justifyContent:'center',padding:'4px 0 8px'}}>
+              <RG size={84} segments={Math.max(12, habitList.length)}
+                rings={[{ value: habitList.length ? doneCount / habitList.length : 0, color: 'var(--accent-2)' }]}
+                center={{ value: doneCount, sub: `of ${habitList.length}` }} />
+            </div>
+          )}
           {habitList.map(h => {
             const done = !!habitsToday[h.id];
             return (
@@ -3555,6 +3690,14 @@ const RecurringTasksCard = ({ cardProps = {} } = {}) => {
 
   const dueCount = items.filter(i => i.due).length;
 
+  // Reactor gauge: one charge-ring per cadence (done/total), due count at the core. (lazy MCViz)
+  const RG = (window.MCViz || {}).ReactorGauge;
+  const freqStats = RECURRING_FREQS.map(f => {
+    const ci = items.filter(i => i.frequency === f.id);
+    const done = ci.filter(i => !i.due).length;
+    return { ...f, total: ci.length, done, value: ci.length ? done / ci.length : 0 };
+  });
+
   const renderColumn = (freq) => {
     const colItems = items.filter(i => i.frequency === freq.id);
     const due = colItems.filter(i => i.due);
@@ -3627,6 +3770,19 @@ const RecurringTasksCard = ({ cardProps = {} } = {}) => {
       }
       bodyClass="flush"
     >
+      {RG && items.length > 0 && (
+        <div style={{ display: 'flex', gap: 16, alignItems: 'center', padding: '12px 14px', borderBottom: '1px solid var(--line-soft)' }}>
+          <RG size={104} rings={freqStats.map(f => ({ value: f.value, color: f.color }))} center={{ value: dueCount, sub: 'due' }} />
+          <div style={{ flex: 1, display: 'grid', gap: 6, maxWidth: 360 }}>
+            {freqStats.map(f => (
+              <div key={f.id} className="row" style={{ justifyContent: 'space-between', gap: 8 }}>
+                <span className="mono" style={{ fontSize: 11, color: f.color, display: 'flex', alignItems: 'center', gap: 6 }}><span className="dot" style={{ background: f.color, boxShadow: 'none' }} />{f.label}</span>
+                <span className="mono num" style={{ fontSize: 12, color: 'var(--ink-2)' }}>{f.done}<span className="muted-2">/{f.total}</span></span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)' }}>
         {RECURRING_FREQS.map(renderColumn)}
       </div>

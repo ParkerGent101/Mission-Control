@@ -63,6 +63,17 @@
 
     <div class="row-title">World variety · seeds &amp; land ratios</div>
     <div class="grid" id="row-seeds"></div>
+
+    <p class="note" style="margin-top:34px">Below: the 2D scanner instruments (<code>window.MCViz</code>) that bring the rest of the app up to the planet's fidelity — no extra WebGL contexts. Same scope chrome, palette, eased motion.</p>
+
+    <div class="row-title">Radial scope · day-cycle &amp; campaign radar</div>
+    <div class="grid" id="row-radial"></div>
+
+    <div class="row-title">Reactor gauge · charge-rings</div>
+    <div class="grid" id="row-reactor"></div>
+
+    <div class="row-title">Scope frame · standalone chrome</div>
+    <div class="grid" id="row-frame"></div>
   </div>
 
   <!-- libs: React + three.js UMD (global THREE) + Babel, as the app loads them -->
@@ -128,6 +139,44 @@
       { lbl: 'water world', props: { data: scaleTo(0.6), size: 130, war: true, whole: INCOME, ocean: 'oklch(0.52 0.11 245)', landNeutral: 'oklch(0.50 0.02 250)', landRatio: 0.34, seed: 'water-2' } },
       { lbl: '2026-06-16',  props: { data: scaleTo(0.4), size: 130, war: true, whole: INCOME, seed: '2026-06-16', ...FB } },
       { lbl: '2026-06-17',  props: { data: scaleTo(0.4), size: 130, war: true, whole: INCOME, seed: '2026-06-17', ...FB } },
+    ]);
+
+    // ── 2D scanner instruments — RadialScope / ReactorGauge / ScopeFrame (window.MCViz) ──
+    const { RadialScope, ReactorGauge, ScopeFrame, resolve } = window.MCViz;
+    const mountC = (rowId, cells) => {
+      const row = document.getElementById(rowId);
+      cells.forEach(cell => {
+        const card = document.createElement('div'); card.className = 'card';
+        const host = document.createElement('div');
+        if (cell.props.size) { host.style.width = host.style.height = cell.props.size + 'px'; host.style.position = 'relative'; }
+        const lbl = document.createElement('div'); lbl.className = 'lbl'; lbl.textContent = cell.lbl;
+        card.appendChild(host); card.appendChild(lbl); row.appendChild(card);
+        ReactDOM.createRoot(host).render(React.createElement(cell.comp, cell.props));
+      });
+    };
+    const clockMarkers = [
+      { angle: 8 / 24,    radius: 0.84, color: 'var(--info)',     size: 3 },
+      { angle: 9.5 / 24,  radius: 0.66, color: 'var(--accent-2)', size: 3 },
+      { angle: 13 / 24,   radius: 0.74, color: 'var(--accent)',   size: 3 },
+      { angle: 18 / 24,   radius: 0.5,  color: 'var(--violet)',   size: 3 },
+      { angle: 20 / 24,   radius: 0.84, color: 'var(--danger)',   size: 3, pulse: true },
+    ];
+    const sectorMarkers = (() => { const a = []; for (let s = 0; s < 4; s++) for (let i = 0; i < 3; i++)
+      a.push({ angle: (s + (i + 0.5) / 3) / 4, radius: [0.42, 0.64, 0.86][i], color: i === 0 ? 'var(--danger)' : i === 1 ? 'var(--warn)' : 'var(--accent-2)', pulse: i === 0, size: 3 }); return a; })();
+    mountC('row-radial', [
+      { lbl: 'day cycle · 19:12', comp: RadialScope, props: { size: 130, markers: clockMarkers, sweepFrom: (19 * 60 + 12) / 1440 } },
+      { lbl: 'campaign · sweep',  comp: RadialScope, props: { size: 130, markers: sectorMarkers, sweep: true, sweepPeriod: 9000 } },
+      { lbl: 'empty · idle sweep', comp: RadialScope, props: { size: 130, markers: [], sweep: true } },
+    ]);
+    mountC('row-reactor', [
+      { lbl: 'single · 70%',  comp: ReactorGauge, props: { size: 130, rings: [{ value: 0.7, color: 'var(--accent-2)' }], center: { value: '4.2', unit: 'h', sub: 'all-time' } } },
+      { lbl: 'today + week',  comp: ReactorGauge, props: { size: 130, rings: [{ value: 0.5, color: 'var(--accent-2)' }, { value: 0.8, color: 'var(--accent)' }], center: { value: 30, unit: 'm', sub: 'today' } } },
+      { lbl: 'over · 125%',   comp: ReactorGauge, props: { size: 130, rings: [{ value: 1.25, color: 'var(--accent-2)', alert: true }], center: { value: '125', unit: '%' } } },
+      { lbl: 'habits · 3/6',  comp: ReactorGauge, props: { size: 96, segments: 12, rings: [{ value: 0.5, color: 'var(--accent-2)' }], center: { value: 3, sub: 'of 6' } } },
+    ]);
+    mountC('row-frame', [
+      { lbl: 'circle', comp: ScopeFrame, props: { size: 130, accent2: resolve('var(--accent-2)'), shape: 'circle' } },
+      { lbl: 'square', comp: ScopeFrame, props: { size: 130, accent2: resolve('var(--accent-2)'), shape: 'square' } },
     ]);
   })();
   </script>
