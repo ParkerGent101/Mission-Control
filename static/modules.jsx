@@ -1437,21 +1437,12 @@ const HealthCard = ({ cardProps = {} } = {}) => {
   const [waterBottleInput, setWaterBottleInput] = useState('32');
   const [waterGoalInput, setWaterGoalInput]     = useState('128');
   const [editWater, setEditWater] = useState(false);
-  const [nutritionView, setNutritionView] = useState('today');   // 'today' | 'week' — swipe to switch
+  const [nutritionView, setNutritionView] = useState('today');   // 'today' | 'week' — tap the toggle to switch
 
-  // Mobile: swipe left/right to toggle the Nutrition Today / Week views (same gesture as Band tabs).
+  // Today / Week is tap-only (the toggle buttons below). The swipe-to-switch gesture was
+  // removed: on mobile a slightly-diagonal vertical scroll registered as a horizontal swipe
+  // and flipped to Week view unintentionally while scrolling / changing days.
   const NUTRITION_VIEWS = ['today', 'week'];
-  const nutritionTouch = React.useRef(null);
-  const onNutritionTouchStart = (e) => { const t = e.touches[0]; nutritionTouch.current = { x: t.clientX, y: t.clientY }; };
-  const onNutritionTouchEnd = (e) => {
-    const s = nutritionTouch.current; if (!s) return; nutritionTouch.current = null;
-    const t = e.changedTouches[0];
-    const dx = t.clientX - s.x, dy = t.clientY - s.y;
-    if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;   // ignore vertical scrolls / taps
-    const i = NUTRITION_VIEWS.indexOf(nutritionView);
-    const ni = dx < 0 ? Math.min(NUTRITION_VIEWS.length - 1, i + 1) : Math.max(0, i - 1);
-    if (ni !== i) setNutritionView(NUTRITION_VIEWS[ni]);
-  };
 
   const getTodayPlan = (prog) => {
     if (!prog || !prog.start_date) return null;
@@ -1874,8 +1865,8 @@ const HealthCard = ({ cardProps = {} } = {}) => {
           </div>
         </div>
 
-        {/* Swipe left/right (touch) to switch between the Today and Week views. */}
-        <div onTouchStart={onNutritionTouchStart} onTouchEnd={onNutritionTouchEnd}>
+        {/* Today / Week is switched with the tap buttons above (swipe removed — see note by NUTRITION_VIEWS). */}
+        <div>
         {nutritionView === 'today' ? (<>
 
         {/* Search + add row sits ABOVE the donut/calorie display so the suggestions

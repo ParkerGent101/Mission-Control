@@ -371,43 +371,243 @@ const PL_drawFx = (ctx, t, fire, size, intensity, alertMix, reduced, dangerHex, 
 // ─── scanner-scope HUD chrome (static vector overlay) ────────────────────────────────────
 // Frame, centre crosshair, faint measurement grid, edge graticule ticks, corner crosshairs,
 // axis numbers. Counts ADAPT to size so the 92px Health globe stays clean and the 148px
-// Finance globe reads as an instrument.
-const PL_Hud = ({ size, accent2 }) => {
+// Finance globe reads as an instrument. Generalised so ANY viz wears the same chrome: pass
+// `children` to frame them under the overlay, and shape:'circle' for radar-style instruments.
+// With no `children` it returns just the overlay SVG — the original WarPlanet contract (see the
+// PL_Hud alias below). All furniture uses the SAME opacities as before so it reads identically.
+const PL_ScopeFrame = (props) => {
+  const { size, accent2, shape = 'square', children } = props;
+  const grid = props.grid !== false, ticks = props.ticks !== false, crosshair = props.crosshair !== false, corners = props.corners !== false;
+  const numbers = props.numbers != null ? props.numbers : (size >= 120 && shape === 'square');
   const pad = Math.max(2, size * 0.022), x0 = pad, y0 = pad, x1 = size - pad, y1 = size - pad, span = x1 - x0, c = size / 2;
   const bezR = Math.max(1, size * 0.01);
   const big = size >= 120;
   const gridN = big ? 10 : 6, tickN = big ? 16 : 8;
   const gstep = span / gridN, tstep = span / tickN;
-  const cid = 'pl' + Math.round(size);
+  const R = span / 2, circle = shape === 'circle';
+  const cid = 'pl' + shape[0] + Math.round(size);
   const F = (n) => n.toFixed(1);
-  return (
+  const svg = (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ position: 'absolute', inset: 0, overflow: 'visible', pointerEvents: 'none' }}>
-      <defs><clipPath id={cid}><rect x={F(x0)} y={F(y0)} width={F(span)} height={F(span)} rx={F(bezR)} ry={F(bezR)} /></clipPath></defs>
+      <defs><clipPath id={cid}>{circle
+        ? <circle cx={F(c)} cy={F(c)} r={F(R)} />
+        : <rect x={F(x0)} y={F(y0)} width={F(span)} height={F(span)} rx={F(bezR)} ry={F(bezR)} />}</clipPath></defs>
       <g clipPath={`url(#${cid})`}>
-        <g stroke={accent2} strokeOpacity="0.09" strokeWidth="0.5">
-          {Array.from({ length: gridN - 1 }, (_, i) => <line key={'gv' + i} x1={F(x0 + gstep * (i + 1))} y1={F(y0)} x2={F(x0 + gstep * (i + 1))} y2={F(y1)} />)}
-          {Array.from({ length: gridN - 1 }, (_, i) => <line key={'gh' + i} x1={F(x0)} y1={F(y0 + gstep * (i + 1))} x2={F(x1)} y2={F(y0 + gstep * (i + 1))} />)}
-        </g>
-        <g stroke={accent2} strokeOpacity="0.4" strokeWidth="0.8">
-          <line x1={F(x0)} y1={F(c)} x2={F(x1)} y2={F(c)} /><line x1={F(c)} y1={F(y0)} x2={F(c)} y2={F(y1)} />
-        </g>
-        <g stroke={accent2} strokeOpacity="0.55">
-          {Array.from({ length: tickN + 1 }, (_, i) => { const x = x0 + tstep * i, b = i % 4 === 0, h = b ? size * 0.028 : size * 0.015; return <g key={'th' + i}>
-            <line x1={F(x)} y1={F(y1)} x2={F(x)} y2={F(y1 - h)} strokeWidth={b ? 0.9 : 0.5} /><line x1={F(x)} y1={F(y0)} x2={F(x)} y2={F(y0 + h)} strokeWidth={b ? 0.9 : 0.5} /></g>; })}
-          {Array.from({ length: tickN + 1 }, (_, i) => { const y = y0 + tstep * i, b = i % 4 === 0, h = b ? size * 0.028 : size * 0.015; return <g key={'tv' + i}>
-            <line x1={F(x0)} y1={F(y)} x2={F(x0 + h)} y2={F(y)} strokeWidth={b ? 0.9 : 0.5} /><line x1={F(x1)} y1={F(y)} x2={F(x1 - h)} y2={F(y)} strokeWidth={b ? 0.9 : 0.5} /></g>; })}
-        </g>
+        {grid && (circle
+          ? <g>
+              <g stroke={accent2} strokeOpacity="0.09" strokeWidth="0.5" fill="none">{[0.33, 0.66].map((f, i) => <circle key={'rr' + i} cx={F(c)} cy={F(c)} r={F(R * f)} />)}</g>
+              <g stroke={accent2} strokeOpacity="0.09" strokeWidth="0.5">{Array.from({ length: 8 }, (_, i) => { const a = (i / 8) * Math.PI * 2; return <line key={'sp' + i} x1={F(c)} y1={F(c)} x2={F(c + Math.cos(a) * R)} y2={F(c + Math.sin(a) * R)} />; })}</g>
+            </g>
+          : <g stroke={accent2} strokeOpacity="0.09" strokeWidth="0.5">
+              {Array.from({ length: gridN - 1 }, (_, i) => <line key={'gv' + i} x1={F(x0 + gstep * (i + 1))} y1={F(y0)} x2={F(x0 + gstep * (i + 1))} y2={F(y1)} />)}
+              {Array.from({ length: gridN - 1 }, (_, i) => <line key={'gh' + i} x1={F(x0)} y1={F(y0 + gstep * (i + 1))} x2={F(x1)} y2={F(y0 + gstep * (i + 1))} />)}
+            </g>)}
+        {crosshair && <g stroke={accent2} strokeOpacity="0.4" strokeWidth="0.8">
+          <line x1={F(circle ? c - R : x0)} y1={F(c)} x2={F(circle ? c + R : x1)} y2={F(c)} /><line x1={F(c)} y1={F(circle ? c - R : y0)} x2={F(c)} y2={F(circle ? c + R : y1)} />
+        </g>}
+        {ticks && (circle
+          ? <g stroke={accent2} strokeOpacity="0.55">{Array.from({ length: tickN }, (_, i) => { const a = (i / tickN) * Math.PI * 2 - Math.PI / 2, b = i % 4 === 0, h = b ? size * 0.028 : size * 0.015;
+              return <line key={'tc' + i} x1={F(c + Math.cos(a) * R)} y1={F(c + Math.sin(a) * R)} x2={F(c + Math.cos(a) * (R - h))} y2={F(c + Math.sin(a) * (R - h))} strokeWidth={b ? 0.9 : 0.5} />; })}</g>
+          : <g stroke={accent2} strokeOpacity="0.55">
+              {Array.from({ length: tickN + 1 }, (_, i) => { const x = x0 + tstep * i, b = i % 4 === 0, h = b ? size * 0.028 : size * 0.015; return <g key={'th' + i}>
+                <line x1={F(x)} y1={F(y1)} x2={F(x)} y2={F(y1 - h)} strokeWidth={b ? 0.9 : 0.5} /><line x1={F(x)} y1={F(y0)} x2={F(x)} y2={F(y0 + h)} strokeWidth={b ? 0.9 : 0.5} /></g>; })}
+              {Array.from({ length: tickN + 1 }, (_, i) => { const y = y0 + tstep * i, b = i % 4 === 0, h = b ? size * 0.028 : size * 0.015; return <g key={'tv' + i}>
+                <line x1={F(x0)} y1={F(y)} x2={F(x0 + h)} y2={F(y)} strokeWidth={b ? 0.9 : 0.5} /><line x1={F(x1)} y1={F(y)} x2={F(x1 - h)} y2={F(y)} strokeWidth={b ? 0.9 : 0.5} /></g>; })}
+            </g>)}
       </g>
-      <rect x={F(x0)} y={F(y0)} width={F(span)} height={F(span)} rx={F(bezR)} ry={F(bezR)} fill="none" stroke={accent2} strokeOpacity="0.7" strokeWidth="1.3" />
-      <rect x={F(x0 + 3)} y={F(y0 + 3)} width={F(span - 6)} height={F(span - 6)} rx={F(Math.max(0.5, bezR - 1))} ry={F(Math.max(0.5, bezR - 1))} fill="none" stroke={accent2} strokeOpacity="0.3" strokeWidth="0.6" />
-      {(() => { const cm = Math.max(4, size * 0.045), o = Math.max(7, size * 0.075);
+      {circle
+        ? <g fill="none" stroke={accent2}><circle cx={F(c)} cy={F(c)} r={F(R)} strokeOpacity="0.7" strokeWidth="1.3" /><circle cx={F(c)} cy={F(c)} r={F(R - 3)} strokeOpacity="0.3" strokeWidth="0.6" /></g>
+        : <g fill="none" stroke={accent2}>
+            <rect x={F(x0)} y={F(y0)} width={F(span)} height={F(span)} rx={F(bezR)} ry={F(bezR)} strokeOpacity="0.7" strokeWidth="1.3" />
+            <rect x={F(x0 + 3)} y={F(y0 + 3)} width={F(span - 6)} height={F(span - 6)} rx={F(Math.max(0.5, bezR - 1))} ry={F(Math.max(0.5, bezR - 1))} strokeOpacity="0.3" strokeWidth="0.6" />
+          </g>}
+      {corners && (() => { const cm = Math.max(4, size * 0.045), o = Math.max(7, size * 0.075);
         const plus = (x, y) => `M${F(x - cm)} ${F(y)}H${F(x + cm)}M${F(x)} ${F(y - cm)}V${F(y + cm)}`;
         return <path d={[plus(x0 + o, y0 + o), plus(x1 - o, y0 + o), plus(x0 + o, y1 - o), plus(x1 - o, y1 - o)].join(' ')} fill="none" stroke={accent2} strokeOpacity="0.85" strokeWidth="1.1" strokeLinecap="round" />; })()}
-      {big && <g fill={accent2} fillOpacity="0.55" fontFamily="var(--font-mono)" fontSize={F(size * 0.038)}>
+      {numbers && <g fill={accent2} fillOpacity="0.55" fontFamily="var(--font-mono)" fontSize={F(size * 0.038)}>
         {[0.2, 0.4, 0.6, 0.8].map((f, i) => <text key={'nx' + i} x={F(x0 + span * f)} y={F(y1 - size * 0.04)} textAnchor="middle">{Math.round(f * 100)}</text>)}
         {[0.2, 0.4, 0.6, 0.8].map((f, i) => <text key={'ny' + i} x={F(x1 - size * 0.05)} y={F(y0 + span * f)} textAnchor="end" dominantBaseline="middle">{Math.round((1 - f) * 100)}</text>)}
       </g>}
     </svg>
+  );
+  if (!children) return svg;
+  return <div style={{ position: 'relative', width: size, height: size }}>{children}{svg}</div>;
+};
+// back-compat alias: WarPlanet renders <PL_Hud size accent2 /> as a bare overlay (square, no children).
+const PL_Hud = PL_ScopeFrame;
+
+// ─── radial scanner (2D canvas radar) — no WebGL ─────────────────────────────────────────
+// A circular scope wearing the ScopeFrame circle chrome, with markers plotted at (angle 0..1
+// clockwise from top, radius 0..1), an optional rotating sweep, and/or a fixed "you are here"
+// needle (`sweepFrom`) with an elapsed wedge. Same lifecycle as WarPlanet: one RAF loop that
+// pauses when the tab is hidden, and a single static frame under prefers-reduced-motion.
+const RadialScope = (props) => {
+  const { size = 120, sweep = false, sweepPeriod = 6000, sweepFrom = null, accent, trail = true } = props;
+  const cvRef = usePLRef(null);
+  const S = usePLRef({});
+  const reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const markers = props.markers || [];
+  const sig = JSON.stringify(markers.map(m => [m.angle, m.radius, m.color, m.size, m.pulse])) + '|' + sweepFrom + '|' + sweep;
+
+  usePLEffect(() => {
+    const cv = cvRef.current; if (!cv) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cv.width = size * dpr; cv.height = size * dpr; cv.style.width = cv.style.height = size + 'px';
+    const ctx = cv.getContext('2d');
+    const cx = size / 2, cy = size / 2, R = size / 2 - Math.max(2, size * 0.022);
+    const pal = { accent: PL_resolve(accent || 'var(--accent-2)'), bone: PL_resolve('var(--bone)'), danger: PL_resolve('var(--danger)') };
+    const st = S.current;
+    st.ctx = ctx; st.dpr = dpr; st.markers = props.markers || []; st.sweepFrom = sweepFrom;
+    const TOP = -Math.PI / 2;
+
+    const draw = (t) => {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, size, size);
+      if (st.sweepFrom != null) {                                                       // fixed elapsed wedge + needle
+        const a = TOP + PL_clamp01(st.sweepFrom) * Math.PI * 2;
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, TOP, a); ctx.closePath();
+        ctx.fillStyle = pal.accent; ctx.globalAlpha = 0.07; ctx.fill(); ctx.globalAlpha = 1;
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R);
+        ctx.lineWidth = Math.max(1, size * 0.012); ctx.strokeStyle = pal.accent; ctx.shadowColor = pal.accent; ctx.shadowBlur = size * 0.03; ctx.globalAlpha = 0.9; ctx.stroke();
+        ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+      }
+      if (sweep && !reduced) {                                                          // rotating radar sweep
+        const a = TOP + ((t % sweepPeriod) / sweepPeriod) * Math.PI * 2;
+        if (trail) { const N = 14, arc = Math.PI * 0.5;
+          for (let k = 0; k < N; k++) { const a1 = a - (k / N) * arc, a0 = a - ((k + 1) / N) * arc;
+            ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, a0, a1); ctx.closePath();
+            ctx.fillStyle = pal.accent; ctx.globalAlpha = 0.10 * (1 - k / N); ctx.fill(); ctx.globalAlpha = 1; } }
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R);
+        ctx.lineWidth = Math.max(1, size * 0.01); ctx.strokeStyle = pal.accent; ctx.shadowColor = pal.accent; ctx.shadowBlur = size * 0.03; ctx.globalAlpha = 0.85; ctx.stroke();
+        ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+      }
+      (st.markers || []).forEach(m => {                                                 // plotted blips
+        const a = TOP + ((((m.angle || 0) % 1) + 1) % 1) * Math.PI * 2;
+        const rr = PL_clamp01(m.radius == null ? 0.7 : m.radius) * R;
+        const mx = cx + Math.cos(a) * rr, my = cy + Math.sin(a) * rr;
+        const col = PL_resolve(m.color || pal.accent), base = m.size || Math.max(1.8, size * 0.022);
+        const k = (m.pulse && !reduced) ? (0.65 + 0.35 * Math.sin(t * 0.006 + a)) : 1;
+        ctx.save(); ctx.shadowColor = col; ctx.shadowBlur = size * 0.05 * k;
+        ctx.beginPath(); ctx.arc(mx, my, base * k, 0, 7); ctx.fillStyle = col; ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.beginPath(); ctx.arc(mx, my, Math.max(0.6, base * 0.42), 0, 7); ctx.fillStyle = pal.bone; ctx.globalAlpha = 0.85; ctx.fill(); ctx.globalAlpha = 1;
+        ctx.restore();
+      });
+    };
+    st.draw = draw;
+
+    const animated = sweep || (st.markers || []).some(m => m.pulse);
+    let raf = 0;
+    if (reduced || !animated) { draw(0); }
+    else {
+      const loop = (t) => { draw(t); raf = requestAnimationFrame(loop); };
+      const onVis = () => { if (document.hidden) { if (raf) cancelAnimationFrame(raf), raf = 0; } else if (!raf) raf = requestAnimationFrame(loop); };
+      document.addEventListener('visibilitychange', onVis); st.onVis = onVis;
+      raf = requestAnimationFrame(loop);
+    }
+    return () => { if (raf) cancelAnimationFrame(raf); if (st.onVis) document.removeEventListener('visibilitychange', st.onVis); S.current = {}; };
+    // eslint-disable-next-line
+  }, [size, accent, sweep, sweepPeriod, reduced]);
+
+  usePLEffect(() => {                                                                   // live data → re-store + redraw if static
+    const st = S.current; if (!st || !st.draw) return;
+    st.markers = props.markers || []; st.sweepFrom = sweepFrom;
+    const animated = sweep || (st.markers || []).some(m => m.pulse);
+    if (reduced || !animated) st.draw(0);
+    // eslint-disable-next-line
+  }, [sig]);
+
+  const accent2 = PL_resolve(accent || 'var(--accent-2)');
+  return (
+    <PL_ScopeFrame size={size} accent2={accent2} shape="circle">
+      <canvas ref={cvRef} style={{ position: 'absolute', inset: 0, width: size, height: size, display: 'block' }} />
+    </PL_ScopeFrame>
+  );
+};
+
+// ─── reactor gauge (2D canvas concentric charge-rings) — no WebGL ────────────────────────
+// Fraction-of-goal scalars as segmented LED rings filling clockwise from top; the rings charge
+// up on mount and ease toward new values with the planet's time-constant. A ring flagged
+// `alert` washes toward --danger as it passes 1.0. Optional centred mono readout (HTML overlay,
+// so it stays crisp + themed). Pauses when the tab is hidden; settles instantly if reduced.
+const ReactorGauge = (props) => {
+  const { size = 120, segments = 36 } = props;
+  const cvRef = usePLRef(null);
+  const S = usePLRef({});
+  const reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const rings = props.rings || [];
+  const sig = JSON.stringify(rings.map(r => [r.value, r.color, r.alert]));
+
+  usePLEffect(() => {
+    const cv = cvRef.current; if (!cv) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cv.width = size * dpr; cv.height = size * dpr; cv.style.width = cv.style.height = size + 'px';
+    const ctx = cv.getContext('2d');
+    const cx = size / 2, cy = size / 2, danger = PL_resolve('var(--danger)');
+    const st = S.current; st.ctx = ctx;
+    const TOP = -Math.PI / 2, gap = 0.22, segAng = (Math.PI * 2) / segments;
+    const thick = Math.max(3, size * 0.045), ringGap = thick + Math.max(2, size * 0.022);
+    const outerR = size / 2 - Math.max(2, size * 0.03) - thick / 2;
+
+    const drawRing = (rr, frac, colHex) => {
+      const filled = Math.round(PL_clamp01(frac) * segments);
+      for (let s = 0; s < segments; s++) {
+        const a0 = TOP + s * segAng + segAng * gap * 0.5, a1 = TOP + (s + 1) * segAng - segAng * gap * 0.5, on = s < filled;
+        ctx.beginPath(); ctx.arc(cx, cy, rr, a0, a1); ctx.lineWidth = thick; ctx.lineCap = 'butt'; ctx.strokeStyle = colHex;
+        if (on) { ctx.shadowColor = colHex; ctx.shadowBlur = size * 0.03; ctx.globalAlpha = 1; } else { ctx.shadowBlur = 0; ctx.globalAlpha = 0.10; }
+        ctx.stroke();
+      }
+      ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+    };
+    const draw = () => {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, size, size);
+      (props.rings || []).forEach((r, i) => {
+        const rr = outerR - i * ringGap; if (rr < thick) return;
+        let col = PL_resolve(r.color || 'var(--accent-2)');
+        const v = st.disp[i] != null ? st.disp[i] : (r.value || 0);
+        if (r.alert && v >= 1) col = PL_mix(col, danger, PL_clamp01(v - 1));
+        drawRing(rr, v, col);
+      });
+    };
+    st.draw = draw;
+
+    let raf = 0, last = 0;
+    const settled = () => (props.rings || []).every((r, i) => Math.abs((st.disp[i] || 0) - (r.value || 0)) < 0.002);
+    const frame = (t) => {
+      const dt = last ? Math.min(0.05, (t - last) / 1000) : 0.016; last = t;
+      const kc = 1 - Math.exp(-dt / 0.18);
+      (props.rings || []).forEach((r, i) => { const tgt = r.value || 0; st.disp[i] = (st.disp[i] || 0) + (tgt - (st.disp[i] || 0)) * kc; });
+      draw();
+      if (!settled()) { raf = requestAnimationFrame(frame); } else { raf = 0; last = 0; }
+    };
+    st.kick = () => { if (!reduced && !raf && !settled()) { last = 0; raf = requestAnimationFrame(frame); } };
+
+    if (reduced) { st.disp = (props.rings || []).map(r => r.value || 0); draw(); }      // settle instantly
+    else { st.disp = (props.rings || []).map(() => 0); draw(); st.kick(); }             // charge up from empty
+
+    const onVis = () => { if (document.hidden && raf) { cancelAnimationFrame(raf); raf = 0; } else if (!document.hidden) st.kick(); };
+    document.addEventListener('visibilitychange', onVis); st.onVis = onVis;
+    return () => { if (raf) cancelAnimationFrame(raf); if (st.onVis) document.removeEventListener('visibilitychange', st.onVis); S.current = {}; };
+    // eslint-disable-next-line
+  }, [size, segments, reduced]);
+
+  usePLEffect(() => {                                                                   // ease to new values on data change
+    const st = S.current; if (!st || !st.draw) return;
+    if (reduced) { st.disp = (props.rings || []).map(r => r.value || 0); st.draw(); } else st.kick && st.kick();
+    // eslint-disable-next-line
+  }, [sig]);
+
+  const center = props.center;
+  return (
+    <div style={{ position: 'relative', width: size, height: size }}>
+      <canvas ref={cvRef} style={{ position: 'absolute', inset: 0, width: size, height: size, display: 'block' }} />
+      {center && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', textAlign: 'center' }}>
+          <div className="mono num" style={{ fontSize: Math.round(size * 0.20), lineHeight: 1, color: 'var(--ink)', fontWeight: 600 }}>{center.value}{center.unit && <span className="muted-2" style={{ fontSize: Math.round(size * 0.085), marginLeft: 2 }}>{center.unit}</span>}</div>
+          {center.sub && <div className="mono muted-2" style={{ fontSize: Math.round(size * 0.075), marginTop: 3, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{center.sub}</div>}
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -574,11 +774,16 @@ const WarPlanet = (props) => {
 
   const accent2 = PL_resolve('var(--accent-2)');
   const atmoCss = `radial-gradient(circle at 50% 50%, transparent 60%, ${PL_resolve(alert ? 'var(--danger)' : 'var(--accent-2)')} 86%, transparent 100%)`;
+  // A <canvas> only ever yields ONE WebGL context for its DOM lifetime, and the setup effect's
+  // cleanup force-loses it. So when the scene must rebuild (new day → new `seed`, or size/landRatio
+  // change) we must remount the canvas to get a FRESH context — reusing the node renders nothing.
+  // This key matches the setup effect's deps; changing it swaps in brand-new canvas elements.
+  const glKey = `${size}|${seed}|${landRatio}|${reduced}`;
   return (
     <div style={{ position: 'relative', width: size, height: size }}>
       <div aria-hidden="true" style={{ position: 'absolute', inset: '-8%', background: atmoCss, opacity: alert ? 0.4 : 0.22, filter: 'blur(3px)', transition: 'opacity .4s ease', pointerEvents: 'none' }} />
-      <canvas ref={glRef} width={size} height={size} style={{ position: 'absolute', inset: 0, width: size, height: size, display: 'block' }} />
-      <canvas ref={fxRef} style={{ position: 'absolute', inset: 0, width: size, height: size, display: 'block' }} />
+      <canvas key={'gl|' + glKey} ref={glRef} width={size} height={size} style={{ position: 'absolute', inset: 0, width: size, height: size, display: 'block' }} />
+      <canvas key={'fx|' + glKey} ref={fxRef} style={{ position: 'absolute', inset: 0, width: size, height: size, display: 'block' }} />
       <PL_Hud size={size} accent2={accent2} />
     </div>
   );
@@ -600,3 +805,9 @@ const DonutChart = (props) => {
     </svg>
   );
 };
+
+// ─── shared viz toolkit ──────────────────────────────────────────────────────────────────
+// The same scanner-scope language the war planet wears, made available to the module cards so
+// the rest of the app reads as instruments too — all 2D (no extra WebGL contexts). Cards must
+// read window.MCViz LAZILY (inside render/effects): modules.jsx is parsed BEFORE this file.
+window.MCViz = { ScopeFrame: PL_ScopeFrame, RadialScope, ReactorGauge, resolve: PL_resolve, mix: PL_mix, clamp01: PL_clamp01 };
