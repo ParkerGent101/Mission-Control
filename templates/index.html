@@ -1704,6 +1704,112 @@
 </head>
 <body>
   <div id="root"></div>
+<!-- MC-BOOT BEGIN (cogitator loading screen; delete this block to disable) -->
+{% raw %}
+<style id="mcboot-css">
+#mcboot{position:fixed;inset:0;z-index:100000;background:#06120b;overflow:hidden;
+  font-family:'Share Tech Mono',ui-monospace,monospace;color:#2bbf7e;
+  text-shadow:0 0 2px rgba(94,255,168,.35);opacity:1;transition:opacity .5s ease-out}
+#mcboot.mcgone{opacity:0;pointer-events:none}
+/* Crossfade target: the React app eases in (opacity 0→1) as the boot cover fades
+   out, over a dark backdrop, so the UI never hard-pops or flashes grey on load. */
+#root{transition:opacity .5s ease}
+html.mc-loading #root{opacity:0}
+html.mc-ready   #root{opacity:1}
+html.mc-bg,html.mc-bg body{background:#06120b}
+/* Repeat loads this session: keep a calm dark cover (no replayed terminal) that
+   still crossfades into the app, instead of vanishing instantly. */
+#mcboot.mc-quiet pre,#mcboot.mc-quiet .scan,#mcboot.mc-quiet .topfade,#mcboot.mc-quiet .ignite{display:none}
+@media (prefers-reduced-motion:reduce){#root{transition:none}}
+#mcboot .mcwrap{position:absolute;inset:clamp(10px,2.2vw,26px);overflow:hidden}
+#mcboot pre{position:absolute;left:0;right:0;top:0;margin:0;white-space:pre-wrap;word-break:break-all;
+  font-size:clamp(10px,1.2vw,15px);line-height:1.4;will-change:transform}
+#mcboot .t{color:#1f8f5e}#mcboot .s{color:#5effa8}#mcboot .ok{color:#f2cb63}
+#mcboot .dim{color:#178050}#mcboot .warn{color:#e8b53a}#mcboot .bad{color:#ff5a4d}
+#mcboot .cur{display:inline-block;width:.6em;height:1.05em;background:#5effa8;vertical-align:-2px;animation:mccur 1s steps(1) infinite}
+@keyframes mccur{50%{opacity:0}}
+#mcboot .topfade{position:absolute;inset:0;z-index:2;pointer-events:none;
+  background:linear-gradient(to bottom,#06120b 0,transparent 12%,transparent 86%,#06120b 100%)}
+#mcboot .scan{position:absolute;inset:0;z-index:3;pointer-events:none;
+  background:repeating-linear-gradient(to bottom,rgba(0,0,0,.4) 0 1.2px,transparent 1.2px 3px);opacity:.4;mix-blend-mode:multiply}
+#mcboot .vig{position:absolute;inset:0;z-index:4;pointer-events:none;
+  background:radial-gradient(135% 125% at 50% 44%,transparent 50%,rgba(0,0,0,.9) 100%)}
+#mcboot .ignite{position:absolute;inset:0;z-index:5;background:#000;animation:mcig .55s ease-out forwards}
+#mcboot .ignite i{position:absolute;left:0;right:0;top:50%;height:2px;background:#dfffe9;
+  box-shadow:0 0 20px 7px rgba(223,255,233,.9);transform:translateY(-50%) scaleX(0);animation:mcigl .5s cubic-bezier(.7,0,.3,1) forwards}
+@keyframes mcig{0%,55%{background:#000}100%{background:transparent}}
+@keyframes mcigl{0%{transform:translateY(-50%) scaleX(0);height:2px}34%{transform:translateY(-50%) scaleX(1);height:2px;opacity:1}68%{transform:translateY(-50%) scaleX(1);height:100vh;opacity:.4}100%{height:100vh;opacity:0}}
+@media (prefers-reduced-motion:reduce){#mcboot .ignite,#mcboot .ignite i{animation:none}}
+</style>
+<div id="mcboot" aria-hidden="true">
+  <div class="mcwrap"><pre id="mcpre"></pre><div class="topfade"></div></div>
+  <div class="scan"></div><div class="vig"></div>
+  <div class="ignite"><i></i></div>
+</div>
+<script>
+(function(){
+  var doc=document.documentElement;
+  var BK='mc_booted_v1', boot=document.getElementById('mcboot');
+  if(!boot){ doc.classList.add('mc-ready'); return; }
+  var reduce = matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var iv=null, hidden=false;
+  function reveal(){ doc.classList.remove('mc-loading'); doc.classList.add('mc-ready'); }
+  function remove(){ if(iv){ clearInterval(iv); iv=null; } reveal(); doc.classList.remove('mc-bg'); if(boot && boot.parentNode) boot.parentNode.removeChild(boot); boot=null; }
+  function done(){ if(hidden || !boot) return; hidden=true; reveal(); boot.classList.add('mcgone'); setTimeout(remove,560); }
+
+  // Arm the absolute failsafe FIRST, then hide the app — guarantees #root is
+  // always revealed even if anything below throws.
+  setTimeout(done, 9000);
+  doc.classList.add('mc-loading','mc-bg');
+
+  // Reveal the moment React mounts (after a short minimum hold so it isn't a flash).
+  var seen = !!sessionStorage.getItem(BK);
+  try{ sessionStorage.setItem(BK,'1'); }catch(e){}
+  var t0=Date.now(), MIN = seen ? 250 : 1300, mounted=false;
+  function maybe(){ if(mounted && Date.now()-t0>=MIN) done(); }
+  var root=document.getElementById('root');
+  if(root){
+    var mo=new MutationObserver(function(){ if(root.childElementCount>0){ mounted=true; mo.disconnect(); maybe(); } });
+    mo.observe(root,{childList:true});
+    if(root.childElementCount>0){ mounted=true; }
+  }
+  iv=setInterval(maybe,150);
+  boot.addEventListener('click', done);
+  window.addEventListener('keydown', done, {once:true});
+
+  if(reduce){ remove(); return; }                       // honour reduced-motion: instant, no fade
+  if(seen){ boot.classList.add('mc-quiet'); return; }   // repeat load: calm cover crossfades into app
+
+  // ---- First load this session: full cogitator terminal ----
+  var NAMES=['machine-spirit','augur-array','vox-caster','lumen-servitor','noosphere','gellar-field','data-vault','binaric-xcode','scrapcode-scrub','hexgramma-ward','servo-skull','logis-core','manifold-reg','plasma-conduit','void-shield','astropath','rite-actv','purity-seal','cogitator','thermals','reliquary','litany-buf','omnissiah','enginseer','auspex','dataphage','rune-cache','mind-impulse','sacristy','vox-array','pict-decode','warp-watch','temple-bus','servitor-pool'];
+  var PATHS=['/sanctum/vault0','/dev/augur0','/dev/vox','/etc/litany.cf','/sys/manifold','/var/reliquary','/dev/cogitator','/sanctum/oils','/proc/spirit','/dev/auspex','/sys/wards','/mnt/datavault'];
+  var OK=['[  ok  ]','[ ok ]','[ done ]','[mounted]','[ active ]','[ sync ]','[sealed]'];
+  var clk=0;
+  function pick(a){ return a[Math.floor(Math.random()*a.length)]; }
+  function hex(n){ return Math.floor(Math.random()*Math.pow(16,n)).toString(16).padStart(n,'0'); }
+  function ts(){ clk+=Math.random()*0.04+0.001; return '<span class="t">['+clk.toFixed(6).padStart(11)+']</span>'; }
+  function dots(n){ return Array(Math.max(2,20-n)).join('.'); }
+  function line(){
+    var r=Math.random(), s;
+    if(r<0.42){ s=pick(NAMES); return ts()+' init <span class="s">'+s+'</span> '+dots(s.length)+' <span class="ok">'+pick(OK)+'</span>'; }
+    if(r<0.60){ return ts()+' <span class="dim">mounting <span class="s">'+pick(PATHS)+'</span></span> <span class="ok">[mounted]</span>'; }
+    if(r<0.74){ return '<span class="dim">0x'+hex(6)+': '+hex(2)+' '+hex(2)+' '+hex(2)+' '+hex(2)+' '+hex(2)+' '+hex(2)+' '+hex(2)+' '+hex(2)+'</span>'; }
+    if(r<0.85){ return ts()+' mem 0x'+hex(8)+'..0x'+hex(8)+' ok'; }
+    if(r<0.93){ return ts()+' <span class="dim">probe slot '+hex(2)+' -> '+pick(NAMES)+'</span>'; }
+    if(r<0.985){ return ts()+' load '+pick(NAMES)+'.so cant '+hex(4)+':'+hex(4); }
+    return ts()+' <span class="warn">! sig 0x'+hex(6)+' contained</span> <span class="bad">[purged]</span>';
+  }
+  var rows=[], i; for(i=0;i<200;i++) rows.push(line());
+  rows.push('<span class="s">_</span> <span class="cur"></span>');
+  var pre=document.getElementById('mcpre'); pre.innerHTML=rows.join('\n');
+
+  // compositor-driven scroll: keeps moving even while Babel blocks the main thread
+  var H=window.innerHeight, P=pre.scrollHeight, dist=Math.max(0,P-H+60), dur=Math.max(2200,dist*0.9);
+  if(pre.animate){ pre.animate([{transform:'translateY(0)'},{transform:'translateY(-'+dist+'px)'}],{duration:dur,easing:'linear',fill:'forwards'}); }
+})();
+</script>
+{% endraw %}
+<!-- MC-BOOT END -->
   <div class="crt-overlay" aria-hidden="true"></div>
   <div class="hud-overlay" aria-hidden="true">
     <span class="hud-x tl"></span><span class="hud-x tr"></span>

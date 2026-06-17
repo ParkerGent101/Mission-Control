@@ -418,10 +418,10 @@ const App = () => {
       const handler = window.Plaid.create({
         token,
         receivedRedirectUri: window.location.href,
-        onSuccess: async (publicToken) => {
+        onSuccess: async (publicToken, metadata) => {
           await fetch('/api/plaid/exchange', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ public_token: publicToken }),
+            body: JSON.stringify({ public_token: publicToken, institution: metadata?.institution }),
           });
           localStorage.removeItem('mc_plaid_link_token');
           clearUrl();

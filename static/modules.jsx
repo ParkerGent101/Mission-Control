@@ -228,6 +228,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
   const [syncing, setSyncing] = useState(false);
   const [pending, setPending] = useState(null);   // null = idle; [] = synced w/ nothing new; [...] = review queue
   const [bankConnected, setBankConnected] = useState(null);  // null = unknown, false = no Plaid items, true = linked
+  const [accounts, setAccounts] = useState([]);   // [{item_id, institution, added}] of linked banks
   const [connecting, setConnecting] = useState(false);
   const [collapsedCats, setCollapsedCats] = useState({});
   const toggleCat = (name) => setCollapsedCats(s => ({...s, [name]: !s[name]}));
@@ -266,12 +267,12 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
   useEffect(() => { loadFinances(month); }, [month]);
   useEffect(() => {
     fetch('/api/finances/subscriptions').then(r=>r.json()).then(setSubs).catch(()=>{});
-    fetch('/api/plaid/status').then(r=>r.json()).then(d => setBankConnected(!!d.connected)).catch(()=>setBankConnected(null));
+    fetch('/api/plaid/status').then(r=>r.json()).then(d => { setBankConnected(!!d.connected); setAccounts(d.accounts || []); }).catch(()=>setBankConnected(null));
   }, []);
   useRefreshListener(() => {
     loadFinances(month);
     fetch('/api/finances/subscriptions').then(r=>r.json()).then(setSubs).catch(()=>{});
-    fetch('/api/plaid/status').then(r=>r.json()).then(d => setBankConnected(!!d.connected)).catch(()=>{});
+    fetch('/api/plaid/status').then(r=>r.json()).then(d => { setBankConnected(!!d.connected); setAccounts(d.accounts || []); }).catch(()=>{});
   });
   const changeMonth = (dir) => {
     const [y, m] = month.split('-').map(Number);
@@ -327,18 +328,33 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
       localStorage.setItem('mc_plaid_link_token', d.link_token);
       const handler = window.Plaid.create({
         token: d.link_token,
-        onSuccess: async (publicToken) => {
+        onSuccess: async (publicToken, metadata) => {
           await fetch('/api/plaid/exchange', { method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ public_token: publicToken }) });
+            body: JSON.stringify({ public_token: publicToken, institution: metadata?.institution }) });
           localStorage.removeItem('mc_plaid_link_token');
           setBankConnected(true); setConnecting(false);
-          window.__toast?.('Bank account connected', 'success');
+          window.__toast?.(`${metadata?.institution?.name || 'Bank account'} connected`, 'success');
+          fetch('/api/plaid/status').then(r=>r.json()).then(d => setAccounts(d.accounts || [])).catch(()=>{});
           syncBank();   // pull the first batch straight into the review queue
         },
         onExit: () => { localStorage.removeItem('mc_plaid_link_token'); setConnecting(false); },
       });
       handler.open();
     } catch { setConnecting(false); window.__toast?.('Plaid connection failed', 'error'); }
+  };
+
+  // Remove one linked institution (Plaid item) without touching the others.
+  const disconnectBank = async (itemId, name) => {
+    if (!window.confirm(`Disconnect ${name || 'this account'}? Already-imported transactions stay; new syncing stops. You can reconnect anytime.`)) return;
+    try {
+      const r = await fetch('/api/plaid/disconnect', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ item_id: itemId }) });
+      const d = await r.json();
+      if (!r.ok || d.error) { window.__toast?.(d.error || 'Disconnect failed', 'error'); return; }
+      setAccounts(a => a.filter(x => x.item_id !== itemId));
+      setBankConnected((d.count | 0) > 0);
+      window.__toast?.('Account disconnected', 'success');
+    } catch { window.__toast?.('Disconnect failed', 'error'); }
   };
 
   const importPending = async () => {
@@ -520,11 +536,25 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
         {bankConnected === false ? (
           <button className="btn" disabled={connecting} onClick={connectBank} title="Link a bank account via Plaid"><Icon name={connecting ? "loader" : "wallet"} size={13}/>{connecting ? "Connecting…" : "Connect bank"}</button>
         ) : (
-          <button className="btn" disabled={syncing} onClick={syncBank} title="Pull recent transactions from your connected bank (Plaid) for review"><Icon name={syncing ? "loader" : "wallet"} size={13}/>{syncing ? "Syncing…" : "Sync bank"}</button>
+          <>
+            <button className="btn" disabled={syncing} onClick={syncBank} title="Pull recent transactions from your connected bank (Plaid) for review"><Icon name={syncing ? "loader" : "wallet"} size={13}/>{syncing ? "Syncing…" : "Sync bank"}</button>
+            <button className="btn" disabled={connecting} onClick={connectBank} title="Link another bank or card via Plaid"><Icon name={connecting ? "loader" : "plus"} size={13}/>{connecting ? "Connecting…" : "Add bank"}</button>
+          </>
         )}
         <button className="btn primary" onClick={() => setShowAdd(s=>!s)}><Icon name="plus" size={13}/>Add expense</button>
       </>}
     >
+      {accounts.length > 0 && (
+        <div style={{ display:'flex', flexWrap:'wrap', gap:6, alignItems:'center', marginBottom:12 }}>
+          <span style={{ fontFamily:'var(--font-mono)', fontSize:10.5, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--ink-4)' }}>Linked</span>
+          {accounts.map(a => (
+            <span key={a.item_id} style={{ display:'inline-flex', alignItems:'center', gap:6, fontSize:11.5, fontFamily:'var(--font-mono)', letterSpacing:'0.03em', padding:'3px 8px', border:'1px solid var(--line-soft)', borderRadius:4, color:'var(--ink-3)' }}>
+              <Icon name="wallet" size={11}/>{a.institution || 'Bank'}
+              <button onClick={()=>disconnectBank(a.item_id, a.institution)} title="Disconnect this account" style={{ background:'none', border:'none', color:'var(--ink-4)', cursor:'pointer', padding:0, lineHeight:1, fontSize:14 }}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
       {pending && pending.length > 0 && (
         <div style={{ padding:'0 0 12px', borderBottom:'1px solid var(--line-soft)', marginBottom:12 }}>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8, gap:8, flexWrap:'wrap' }}>

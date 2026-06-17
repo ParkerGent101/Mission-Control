@@ -110,10 +110,10 @@ const OnboardingWizard = ({ onComplete }) => {
       localStorage.setItem('mc_plaid_link_token', d.link_token);
       const handler = window.Plaid.create({
         token: d.link_token,
-        onSuccess: async (publicToken) => {
+        onSuccess: async (publicToken, metadata) => {
           await fetch('/api/plaid/exchange', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ public_token: publicToken })
+            body: JSON.stringify({ public_token: publicToken, institution: metadata?.institution })
           });
           localStorage.removeItem('mc_plaid_link_token');
           setPlaidStatus('connected');

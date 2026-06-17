@@ -1529,7 +1529,8 @@ def plaid_link_token():
 def plaid_exchange():
     if not PLAID_CLIENT_ID or not PLAID_SECRET:
         return jsonify({"error": "Plaid not configured"}), 400
-    public_token = (request.json or {}).get("public_token")
+    body = request.json or {}
+    public_token = body.get("public_token")
     if not public_token:
         return jsonify({"error": "Missing public_token"}), 400
     client, err = _plaid_client()
@@ -1539,20 +1540,56 @@ def plaid_exchange():
         from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
         resp = client.item_public_token_exchange(ItemPublicTokenExchangeRequest(public_token=public_token))
         config = _load(PLAID_CONFIG_FILE, {"items": []})
+        # Plaid Link's onSuccess metadata carries the chosen institution; store its name
+        # so multiple linked accounts (Capital One, SoFi, …) can be told apart and managed.
+        inst = body.get("institution") or {}
         config["items"].append({
             "access_token": resp["access_token"],
             "item_id": resp["item_id"],
+            "institution": inst.get("name") or body.get("institution_name") or "Bank",
+            "institution_id": inst.get("institution_id"),
             "added": datetime.now().isoformat(),
         })
         _save(PLAID_CONFIG_FILE, config)
-        return jsonify({"ok": True, "item_id": resp["item_id"]})
+        return jsonify({"ok": True, "item_id": resp["item_id"], "institution": inst.get("name")})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/plaid/status", methods=["GET"])
 def plaid_status():
     config = _load(PLAID_CONFIG_FILE, {"items": []})
-    return jsonify({"connected": len(config.get("items", [])) > 0, "count": len(config.get("items", []))})
+    items = config.get("items", [])
+    # Surface the linked institutions (never the access tokens) so the Finance card can
+    # list connected accounts and offer per-account disconnect.
+    accounts = [{
+        "item_id": it.get("item_id"),
+        "institution": it.get("institution") or "Bank",
+        "added": it.get("added"),
+    } for it in items]
+    return jsonify({"connected": len(items) > 0, "count": len(items), "accounts": accounts})
+
+@app.route("/api/plaid/disconnect", methods=["POST"])
+def plaid_disconnect():
+    """Remove a single connected Plaid item by item_id: invalidate it at Plaid
+    (best-effort) and drop it locally so its transactions stop syncing."""
+    item_id = (request.json or {}).get("item_id")
+    if not item_id:
+        return jsonify({"error": "Missing item_id"}), 400
+    config = _load(PLAID_CONFIG_FILE, {"items": []})
+    items = config.get("items", [])
+    target = next((it for it in items if it.get("item_id") == item_id), None)
+    if not target:
+        return jsonify({"error": "Account not found"}), 404
+    client, err = _plaid_client()
+    if client and not err:
+        try:
+            from plaid.model.item_remove_request import ItemRemoveRequest
+            client.item_remove(ItemRemoveRequest(access_token=target["access_token"]))
+        except Exception:
+            pass   # local removal proceeds even if the Plaid call fails
+    config["items"] = [it for it in items if it.get("item_id") != item_id]
+    _save(PLAID_CONFIG_FILE, config)
+    return jsonify({"ok": True, "count": len(config["items"])})
 
 @app.route("/api/plaid/transactions", methods=["GET"])
 def plaid_transactions():

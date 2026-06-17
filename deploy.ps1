@@ -18,12 +18,12 @@ $BUCKET     = "parker-mission-control-data"
 
 # Free Plaid accounts can run Mission Control against Sandbox test data. Set this to
 # "production" only when you have Plaid Production access and have stored that secret.
-$PLAID_ENV = "sandbox"
+$PLAID_ENV = "production"
 
 # OAuth banks (Fidelity, Chase, etc.): register this EXACT url as an allowed redirect
 # URI in the Plaid dashboard FIRST, then set it here. Leave "" until registered - an
 # unregistered redirect URI makes every bank link fail, not just OAuth ones.
-$PLAID_REDIRECT_URI = ""   # e.g. "https://mission-control-568559213462.us-central1.run.app/"
+$PLAID_REDIRECT_URI = "https://mission-control-568559213462.us-central1.run.app/"   # e.g. "https://mission-control-568559213462.us-central1.run.app/"
 
 Write-Host "==> Setting project..." -ForegroundColor Cyan
 gcloud config set project $PROJECT_ID
