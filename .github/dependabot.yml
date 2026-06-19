@@ -1,0 +1,17 @@
+# Automated dependency vulnerability scanning + version updates.
+# Dependabot opens PRs for outdated/vulnerable dependencies; combined with
+# GitHub Dependabot security alerts (enabled in repo Settings -> Code security),
+# this provides continuous scanning of the application's dependencies.
+version: 2
+updates:
+  # Python application dependencies (requirements.txt at repo root)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "security"
+    commit-message:
+      prefix: "deps"
