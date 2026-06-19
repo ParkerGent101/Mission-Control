@@ -32,6 +32,21 @@ deployed from reviewed source. The Git history records when components were upda
 This policy — and a check of current runtime/dependency support status — is reviewed
 at least annually and on significant change. Revisions tracked in Git history.
 
+## 6. EOL Monitoring Log
+Dated record of support-status checks (the operating evidence for this policy).
+
+### 2026-06-19 — baseline check
+| Component | Version in use | Support status | EOL / notes |
+|-----------|----------------|----------------|-------------|
+| Python runtime | 3.11 (`python:3.11-slim`) | Supported | Security support to ~Oct 2027 |
+| Base image | Debian 12 "bookworm" (slim) | Supported | LTS to ~2028 |
+| Flask | ≥ 3.0 | Current | — |
+| gunicorn | ≥ 21 | Current | — |
+| anthropic / google-auth / google-api-python-client / plaid-python / google-cloud-storage | rolling latest (`>=`) | Maintained | Pinned to current majors |
+| React (frontend, via CDN) | 18 | Supported | React 19 available; 18 not EOL |
+
+**Result:** No end-of-life software in use. Watch item: Python 3.11 (plan upgrade before Oct 2027).
+
 ### Approval
 | Role | Name | Date |
 |------|------|------|
