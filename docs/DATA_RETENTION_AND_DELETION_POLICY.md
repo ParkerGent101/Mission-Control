@@ -16,7 +16,7 @@ usefulness to the operator.
 |------|-----------|
 | Financial transactions / budget figures | Kept for the current and recent periods for trend/budget context; superseded by yearly rollover. |
 | Plaid access tokens | Kept only while the institution is connected; revoked on disconnect. |
-| Google OAuth tokens | Kept only while the integration is connected; revoked on disconnect / re-auth. |
+| Google OAuth tokens | Kept only while the integration is connected; the stored token is deleted on credential rotation / re-auth (full revocation via the operator's Google Account third-party-access settings). |
 | Calendar, tasks, health, band, and other module data | Kept while relevant to the operator; deletable per item or in bulk. |
 | Activity log | Bounded/rolling; not retained indefinitely. |
 | Secrets (API keys, client secrets) | Kept while the integration is in use; rotated if exposure is suspected. |
@@ -25,7 +25,9 @@ usefulness to the operator.
 - **In-app data reset** — clears application data on demand.
 - **Disconnect a financial institution** — removes its Plaid item and **revokes the
   associated access token**.
-- **Disconnect Google integrations** — revokes the stored OAuth token.
+- **Disconnect Google integrations** — deletes the stored Google OAuth token (on
+  credential rotation / re-auth, or by removing it from storage); full revocation of
+  the grant is performed via the operator's Google Account third-party-access settings.
 - **Storage deletion** — data objects can be removed directly from Google Cloud
   Storage; **secret rotation/deletion** via Secret Manager.
 - Deletions propagate to the durable cloud storage backing the application.
