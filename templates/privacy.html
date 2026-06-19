@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy Policy · Mission Control</title>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--gold:#d8a93b;--gold-bright:#f2cb63;--bone:#e8e2d0;--dim:#8a8264;--ink:#0a0b0e}
+body{background:var(--ink);color:var(--bone);font-family:'Share Tech Mono',monospace;line-height:1.65;min-height:100vh;padding:42px 18px 80px}
+body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;background:radial-gradient(60% 42% at 50% -6%,rgba(216,169,59,.08),transparent 70%),radial-gradient(130% 120% at 50% 45%,transparent 55%,rgba(0,0,0,.6) 100%)}
+.wrap{position:relative;z-index:1;max-width:720px;margin:0 auto}
+.crest{font-family:'Cinzel Decorative',serif;color:var(--gold);text-align:center;font-size:13px;letter-spacing:3px;margin-bottom:6px;text-shadow:0 0 14px rgba(216,169,59,.4)}
+h1{font-family:'Cinzel Decorative',serif;color:var(--gold-bright);font-size:26px;text-align:center;margin-bottom:4px;text-shadow:0 0 16px rgba(216,169,59,.4)}
+.meta{text-align:center;color:var(--dim);font-size:11px;letter-spacing:1px;margin-bottom:34px}
+.meta a{color:var(--gold)}
+h2{color:var(--gold);font-family:'Cinzel Decorative',serif;font-size:15px;letter-spacing:1px;margin:30px 0 10px;border-bottom:1px solid rgba(216,169,59,.22);padding-bottom:6px}
+p{margin:0 0 12px}
+ul{margin:0 0 14px 20px}
+li{margin-bottom:7px}
+strong{color:var(--gold-bright)}
+.back{display:inline-block;margin-top:38px;color:var(--gold);text-decoration:none;border:1px solid rgba(216,169,59,.4);border-radius:2px;padding:9px 16px;font-size:12px;letter-spacing:2px;text-transform:uppercase}
+.back:hover{background:rgba(216,169,59,.12)}
+.foot{margin-top:30px;color:var(--dim);font-size:10px;letter-spacing:1px;border-top:1px solid rgba(216,169,59,.15);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="crest">&#10016; Mission Control &#10016;</div>
+  <h1>Privacy Policy</h1>
+  <div class="meta">Version 1.0 &middot; Effective 2026-06-19 &middot; Contact: <a href="mailto:parkergent7@gmail.com">parkergent7@gmail.com</a></div>
+
+  <h2>1. Overview</h2>
+  <p>Mission Control is a <strong>single-user personal application</strong> operated by Parker Gent. It processes the operator&rsquo;s own financial, scheduling, and personal-productivity data. There are no third-party end users; access is limited to the operator.</p>
+
+  <h2>2. Data the application processes</h2>
+  <ul>
+    <li><strong>Financial data</strong> &mdash; account balances, transactions, holdings, and budget figures, obtained through connected financial institutions (via Plaid), Google Sheets, and manual entry.</li>
+    <li><strong>Identity data</strong> &mdash; the Google account email used to sign in.</li>
+    <li><strong>Productivity data</strong> &mdash; calendar events, contacts, tasks, notes, health/habit logs, and band/work data entered by or synced for the operator.</li>
+    <li><strong>Credentials</strong> &mdash; OAuth tokens and API keys required to operate integrations (stored securely; see &sect;5).</li>
+  </ul>
+
+  <h2>3. How and why it is collected</h2>
+  <p>Data is collected only to provide the operator&rsquo;s own dashboard functionality: displaying finances, calendar, tasks, health, and related modules. The application does <strong>not</strong> use data for advertising and does <strong>not</strong> sell or share data for marketing purposes.</p>
+
+  <h2>4. Third-party services (sub-processors)</h2>
+  <ul>
+    <li><strong>Plaid</strong> &mdash; connects to financial institutions to retrieve account and transaction data, at the operator&rsquo;s instruction. Used only to deliver the finance features.</li>
+    <li><strong>Google</strong> &mdash; identity/sign-in (OAuth/OIDC), Calendar, Drive/Sheets, and hosting (Cloud Run, Cloud Storage, Secret Manager).</li>
+    <li><strong>Anthropic</strong> &mdash; powers AI assistant features; only the content the operator submits for a given request is sent.</li>
+  </ul>
+  <p>Each receives only the minimum data necessary for its function, under its own terms.</p>
+
+  <h2>5. Storage &amp; security</h2>
+  <ul>
+    <li>Data is stored in Google Cloud (Cloud Storage) and secrets in Google Secret Manager, <strong>encrypted at rest</strong> by default.</li>
+    <li>All traffic is served over <strong>TLS/HTTPS</strong> (encrypted in transit).</li>
+    <li>Application access requires <strong>Sign in with Google restricted to an allow-list</strong>, protected by the operator&rsquo;s <strong>multi-factor authentication</strong>. Shared-password login is disabled in production.</li>
+  </ul>
+
+  <h2>6. Retention &amp; deletion</h2>
+  <p>Data is retained only while useful to the operator and can be deleted on demand (in-app data reset, disconnecting financial institutions to revoke Plaid tokens, and secret rotation).</p>
+
+  <h2>7. Rights &amp; control</h2>
+  <p>As the sole data subject and operator, Parker Gent has full control over all data in the system, including the ability to access, correct, export, and delete it, and to revoke any third-party connection at any time.</p>
+
+  <h2>8. Changes</h2>
+  <p>This policy is reviewed at least annually and updated on any significant change to the data handled or the services used. Revisions are recorded in version control.</p>
+
+  <a class="back" href="/login">&larr; Back to Mission Control</a>
+  <div class="foot">&#10016; Mission Control &mdash; personal dashboard. Operated by Parker Gent. &#10016;</div>
+</div>
+</body>
+</html>

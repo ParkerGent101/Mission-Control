@@ -516,6 +516,8 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
         ))}
       </div>
 
+      <a href="/privacy" target="_blank" rel="noopener" style={{ display: 'inline-block', marginTop: 14, fontSize: 12, color: 'var(--accent)', textDecoration: 'underline' }}>Privacy Policy</a>
+
       <SectionHead style={{ marginTop: 24 }}>Keyboard Shortcuts</SectionHead>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {[

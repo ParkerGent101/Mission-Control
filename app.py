@@ -213,7 +213,7 @@ def require_auth():
     p = request.path
     if p.startswith('/static/'):
         return None
-    if p in ('/login', '/api/login', '/api/logout', '/api/me',
+    if p in ('/login', '/privacy', '/api/login', '/api/logout', '/api/me',
              '/api/auth/google/start', '/api/auth/google/callback'):
         return None
     if session.get('authenticated'):
@@ -225,6 +225,11 @@ def require_auth():
 @app.route("/login")
 def login_page():
     return render_template("login.html")
+
+@app.route("/privacy")
+def privacy_page():
+    """Public privacy policy for the application where Plaid Link is deployed."""
+    return render_template("privacy.html")
 
 def _effective_password():
     override = _load(USER_CONFIG_FILE, {}).get("password")
