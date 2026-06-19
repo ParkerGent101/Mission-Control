@@ -3,31 +3,89 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Privacy Policy · Mission Control</title>
-<link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<title>Privacy Policy &middot; Mission Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-:root{--gold:#d8a93b;--gold-bright:#f2cb63;--bone:#e8e2d0;--dim:#8a8264;--ink:#0a0b0e}
-body{background:var(--ink);color:var(--bone);font-family:'Share Tech Mono',monospace;line-height:1.65;min-height:100vh;padding:42px 18px 80px}
-body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;background:radial-gradient(60% 42% at 50% -6%,rgba(216,169,59,.08),transparent 70%),radial-gradient(130% 120% at 50% 45%,transparent 55%,rgba(0,0,0,.6) 100%)}
+/* Same console-HUD system as the main app (index.html): warm-amber oklch ramp,
+   Share Tech Mono throughout, gilded gold trim, CRT scanlines + vignette. */
+:root{
+  --bg:        oklch(0.150 0.018 70);
+  --surface:   oklch(0.225 0.028 74);
+  --line:      oklch(0.500 0.060 80);
+  --line-soft: oklch(0.360 0.045 78);
+  --ink:       oklch(0.965 0.022 92);
+  --ink-2:     oklch(0.880 0.045 88);
+  --ink-3:     oklch(0.780 0.065 84);
+  --ink-4:     oklch(0.660 0.080 80);
+  --accent:    oklch(0.80 0.135 75);
+  --accent-2:  oklch(0.88 0.12 92);
+  --gold:        oklch(0.840 0.120 85);
+  --gold-bright: oklch(0.930 0.100 92);
+  --bone:        oklch(0.970 0.030 92);
+  --phosphor:    oklch(0.275 0.115 150);
+  --gold-soft:   color-mix(in oklch, var(--accent) 48%, var(--line));
+  --mono: 'Share Tech Mono', ui-monospace, monospace;
+}
+body{
+  background:var(--bg);color:var(--ink-2);font-family:var(--mono);
+  line-height:1.7;letter-spacing:.01em;min-height:100vh;padding:46px 18px 90px;
+  text-shadow:0 0 1px color-mix(in oklch, var(--accent-2) 22%, transparent);
+}
+/* Fine CRT scanlines + faint noise grain (matches index.html body::before) */
+body::before{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:9000;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+    repeating-linear-gradient(to bottom, rgba(0,0,0,0.42) 0px, rgba(0,0,0,0.42) 1.2px, transparent 1.2px, transparent 3px);
+  background-size:120px 120px, auto;opacity:.42;mix-blend-mode:multiply;
+}
+/* Top-glow, faint green phosphor bloom + deep vignette (matches body::after) */
+body::after{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:8999;
+  background:
+    radial-gradient(62% 38% at 50% -8%, color-mix(in oklch, var(--accent-2) 11%, transparent), transparent 70%),
+    radial-gradient(120% 100% at 50% 50%, color-mix(in oklch, var(--phosphor) 7%, transparent), transparent 60%),
+    radial-gradient(135% 130% at 50% 42%, transparent 50%, color-mix(in oklch, #000 84%, var(--accent-2)) 100%);
+}
 .wrap{position:relative;z-index:1;max-width:720px;margin:0 auto}
-.crest{font-family:'Cinzel Decorative',serif;color:var(--gold);text-align:center;font-size:13px;letter-spacing:3px;margin-bottom:6px;text-shadow:0 0 14px rgba(216,169,59,.4)}
-h1{font-family:'Cinzel Decorative',serif;color:var(--gold-bright);font-size:26px;text-align:center;margin-bottom:4px;text-shadow:0 0 16px rgba(216,169,59,.4)}
-.meta{text-align:center;color:var(--dim);font-size:11px;letter-spacing:1px;margin-bottom:34px}
-.meta a{color:var(--gold)}
-h2{color:var(--gold);font-family:'Cinzel Decorative',serif;font-size:15px;letter-spacing:1px;margin:30px 0 10px;border-bottom:1px solid rgba(216,169,59,.22);padding-bottom:6px}
-p{margin:0 0 12px}
-ul{margin:0 0 14px 20px}
-li{margin-bottom:7px}
-strong{color:var(--gold-bright)}
-.back{display:inline-block;margin-top:38px;color:var(--gold);text-decoration:none;border:1px solid rgba(216,169,59,.4);border-radius:2px;padding:9px 16px;font-size:12px;letter-spacing:2px;text-transform:uppercase}
-.back:hover{background:rgba(216,169,59,.12)}
-.foot{margin-top:30px;color:var(--dim);font-size:10px;letter-spacing:1px;border-top:1px solid rgba(216,169,59,.15);padding-top:14px}
+.crest{font-family:var(--mono);color:var(--accent);text-align:center;font-size:11px;letter-spacing:.32em;text-transform:uppercase;margin-bottom:10px;text-shadow:0 0 13px color-mix(in oklch, var(--accent) 40%, transparent)}
+.crest .sig{opacity:.85}
+h1{
+  font-family:var(--mono);color:var(--bone);font-size:24px;text-align:center;font-weight:700;
+  letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px;
+  text-shadow:0 0 22px color-mix(in oklch, var(--accent) 30%, transparent),0 2px 0 #000;
+}
+.meta{text-align:center;color:var(--ink-4);font-size:11px;letter-spacing:.08em;margin-bottom:36px}
+.meta a{color:var(--accent);text-decoration:none}
+.meta a:hover{text-decoration:underline}
+h2{
+  color:color-mix(in oklch, var(--accent-2) 70%, var(--ink-3));font-family:var(--mono);
+  font-size:14px;letter-spacing:.14em;text-transform:uppercase;margin:32px 0 11px;
+  border-bottom:1px solid var(--gold-soft);padding-bottom:7px;display:flex;align-items:center;gap:9px;
+}
+h2::before{content:'\2720';color:var(--accent);opacity:.8;font-size:12px;line-height:1}
+p{margin:0 0 12px;color:var(--ink-2)}
+ul{margin:0 0 14px 22px}
+li{margin-bottom:7px;color:var(--ink-2)}
+li::marker{color:var(--accent)}
+strong{color:var(--accent-2);font-weight:400}
+.back{
+  display:inline-block;margin-top:40px;color:var(--accent);text-decoration:none;
+  border:1px solid var(--accent);border-radius:2px;padding:10px 18px;
+  font-size:11px;letter-spacing:.18em;text-transform:uppercase;
+  background:linear-gradient(180deg, color-mix(in oklch, var(--accent) 12%, transparent), color-mix(in oklch, var(--accent) 4%, transparent));
+  transition:background .2s,box-shadow .2s;
+}
+.back:hover{background:color-mix(in oklch, var(--accent) 22%, transparent);box-shadow:0 0 12px color-mix(in oklch, var(--accent) 35%, transparent)}
+.foot{margin-top:32px;color:var(--ink-4);font-size:10px;letter-spacing:.1em;text-transform:uppercase;border-top:1px solid var(--line-soft);padding-top:16px}
+.foot .sig{color:var(--accent);opacity:.7}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="crest">&#10016; Mission Control &#10016;</div>
+  <div class="crest"><span class="sig">&#10016;</span> Mission Control <span class="sig">&#10016;</span></div>
   <h1>Privacy Policy</h1>
   <div class="meta">Version 1.0 &middot; Effective 2026-06-19 &middot; Contact: <a href="mailto:parkergent7@gmail.com">parkergent7@gmail.com</a></div>
 
@@ -70,7 +128,7 @@ strong{color:var(--gold-bright)}
   <p>This policy is reviewed at least annually and updated on any significant change to the data handled or the services used. Revisions are recorded in version control.</p>
 
   <a class="back" href="/login">&larr; Back to Mission Control</a>
-  <div class="foot">&#10016; Mission Control &mdash; personal dashboard. Operated by Parker Gent. &#10016;</div>
+  <div class="foot"><span class="sig">&#10016;</span> Mission Control &mdash; personal dashboard. Operated by Parker Gent. <span class="sig">&#10016;</span></div>
 </div>
 </body>
 </html>

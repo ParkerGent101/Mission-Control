@@ -4,47 +4,129 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mission Control</title>
-<link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700;900&family=UnifrakturCook:wght@700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-:root{--gold:#d8a93b;--gold-bright:#f2cb63;--bone:#e8e2d0;--blood:#b3242a;--dim:#5a5340}
-body{background:#0a0b0e;color:var(--bone);font-family:'Share Tech Mono',monospace;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;}
-/* CRT scanlines + grimdark vignette */
-body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:9;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.16) 2px,rgba(0,0,0,.16) 3px)}
-body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:8;background:radial-gradient(60% 42% at 50% -6%,rgba(216,169,59,.10),transparent 70%),radial-gradient(130% 120% at 50% 45%,transparent 48%,rgba(0,0,0,.72) 100%)}
-.card{width:min(390px,92vw);background:linear-gradient(180deg,#0d0f13,#0a0b0e);border:1px solid rgba(216,169,59,.32);border-radius:3px;padding:46px 38px 38px;position:relative;box-shadow:0 18px 60px rgba(0,0,0,.6),inset 0 1px 0 rgba(242,203,99,.12);z-index:1}
-/* bright gold top rail */
-.card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--gold) 22%,var(--gold-bright) 50%,var(--gold) 78%,transparent);box-shadow:0 0 9px rgba(216,169,59,.55)}
-/* inner gilded frame */
-.card::after{content:'';position:absolute;inset:5px;border:1px solid rgba(216,169,59,.18);border-radius:2px;pointer-events:none}
-.sigil{font-family:'Cinzel Decorative',serif;font-size:24px;color:var(--gold);text-align:center;margin-bottom:6px;text-shadow:0 0 14px rgba(216,169,59,.5)}
-.logo{font-family:'UnifrakturCook',serif;font-size:30px;letter-spacing:1px;color:var(--gold);text-align:center;line-height:1;margin-bottom:8px;text-shadow:0 0 14px rgba(216,169,59,.55),0 0 30px rgba(216,169,59,.2)}
-.sub{font-size:9px;letter-spacing:5px;text-transform:uppercase;color:var(--dim);text-align:center;margin-bottom:34px}
-.prompt-line{font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--dim);display:block;margin-bottom:8px}
-input[type=password]{width:100%;background:#06070a;border:1px solid rgba(216,169,59,.28);border-radius:2px;padding:12px 14px;color:var(--gold-bright);font-family:'Share Tech Mono',monospace;font-size:16px;outline:none;transition:border-color .2s,box-shadow .2s;letter-spacing:3px}
-input[type=password]:focus{border-color:var(--gold);box-shadow:0 0 10px rgba(216,169,59,.35),inset 0 1px 3px rgba(0,0,0,.5)}
-.btn{width:100%;margin-top:16px;padding:13px;background:linear-gradient(180deg,rgba(216,169,59,.16),rgba(216,169,59,.06));color:var(--gold-bright);font-family:'Cinzel Decorative',serif;font-size:12px;font-weight:700;letter-spacing:3px;border:1px solid var(--gold);border-radius:2px;cursor:pointer;transition:all .2s;text-transform:uppercase}
-.btn:hover{background:linear-gradient(180deg,rgba(216,169,59,.32),rgba(216,169,59,.14));box-shadow:0 0 12px rgba(216,169,59,.4)}
+/* Palette + type lifted verbatim from the main app's console-HUD skin (index.html)
+   so the login surface reads as the same system: warm-amber oklch ramp, Share Tech
+   Mono throughout, gilded gold trim, CRT scanlines + vignette. */
+:root{
+  --bg:        oklch(0.150 0.018 70);
+  --bg-2:      oklch(0.190 0.022 72);
+  --surface:   oklch(0.225 0.028 74);
+  --surface-2: oklch(0.275 0.034 76);
+  --line:      oklch(0.500 0.060 80);
+  --line-soft: oklch(0.360 0.045 78);
+  --ink:       oklch(0.965 0.022 92);
+  --ink-2:     oklch(0.880 0.045 88);
+  --ink-3:     oklch(0.780 0.065 84);
+  --ink-4:     oklch(0.660 0.080 80);
+  --accent:    oklch(0.80 0.135 75);
+  --accent-2:  oklch(0.88 0.12 92);
+  --danger:    oklch(0.660 0.160 45);
+  --gold:        oklch(0.840 0.120 85);
+  --gold-bright: oklch(0.930 0.100 92);
+  --gold-deep:   oklch(0.660 0.120 70);
+  --bone:        oklch(0.970 0.030 92);
+  --blood:       oklch(0.550 0.120 45);
+  --phosphor:    oklch(0.275 0.115 150);
+  --gold-soft:   color-mix(in oklch, var(--accent) 48%, var(--line));
+  --mono: 'Share Tech Mono', ui-monospace, monospace;
+}
+body{
+  background:var(--bg);color:var(--ink);font-family:var(--mono);
+  letter-spacing:.01em;line-height:1.45;min-height:100vh;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;
+  text-shadow:0 0 1px color-mix(in oklch, var(--accent-2) 24%, transparent);
+}
+/* Fine CRT scanlines + faint noise grain (matches index.html body::before) */
+body::before{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:9000;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+    repeating-linear-gradient(to bottom, rgba(0,0,0,0.42) 0px, rgba(0,0,0,0.42) 1.2px, transparent 1.2px, transparent 3px);
+  background-size:120px 120px, auto;opacity:.5;mix-blend-mode:multiply;
+}
+/* Candlelit top-glow, faint green phosphor bloom + deep vignette (matches body::after) */
+body::after{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:8999;
+  background:
+    radial-gradient(62% 42% at 50% -8%, color-mix(in oklch, var(--accent-2) 14%, transparent), transparent 70%),
+    radial-gradient(120% 100% at 50% 52%, color-mix(in oklch, var(--phosphor) 9%, transparent), transparent 58%),
+    radial-gradient(135% 125% at 50% 44%, transparent 44%, color-mix(in oklch, #000 88%, var(--accent-2)) 100%);
+}
+@media (prefers-reduced-motion: no-preference){
+  body::after{animation:crtBreathe 7s ease-in-out infinite}
+  @keyframes crtBreathe{0%,100%{opacity:1}50%{opacity:.88}}
+}
+/* Gilded armour-plate card: corner rivets + bright gold top rail (matches .card) */
+.card{
+  width:min(390px,92vw);position:relative;z-index:1;padding:46px 38px 38px;
+  border:1px solid var(--gold-soft);border-radius:3px;
+  background:
+    radial-gradient(circle at 8px 8px, var(--gold-bright) 0 1.3px, #0c0900 1.4px 2.3px, transparent 2.5px),
+    radial-gradient(circle at calc(100% - 8px) 8px, var(--gold-bright) 0 1.3px, #0c0900 1.4px 2.3px, transparent 2.5px),
+    radial-gradient(circle at 8px calc(100% - 8px), var(--gold-bright) 0 1.3px, #0c0900 1.4px 2.3px, transparent 2.5px),
+    radial-gradient(circle at calc(100% - 8px) calc(100% - 8px), var(--gold-bright) 0 1.3px, #0c0900 1.4px 2.3px, transparent 2.5px),
+    linear-gradient(180deg, color-mix(in oklch, var(--surface) 84%, #000), var(--surface));
+  background-repeat:no-repeat;
+  box-shadow:inset 0 1px 0 color-mix(in oklch, var(--accent) 14%, transparent),0 2px 0 rgba(0,0,0,.5),0 12px 34px rgba(0,0,0,.5);
+}
+.card::before{/* bright gold rail across the top edge */
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;z-index:1;
+  background:linear-gradient(90deg,transparent,var(--gold) 20%,var(--gold-bright) 50%,var(--gold) 80%,transparent);
+  box-shadow:0 0 8px color-mix(in oklch, var(--accent) 55%, transparent);pointer-events:none;
+}
+.brand-mark{
+  width:30px;height:30px;border-radius:50%;margin:0 auto 14px;
+  background:radial-gradient(circle at 50% 38%, var(--gold-bright), var(--gold-deep) 64%, #140e00 100%);
+  box-shadow:0 0 0 1px color-mix(in oklch, var(--accent) 75%, transparent),0 0 16px color-mix(in oklch, var(--accent) 60%, transparent);
+}
+.brand-name{
+  font-family:var(--mono);font-weight:700;font-size:20px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--accent);text-align:center;line-height:1;
+  text-shadow:0 0 13px color-mix(in oklch, var(--accent) 45%, transparent);
+}
+.sub{font-size:9.5px;letter-spacing:.34em;text-transform:uppercase;color:var(--ink-4);text-align:center;margin:10px 0 32px}
+.sub .sig{color:var(--accent);opacity:.85}
+.prompt-line{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-4);display:block;margin-bottom:8px}
+input[type=password]{
+  width:100%;background:var(--bg);border:1px solid var(--line-soft);border-radius:2px;
+  padding:12px 14px;color:var(--accent-2);font-family:var(--mono);font-size:16px;outline:none;
+  letter-spacing:.2em;transition:border-color .2s,box-shadow .2s;
+}
+input[type=password]:focus{border-color:var(--accent);box-shadow:0 0 10px color-mix(in oklch, var(--accent) 30%, transparent),inset 0 1px 3px rgba(0,0,0,.5)}
+.btn{
+  width:100%;margin-top:16px;padding:13px;cursor:pointer;border-radius:2px;
+  font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--accent-2);border:1px solid var(--accent);
+  background:linear-gradient(180deg, color-mix(in oklch, var(--accent) 16%, transparent), color-mix(in oklch, var(--accent) 5%, transparent));
+  transition:background .2s,box-shadow .2s;
+}
+.btn:hover{background:linear-gradient(180deg, color-mix(in oklch, var(--accent) 30%, transparent), color-mix(in oklch, var(--accent) 12%, transparent));box-shadow:0 0 12px color-mix(in oklch, var(--accent) 40%, transparent)}
 .gbtn{display:flex;align-items:center;justify-content:center;gap:11px;text-decoration:none}
-.gmark{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:2px;background:var(--gold-bright);color:#0a0b0e;font-family:'Cinzel Decorative',serif;font-weight:900;font-size:14px;line-height:1}
-.hint{margin-top:14px;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);text-align:center;line-height:1.5}
-.fallback-link{margin-top:18px;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);text-align:center;cursor:pointer;text-decoration:underline}
-.err{margin-top:14px;font-size:11px;color:var(--blood);text-align:center;display:none;letter-spacing:2px;text-shadow:0 0 8px rgba(179,36,42,.5)}
-.creed{font-family:'Cinzel Decorative',serif;font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--dim);z-index:1;text-align:center}
+.gmark{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:2px;background:var(--gold-bright);color:#140e00;font-weight:700;font-size:13px;line-height:1}
+.hint{margin-top:14px;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-4);text-align:center;line-height:1.6}
+.err{margin-top:14px;font-size:11px;color:var(--danger);text-align:center;display:none;letter-spacing:.12em;text-shadow:0 0 8px color-mix(in oklch, var(--danger) 50%, transparent)}
+.creed{font-family:var(--mono);font-size:9.5px;letter-spacing:.28em;text-transform:uppercase;color:var(--ink-4);z-index:1;text-align:center}
+.creed .sig{color:var(--accent);opacity:.8}
+.foot-link{font-family:var(--mono);font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-4);text-decoration:underline;text-underline-offset:3px;z-index:1}
+.foot-link:hover{color:var(--accent)}
 </style>
 </head>
 <body>
 <div class="card">
-  <div class="sigil">&#10016;</div>
-  <div class="logo">Mission Control</div>
-  <div class="sub">&#10016; Authorization Required &#10016;</div>
+  <div class="brand-mark"></div>
+  <div class="brand-name">Mission Control</div>
+  <div class="sub"><span class="sig">&#10016;</span> Restricted &middot; Authentication Required <span class="sig">&#10016;</span></div>
 
   <a class="btn gbtn" href="/api/auth/google/start"><span class="gmark">G</span> Sign in with Google</a>
-  <div class="hint">Secured by your Google account &amp; 2-step verification</div>
+  <div class="hint">Secured by Google Sign-In &amp; 2-step verification</div>
 
   <!-- break-glass: only revealed if the server still permits password login -->
-  <div id="pwbox" style="display:none;margin-top:18px;border-top:1px solid rgba(216,169,59,.18);padding-top:16px">
-    <label class="prompt-line">Access Rites &mdash; fallback</label>
+  <div id="pwbox" style="display:none;margin-top:18px;border-top:1px solid var(--line-soft);padding-top:16px">
+    <label class="prompt-line">Password fallback</label>
     <input type="text" name="username" autocomplete="username" value="parker" style="display:none">
     <input type="password" id="pw" name="password" autocomplete="current-password" placeholder="&bull; &bull; &bull; &bull; &bull; &bull; &bull; &bull;" onkeydown="if(event.key==='Enter')login()">
     <button class="btn" onclick="login()" style="margin-top:10px">Authenticate</button>
@@ -52,8 +134,8 @@ input[type=password]:focus{border-color:var(--gold);box-shadow:0 0 10px rgba(216
 
   <div class="err" id="err">&#9888; ACCESS DENIED</div>
 </div>
-<div class="creed">&#10016; The Emperor Protects &#10016;</div>
-<a href="/privacy" style="font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);text-decoration:underline;z-index:1">Privacy Policy</a>
+<div class="creed"><span class="sig">&#10016;</span> Authorized access only <span class="sig">&#10016;</span></div>
+<a class="foot-link" href="/privacy">Privacy Policy</a>
 <script>
 function login() {
   var pw=document.getElementById('pw').value;
