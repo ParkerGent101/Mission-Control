@@ -25,6 +25,10 @@ input[type=password]{width:100%;background:#06070a;border:1px solid rgba(216,169
 input[type=password]:focus{border-color:var(--gold);box-shadow:0 0 10px rgba(216,169,59,.35),inset 0 1px 3px rgba(0,0,0,.5)}
 .btn{width:100%;margin-top:16px;padding:13px;background:linear-gradient(180deg,rgba(216,169,59,.16),rgba(216,169,59,.06));color:var(--gold-bright);font-family:'Cinzel Decorative',serif;font-size:12px;font-weight:700;letter-spacing:3px;border:1px solid var(--gold);border-radius:2px;cursor:pointer;transition:all .2s;text-transform:uppercase}
 .btn:hover{background:linear-gradient(180deg,rgba(216,169,59,.32),rgba(216,169,59,.14));box-shadow:0 0 12px rgba(216,169,59,.4)}
+.gbtn{display:flex;align-items:center;justify-content:center;gap:11px;text-decoration:none}
+.gmark{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:2px;background:var(--gold-bright);color:#0a0b0e;font-family:'Cinzel Decorative',serif;font-weight:900;font-size:14px;line-height:1}
+.hint{margin-top:14px;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);text-align:center;line-height:1.5}
+.fallback-link{margin-top:18px;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);text-align:center;cursor:pointer;text-decoration:underline}
 .err{margin-top:14px;font-size:11px;color:var(--blood);text-align:center;display:none;letter-spacing:2px;text-shadow:0 0 8px rgba(179,36,42,.5)}
 .creed{font-family:'Cinzel Decorative',serif;font-size:10px;letter-spacing:4px;text-transform:uppercase;color:var(--dim);z-index:1;text-align:center}
 </style>
@@ -34,20 +38,40 @@ input[type=password]:focus{border-color:var(--gold);box-shadow:0 0 10px rgba(216
   <div class="sigil">&#10016;</div>
   <div class="logo">Mission Control</div>
   <div class="sub">&#10016; Authorization Required &#10016;</div>
-  <label class="prompt-line">Access Rites</label>
-  <input type="text" name="username" autocomplete="username" value="parker" style="display:none">
-  <input type="password" id="pw" name="password" autocomplete="current-password" placeholder="&bull; &bull; &bull; &bull; &bull; &bull; &bull; &bull;" autofocus onkeydown="if(event.key==='Enter')login()">
-  <button class="btn" onclick="login()">Authenticate</button>
+
+  <a class="btn gbtn" href="/api/auth/google/start"><span class="gmark">G</span> Sign in with Google</a>
+  <div class="hint">Secured by your Google account &amp; 2-step verification</div>
+
+  <!-- break-glass: only revealed if the server still permits password login -->
+  <div id="pwbox" style="display:none;margin-top:18px;border-top:1px solid rgba(216,169,59,.18);padding-top:16px">
+    <label class="prompt-line">Access Rites &mdash; fallback</label>
+    <input type="text" name="username" autocomplete="username" value="parker" style="display:none">
+    <input type="password" id="pw" name="password" autocomplete="current-password" placeholder="&bull; &bull; &bull; &bull; &bull; &bull; &bull; &bull;" onkeydown="if(event.key==='Enter')login()">
+    <button class="btn" onclick="login()" style="margin-top:10px">Authenticate</button>
+  </div>
+
   <div class="err" id="err">&#9888; ACCESS DENIED</div>
 </div>
 <div class="creed">&#10016; The Emperor Protects &#10016;</div>
 <script>
-async function login() {
-  const pw=document.getElementById('pw').value;
-  const res=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
-  if(res.ok){window.location.href='/';}
-  else{document.getElementById('err').style.display='block';}
+function login() {
+  var pw=document.getElementById('pw').value;
+  fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})})
+    .then(function(res){
+      if(res.ok){window.location.href='/';}
+      else{ showErr('&#9888; ACCESS DENIED'); }
+    }).catch(function(){ showErr('&#9888; ACCESS DENIED'); });
 }
+function showErr(html){ var e=document.getElementById('err'); e.innerHTML=html; e.style.display='block'; }
+// Reveal the password fallback only if the server still allows it (break-glass).
+fetch('/api/me').then(function(r){return r.json();}).then(function(d){
+  if(d && d.password_login){ document.getElementById('pwbox').style.display='block'; }
+}).catch(function(){});
+// Surface an un-authorized Google account cleanly.
+(function(){
+  var m=new URLSearchParams(location.search).get('denied');
+  if(m){ showErr('&#9888; ' + (m==='unknown' ? 'SIGN-IN FAILED' : (m + ' is not authorized'))); }
+})();
 </script>
 </body>
 </html>

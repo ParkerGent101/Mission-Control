@@ -101,6 +101,13 @@ if ($SkipData) {
 $envVars = "DATA_DIR=/data,FINANCE_SHEET_ID=1UaFkSQ3wwrPt6pfZIfnNrlMQmerv-ZQ52KYyCF5rIvo,HEALTH_SHEET_ID=1IaAphdKbTYrX3OHL_CDsFieB1bi-H_DznRHdzaQwDfk,FINANCE_OWNER_EMAIL=parkergent7@gmail.com,PLAID_ENV=$PLAID_ENV"
 if ($PLAID_REDIRECT_URI) { $envVars += ",PLAID_REDIRECT_URI=$PLAID_REDIRECT_URI" }
 
+# Sign-in (Google identity + MFA). Production is password-free: ALLOW_PASSWORD_LOGIN
+# is false, so /api/login is disabled and access requires Google sign-in + 2FA.
+# Break-glass: set it to true and re-deploy ONLY if you get locked out of Google
+# sign-in. Google's OAuth client (data/credentials.json in the bucket) must list the
+# run.app /api/auth/google/callback redirect URI.
+$envVars += ",ALLOWED_LOGIN_EMAILS=parkergent7@gmail.com,SESSION_LIFETIME_DAYS=7,ALLOW_PASSWORD_LOGIN=false"
+
 # Only bind Plaid secrets if they exist in Secret Manager, so a deploy never fails
 # when bank sync hasn't been configured yet.
 $secretBindings = "ANTHROPIC_API_KEY=anthropic-api-key:latest,FLASK_SECRET=flask-secret:latest,GITHUB_TOKEN=github-token:latest"

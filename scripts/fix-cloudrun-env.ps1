@@ -1,4 +1,4 @@
-# Mission Control — Fix Cloud Run environment variables & secrets
+# Mission Control -Fix Cloud Run environment variables & secrets
 #
 # Adds the missing GITHUB_TOKEN secret and ensures all env vars are correct.
 # Safe to re-run: reads current config and merges rather than replacing.
@@ -10,7 +10,15 @@ $PROJECT_ID = "mission-control-496004"
 $REGION     = "us-central1"
 $SERVICE    = "mission-control"
 
-$REQUIRED_ENV = "DATA_DIR=/data,FINANCE_SHEET_ID=1UaFkSQ3wwrPt6pfZIfnNrlMQmerv-ZQ52KYyCF5rIvo"
+# Free Plaid accounts can run against Sandbox. Use "production" only with a Production
+# secret and access to real bank data.
+$PLAID_ENV = "sandbox"
+
+# Set $PLAID_REDIRECT_URI only AFTER registering the exact URL in the Plaid dashboard
+# (an unregistered redirect URI breaks every bank link). Needed for OAuth banks (Fidelity).
+$PLAID_REDIRECT_URI = ""   # e.g. "https://mission-control-568559213462.us-central1.run.app/"
+$REQUIRED_ENV = "DATA_DIR=/data,FINANCE_SHEET_ID=1UaFkSQ3wwrPt6pfZIfnNrlMQmerv-ZQ52KYyCF5rIvo,PLAID_ENV=$PLAID_ENV"
+if ($PLAID_REDIRECT_URI) { $REQUIRED_ENV += ",PLAID_REDIRECT_URI=$PLAID_REDIRECT_URI" }
 
 Write-Host "==> Mission Control: Fix Cloud Run Environment" -ForegroundColor Cyan
 Write-Host ""
@@ -80,6 +88,14 @@ if ($hasGithubToken) {
 # --- Build merged --set-secrets string ---
 # Always include all three; add GITHUB_TOKEN to whatever was there
 $secretBindings = "ANTHROPIC_API_KEY=anthropic-api-key:latest,FLASK_SECRET=flask-secret:latest,GITHUB_TOKEN=github-token:latest"
+
+# Bind Plaid bank-sync secrets only if they exist (keeps this safe to run pre-Plaid)
+if (($existingSecrets -contains "plaid-client-id") -and ($existingSecrets -contains "plaid-secret")) {
+    $secretBindings += ",PLAID_CLIENT_ID=plaid-client-id:latest,PLAID_SECRET=plaid-secret:latest"
+    Write-Host "  Plaid secrets found - binding bank sync." -ForegroundColor Gray
+} else {
+    Write-Host "  Plaid secrets not found - skipping bank sync binding." -ForegroundColor Yellow
+}
 
 # --- Update Cloud Run service ---
 Write-Host ""

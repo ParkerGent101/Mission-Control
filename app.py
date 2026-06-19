@@ -1,5 +1,7 @@
 import os
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
+# Google adds/reorders the 'openid' scope on sign-in; don't let oauthlib reject the token for it.
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
 from contextlib import contextmanager
 from datetime import datetime, timedelta, date
@@ -23,9 +25,16 @@ def no_cache_static(response):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
         response.headers["Pragma"] = "no-cache"
     return response
-app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=int(os.environ.get("SESSION_LIFETIME_DAYS", "7")))
 
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "aces2026")
+# Google sign-in: only these accounts may log in. Comma-separated; defaults to Parker's account.
+ALLOWED_LOGIN_EMAILS = [e.strip().lower() for e in os.environ.get(
+    "ALLOWED_LOGIN_EMAILS", "parkergent7@gmail.com").split(",") if e.strip()]
+# Break-glass only: the legacy shared-password login. Off by default so production is password-free
+# (required for the Plaid MFA / zero-trust attestations). Set ALLOW_PASSWORD_LOGIN=true to re-enable.
+ALLOW_PASSWORD_LOGIN = os.environ.get("ALLOW_PASSWORD_LOGIN", "false").lower() in ("1", "true", "yes")
+GOOGLE_LOGIN_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
 
 BAND_DIR    = Path(os.environ.get("BAND_DIR", "C:/Users/Parker/projects/coming-up-aces"))
 DATA_DIR    = Path(os.environ.get("DATA_DIR", str(Path(__file__).parent / "data")))
@@ -204,7 +213,8 @@ def require_auth():
     p = request.path
     if p.startswith('/static/'):
         return None
-    if p in ('/login', '/api/login', '/api/logout'):
+    if p in ('/login', '/api/login', '/api/logout', '/api/me',
+             '/api/auth/google/start', '/api/auth/google/callback'):
         return None
     if session.get('authenticated'):
         return None
@@ -222,6 +232,8 @@ def _effective_password():
 
 @app.route("/api/login", methods=["POST"])
 def do_login():
+    if not ALLOW_PASSWORD_LOGIN:
+        return jsonify({"ok": False, "error": "Password login is disabled — use Sign in with Google."}), 403
     data = request.get_json(silent=True) or request.form
     pw = data.get("password", "")
     if pw == _effective_password():
@@ -234,6 +246,55 @@ def do_login():
 def logout():
     session.clear()
     return jsonify({"ok": True})
+
+@app.route("/api/me")
+def whoami():
+    """Public: lets the login page / settings know who's in and whether the password fallback is live."""
+    return jsonify({
+        "authenticated": bool(session.get("authenticated")),
+        "email": session.get("user_email"),
+        "password_login": ALLOW_PASSWORD_LOGIN,
+    })
+
+# ── Google sign-in (identity + MFA via the user's own Google account) ────────────
+@app.route("/api/auth/google/start")
+def google_login_start():
+    if not _has_google_oauth_client():
+        return "Google sign-in isn't configured (missing OAuth client ID/secret).", 500
+    redirect_uri = _request_base_url() + '/api/auth/google/callback'
+    flow = _oauth_flow(GOOGLE_LOGIN_SCOPES, redirect_uri)
+    if flow is None:
+        return "Google sign-in isn't configured.", 500
+    auth_url, state = flow.authorization_url(
+        access_type='online', include_granted_scopes='true', prompt='select_account')
+    session['login_oauth_state'] = state
+    session['login_code_verifier'] = getattr(flow, 'code_verifier', None)
+    return redirect(auth_url)
+
+@app.route("/api/auth/google/callback")
+def google_login_callback():
+    try:
+        from google_auth_oauthlib.flow import Flow  # noqa: F401  (ensure dep present)
+    except ImportError:
+        return "google-auth-oauthlib not installed", 500
+    redirect_uri = _request_base_url() + '/api/auth/google/callback'
+    try:
+        flow = _oauth_flow(GOOGLE_LOGIN_SCOPES, redirect_uri)
+        if flow is None:
+            return "Google sign-in isn't configured.", 400
+        verifier = session.pop('login_code_verifier', None)
+        if verifier:
+            flow.code_verifier = verifier
+        flow.fetch_token(authorization_response=request.url)
+        email = _google_userinfo_email(flow.credentials)
+    except Exception as e:
+        return f"<h2>Sign-in error</h2><pre>{e}</pre><br><a href='/login'>Back</a>", 400
+    if email and email.lower() in ALLOWED_LOGIN_EMAILS:
+        session.permanent = True
+        session["authenticated"] = True
+        session["user_email"] = email
+        return redirect('/')
+    return redirect('/login?denied=' + (email or 'unknown'))
 
 # ── Band tools ─────────────────────────────────────────────────────────────────
 
@@ -1383,6 +1444,8 @@ def user_profile():
 
 @app.route("/api/user/password", methods=["POST"])
 def user_change_password():
+    if not ALLOW_PASSWORD_LOGIN:
+        return jsonify({"error": "Password login is disabled — sign-in uses your Google account."}), 403
     d = request.json or {}
     if d.get("current") != _effective_password():
         return jsonify({"error": "Current password incorrect"}), 401
@@ -1637,18 +1700,70 @@ def plaid_categorize():
     _save(PLAID_CONFIG_FILE, config)
     return jsonify({"ok": True, "saved": len(categories)})
 
-def _plaid_to_finance_category(plaid_cats, name=""):
-    """Map a Plaid transaction's category/merchant onto a Sheet-tracked finance
-    category. Defaults to 'Fun' (always Sheet-writable) so nothing is un-importable."""
-    blob = " ".join(str(c).lower() for c in (plaid_cats or [])) + " " + str(name or "").lower()
-    if any(k in blob for k in ("gas station", "gas", "fuel")):                                  return "Gas"
-    if any(k in blob for k in ("supermarket", "groceries", "grocery", "food store")):           return "Food / Grocery"
-    if any(k in blob for k in ("rent", "mortgage")):                                            return "Housing"
+# Plaid personal_finance_category -> Sheet category. DETAILED is most specific (checked
+# first); PRIMARY is the fallback. Lets auto-import categorize even when the legacy
+# `category` field is empty (newer Plaid items often return only PFC).
+PFC_DETAILED_MAP = {
+    "TRANSPORTATION_GAS": "Gas",
+    "FOOD_AND_DRINK_GROCERIES": "Food / Grocery",
+    "GENERAL_MERCHANDISE_CONVENIENCE_STORES": "Food / Grocery",
+    "RENT_AND_UTILITIES_RENT": "Housing",
+    "RENT_AND_UTILITIES_GAS_AND_ELECTRICITY": "Utilities",
+    "RENT_AND_UTILITIES_WATER": "Utilities",
+    "RENT_AND_UTILITIES_SEWAGE_AND_WASTE_MANAGEMENT": "Utilities",
+    "RENT_AND_UTILITIES_INTERNET_AND_CABLE": "Utilities",
+    "RENT_AND_UTILITIES_TELEPHONE": "Utilities",
+    "RENT_AND_UTILITIES_OTHER_UTILITIES": "Utilities",
+}
+PFC_PRIMARY_MAP = {
+    "FOOD_AND_DRINK": "Fun",
+    "RENT_AND_UTILITIES": "Utilities",
+    "ENTERTAINMENT": "Fun",
+    "TRANSPORTATION": "Gas",
+}
+
+def _plaid_pfc(t):
+    """(primary, detailed) upper-case from a Plaid txn's personal_finance_category, or ('','')."""
+    try:
+        pfc = t.get("personal_finance_category") if hasattr(t, "get") else None
+        if pfc:
+            return str(pfc.get("primary") or "").upper(), str(pfc.get("detailed") or "").upper()
+    except Exception:
+        pass
+    return "", ""
+
+def _plaid_is_nonspend(t):
+    """True for transactions that aren't new discretionary spend, so auto-import doesn't
+    distort the Sheet: transfers between accounts, income, and credit-card bill payments
+    (the underlying purchases are what count). Mortgage / auto loans are kept as expenses."""
+    primary, detailed = _plaid_pfc(t)
+    if primary in ("TRANSFER_IN", "TRANSFER_OUT", "INCOME"):
+        return True
+    if detailed == "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT":
+        return True
+    legacy = " ".join(str(c).lower() for c in (t.get("category") or [])) if hasattr(t, "get") else ""
+    return any(k in legacy for k in ("transfer", "credit card payment"))
+
+def _plaid_to_finance_category(t_or_cats, name=""):
+    """Map a Plaid transaction onto a Sheet-tracked finance category. Accepts either a full
+    Plaid txn (preferred -- uses personal_finance_category) or a legacy category list.
+    Defaults to 'Fun' (always Sheet-writable) so nothing is un-importable."""
+    cats = []
+    if isinstance(t_or_cats, (list, tuple)):
+        cats = list(t_or_cats)
+    elif hasattr(t_or_cats, "get"):
+        primary, detailed = _plaid_pfc(t_or_cats)
+        if detailed in PFC_DETAILED_MAP: return PFC_DETAILED_MAP[detailed]
+        if primary in PFC_PRIMARY_MAP:   return PFC_PRIMARY_MAP[primary]
+        cats = list(t_or_cats.get("category") or [])
+    blob = (" ".join(str(c).lower() for c in cats) + " " + str(name or "").lower()).replace("_", " ")
+    if any(k in blob for k in ("gas station", "fuel")):                                  return "Gas"
+    if any(k in blob for k in ("supermarket", "groceries", "grocery", "food store")):    return "Food / Grocery"
+    if any(k in blob for k in ("rent", "mortgage")):                                     return "Housing"
     if any(k in blob for k in ("internet", "cable", "electric", "water", "utilit", "telephone")): return "Utilities"
     if any(k in blob for k in ("restaurant", "fast food", "coffee", "dining", "food and drink", "bar", "pub")): return "Fun"
-    if any(k in blob for k in ("entertainment", "recreation", "movie", "music", "game")):       return "Fun"
+    if any(k in blob for k in ("entertainment", "recreation", "movie", "music", "game")): return "Fun"
     return "Fun"
-
 def _record_expense(date, desc, amt, cat):
     """Write one expense to the finance Sheet (detail or budget table) or the local
     JSON fallback. Returns (ok: bool, detail: str|dict). Mirrors POST /api/finances."""
@@ -1742,6 +1857,67 @@ def plaid_import():
     config["imported_ids"] = list(imported)
     _save(PLAID_CONFIG_FILE, config)
     return jsonify({"ok": True, "written": written, "failed": failed, "errors": errors[:5]})
+
+@app.route("/api/plaid/autoimport", methods=["GET"])
+def plaid_autoimport():
+    """Auto-pull recent SETTLED expenses from every connected Plaid item and write them
+    straight to the finance Sheet -- categorized and de-duplicated, no review step.
+    Skips pending charges (they re-post under a new id -> would double-count) and
+    non-spend transactions (transfers, card/loan payments, income)."""
+    config = _load(PLAID_CONFIG_FILE, {"items": []})
+    items = config.get("items", [])
+    if not items:
+        return jsonify({"error": "No Plaid accounts connected"}), 400
+    plaid_c, err = _plaid_client()
+    if err:
+        return jsonify({"error": err}), 500
+    imported = set(config.get("imported_ids", []))
+    skipped  = set(config.get("skipped_ids", []))
+    written, failed, scanned, errors = 0, 0, 0, []
+    try:
+        from plaid.model.transactions_get_request import TransactionsGetRequest
+        from plaid.model.transactions_get_request_options import TransactionsGetRequestOptions
+        import datetime as dt
+        try:
+            days = max(1, min(90, int(request.args.get("days", 30))))
+        except (TypeError, ValueError):
+            days = 30
+        end_date = dt.date.today()
+        start_date = end_date - dt.timedelta(days=days)
+        for it in items:
+            req = TransactionsGetRequest(
+                access_token=it["access_token"], start_date=start_date, end_date=end_date,
+                options=TransactionsGetRequestOptions(count=100))
+            resp = plaid_c.transactions_get(req)
+            for t in resp["transactions"]:
+                scanned += 1
+                tid = t["transaction_id"]
+                if tid in imported or tid in skipped:
+                    continue
+                if t.get("pending"):                 # not settled yet -> re-posts under a new id
+                    continue
+                amt = float(t["amount"])
+                if amt <= 0:                          # inflow / refund -- not an expense
+                    continue
+                if _plaid_is_nonspend(t):             # transfer / card-loan payment / income
+                    continue
+                name = t.get("merchant_name") or t["name"]
+                date = t["date"].isoformat() if hasattr(t["date"], "isoformat") else str(t["date"])
+                try:
+                    ok, detail = _record_expense(date, name, amt, _plaid_to_finance_category(t, name))
+                    if ok:
+                        imported.add(tid); written += 1
+                    else:
+                        failed += 1
+                        if isinstance(detail, str) and detail not in errors:
+                            errors.append(detail)
+                except Exception as e:
+                    failed += 1; errors.append(str(e))
+        config["imported_ids"] = list(imported)
+        _save(PLAID_CONFIG_FILE, config)
+        return jsonify({"ok": True, "written": written, "failed": failed, "scanned": scanned, "errors": errors[:5]})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/plaid/skip", methods=["POST"])
 def plaid_skip():
@@ -3013,8 +3189,10 @@ def _google_oauth_client_config():
         "redirect_uris": [
             "http://localhost:5000/api/drive/callback",
             "http://localhost:5000/api/calendar/callback",
+            "http://localhost:5000/api/auth/google/callback",
             "https://mission-control-568559213462.us-central1.run.app/api/drive/callback",
             "https://mission-control-568559213462.us-central1.run.app/api/calendar/callback",
+            "https://mission-control-568559213462.us-central1.run.app/api/auth/google/callback",
         ],
     }
     if GOOGLE_OAUTH_PROJECT_ID:
@@ -3032,6 +3210,21 @@ def _oauth_flow(scopes, redirect_uri):
     if not config:
         return None
     return Flow.from_client_config(config, scopes=scopes, redirect_uri=redirect_uri)
+
+def _google_userinfo_email(creds):
+    """Return the verified email for a freshly-authorized Google sign-in, or None."""
+    try:
+        from google.auth.transport.requests import AuthorizedSession
+        resp = AuthorizedSession(creds).get(
+            "https://www.googleapis.com/oauth2/v3/userinfo", timeout=10)
+        info = resp.json()
+    except Exception:
+        return None
+    email = info.get("email")
+    verified = info.get("email_verified")
+    if email and verified in (True, "true", None):
+        return email
+    return None
 
 def _gdrive_service():
     try:

@@ -269,6 +269,15 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
     fetch('/api/finances/subscriptions').then(r=>r.json()).then(setSubs).catch(()=>{});
     fetch('/api/plaid/status').then(r=>r.json()).then(d => { setBankConnected(!!d.connected); setAccounts(d.accounts || []); }).catch(()=>setBankConnected(null));
   }, []);
+  // Auto-import recent bank transactions once a connection is known -- silent, throttled to
+  // at most once / 10 min so revisiting Finance doesn't hammer Plaid or the Sheet.
+  useEffect(() => {
+    if (bankConnected !== true) return;
+    let last = 0; try { last = +(localStorage.getItem('mc_plaid_autoimport_ts') || 0); } catch {}
+    if (Date.now() - last < 10 * 60 * 1000) return;
+    try { localStorage.setItem('mc_plaid_autoimport_ts', String(Date.now())); } catch {}
+    syncBank();
+  }, [bankConnected]);
   useRefreshListener(() => {
     loadFinances(month);
     fetch('/api/finances/subscriptions').then(r=>r.json()).then(setSubs).catch(()=>{});
@@ -301,16 +310,23 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
   // Sheet-tracked expense categories (the only ones Plaid imports can write to).
   const SHEET_CATS = ["Food / Grocery", "Fun", "Gas", "Housing", "Utilities"];
 
-  const syncBank = async () => {
+  // Auto-import: pull recent settled bank transactions and write them straight to the
+  // Sheet (categorized + de-duped server-side). No review step -- they just appear in the
+  // finance list. Runs silently on load (throttled) and manually via the Sync button.
+  const syncBank = async (opts = {}) => {
     setSyncing(true);
     try {
-      const r = await fetch('/api/plaid/sync');
+      const r = await fetch('/api/plaid/autoimport');
       const d = await r.json();
-      if (!r.ok || d.error) { alert(d.error || 'Bank sync failed'); setSyncing(false); return; }
-      const rows = (d.pending || []).map(t => ({ ...t, include: true }));
-      setPending(rows);
-      if (rows.length === 0) window.__toast?.('No new transactions to import', 'info');
-    } catch { alert('Bank sync failed — is Plaid configured?'); }
+      if (!r.ok || d.error) { if (opts.manual) window.__toast?.(d.error || 'Bank sync failed', 'error'); setSyncing(false); return; }
+      if (d.written > 0) {
+        loadFinances(month);
+        window.__toast?.(`Imported ${d.written} bank transaction${d.written === 1 ? '' : 's'}`, 'success');
+      } else if (opts.manual) {
+        window.__toast?.('No new bank transactions to import', 'info');
+      }
+      if (opts.manual && d.failed) window.__toast?.(`${d.failed} couldn't be written to the Sheet`, 'error');
+    } catch { if (opts.manual) window.__toast?.('Bank sync failed -- is Plaid configured?', 'error'); }
     setSyncing(false);
   };
 
@@ -335,7 +351,8 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
           setBankConnected(true); setConnecting(false);
           window.__toast?.(`${metadata?.institution?.name || 'Bank account'} connected`, 'success');
           fetch('/api/plaid/status').then(r=>r.json()).then(d => setAccounts(d.accounts || [])).catch(()=>{});
-          syncBank();   // pull the first batch straight into the review queue
+          try { localStorage.setItem('mc_plaid_autoimport_ts', String(Date.now())); } catch {}
+          syncBank({ manual: true });   // import this newly-linked bank's first batch now
         },
         onExit: () => { localStorage.removeItem('mc_plaid_link_token'); setConnecting(false); },
       });
@@ -537,7 +554,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
           <button className="btn" disabled={connecting} onClick={connectBank} title="Link a bank account via Plaid"><Icon name={connecting ? "loader" : "wallet"} size={13}/>{connecting ? "Connecting…" : "Connect bank"}</button>
         ) : (
           <>
-            <button className="btn" disabled={syncing} onClick={syncBank} title="Pull recent transactions from your connected bank (Plaid) for review"><Icon name={syncing ? "loader" : "wallet"} size={13}/>{syncing ? "Syncing…" : "Sync bank"}</button>
+            <button className="btn" disabled={syncing} onClick={()=>syncBank({ manual: true })} title="Pull & import recent bank transactions from Plaid"><Icon name={syncing ? "loader" : "wallet"} size={13}/>{syncing ? "Syncing…" : "Sync bank"}</button>
             <button className="btn" disabled={connecting} onClick={connectBank} title="Link another bank or card via Plaid"><Icon name={connecting ? "loader" : "plus"} size={13}/>{connecting ? "Connecting…" : "Add bank"}</button>
           </>
         )}

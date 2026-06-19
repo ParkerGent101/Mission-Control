@@ -1765,11 +1765,21 @@ html.mc-bg,html.mc-bg body{background:#06120b}
   // Reveal the moment React mounts (after a short minimum hold so it isn't a flash).
   var seen = !!sessionStorage.getItem(BK);
   try{ sessionStorage.setItem(BK,'1'); }catch(e){}
-  var t0=Date.now(), MIN = seen ? 250 : 1300, mounted=false;
+  var t0=Date.now(), MIN = seen ? 250 : 1200, mounted=false;
   function maybe(){ if(mounted && Date.now()-t0>=MIN) done(); }
   var root=document.getElementById('root');
   if(root){
-    var mo=new MutationObserver(function(){ if(root.childElementCount>0){ mounted=true; mo.disconnect(); maybe(); } });
+    var mo=new MutationObserver(function(){
+      if(root.childElementCount>0){
+        mounted=true;
+        mo.disconnect();
+        // Append "initialized" message to terminal when React mounts
+        var pre=document.getElementById('mcpre');
+        if(pre) pre.innerHTML += '\n' + ts() + ' <span class="ok">[initialized]</span>';
+        // Give user a moment to see "initialized", then crossfade
+        setTimeout(maybe, 300);
+      }
+    });
     mo.observe(root,{childList:true});
     if(root.childElementCount>0){ mounted=true; }
   }
@@ -1805,7 +1815,9 @@ html.mc-bg,html.mc-bg body{background:#06120b}
 
   // compositor-driven scroll: keeps moving even while Babel blocks the main thread
   var H=window.innerHeight, P=pre.scrollHeight, dist=Math.max(0,P-H+60), dur=Math.max(2200,dist*0.9);
-  if(pre.animate){ pre.animate([{transform:'translateY(0)'},{transform:'translateY(-'+dist+'px)'}],{duration:dur,easing:'linear',fill:'forwards'}); }
+  if(pre.animate){
+    pre.animate([{transform:'translateY(0)'},{transform:'translateY(-'+dist+'px)'}],{duration:dur,easing:'linear',fill:'forwards'});
+  }
 })();
 </script>
 {% endraw %}
@@ -1831,7 +1843,6 @@ html.mc-bg,html.mc-bg body{background:#06120b}
   <!-- planet.jsx defines DonutChart (the 3D war globe); loads after modules.jsx so the const
        is declared once, before app.jsx triggers the first render -->
   <script type="text/babel" src="/static/planet.jsx"></script>
-  <script type="text/babel" src="/static/command-palette.jsx"></script>
   <script type="text/babel" src="/static/onboarding.jsx"></script>
   <script type="text/babel" src="/static/settings.jsx"></script>
   <script type="text/babel" src="/static/app.jsx"></script>

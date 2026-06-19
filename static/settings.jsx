@@ -73,12 +73,14 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
   const [sheetContacts, setSheetContacts] = useST('');
   const [driveSyncing, setDriveSyncing] = useST(null);
   const [driveMsg, setDriveMsg] = useST({});
+  const [me, setMe] = useST(null);
 
   useEffectST(() => {
     if (!open) return;
     setProfileName(userName || "");
     setCurPw(""); setNewPw(""); setPwMsg(null); setNameMsg(null);
     setResetConfirm(false);
+    fetch('/api/me').then(r => r.json()).then(setMe).catch(() => {});
   }, [open, userName]);
 
   useEffectST(() => {
@@ -200,17 +202,24 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
       </FieldRow>
 
       <SectionHead style={{ marginTop: 24 }}>Security</SectionHead>
-      <FieldRow label="Change Password" desc="Updates the password for this Mission Control instance.">
-        <input className="input" type="password" placeholder="Current password" value={curPw}
-          onChange={e => setCurPw(e.target.value)} style={{ width: 220 }} />
-        <input className="input" type="password" placeholder="New password (min 4 chars)" value={newPw}
-          onChange={e => setNewPw(e.target.value)} style={{ width: 220 }} />
-        <button className="btn primary" onClick={changePassword} disabled={!curPw || !newPw || newPw.length < 4}
-          style={{ alignSelf: 'flex-end' }}>
-          Update password
-        </button>
-        {pwMsg && <span style={{ fontSize: 11, color: pwMsg.ok ? 'var(--accent-2)' : 'var(--danger)' }}>{pwMsg.text}</span>}
+      <FieldRow label="Signed in as" desc="Access is verified through your Google account and its 2-step verification (MFA).">
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--ink-2)' }}>
+          {me && me.email ? me.email : (me && me.password_login ? 'Password session (no Google identity)' : '…')}
+        </span>
       </FieldRow>
+      {me && me.password_login && (
+        <FieldRow label="Change Password" desc="Break-glass fallback only — sign-in normally uses Google.">
+          <input className="input" type="password" placeholder="Current password" value={curPw}
+            onChange={e => setCurPw(e.target.value)} style={{ width: 220 }} />
+          <input className="input" type="password" placeholder="New password (min 4 chars)" value={newPw}
+            onChange={e => setNewPw(e.target.value)} style={{ width: 220 }} />
+          <button className="btn primary" onClick={changePassword} disabled={!curPw || !newPw || newPw.length < 4}
+            style={{ alignSelf: 'flex-end' }}>
+            Update password
+          </button>
+          {pwMsg && <span style={{ fontSize: 11, color: pwMsg.ok ? 'var(--accent-2)' : 'var(--danger)' }}>{pwMsg.text}</span>}
+        </FieldRow>
+      )}
 
       <SectionHead style={{ marginTop: 24 }}>Session</SectionHead>
       <FieldRow label="Re-run Setup" desc="Restart the onboarding wizard to reconfigure your profile, modules, and integrations.">
@@ -498,7 +507,7 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
           ["Stack",      "Flask · React · Claude API"],
           ["Model",      "claude-sonnet-4-6"],
           ["Storage",    "Local JSON · SQLite activity log"],
-          ["Auth",       "Session-based password login"],
+          ["Auth",       "Google sign-in · 2-step verification"],
         ].map(([k, v]) => (
           <div key={k} style={{ display: 'flex', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--line-soft)', alignItems: 'baseline' }}>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-4)', width: 80, flexShrink: 0 }}>{k}</span>
@@ -510,7 +519,6 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
       <SectionHead style={{ marginTop: 24 }}>Keyboard Shortcuts</SectionHead>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {[
-          ["⌘K",    "Open command palette"],
           ["Enter", "Submit Talk bar"],
           ["Esc",   "Close any open panel"],
         ].map(([k, v]) => (
