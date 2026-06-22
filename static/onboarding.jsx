@@ -36,17 +36,6 @@ const SPLITS = [
 
 const WEEK_DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
-const TXN_CATS = [
-  { id: "housing",       label: "Housing" },
-  { id: "food",          label: "Food & Dining" },
-  { id: "transport",     label: "Transport" },
-  { id: "entertainment", label: "Entertainment" },
-  { id: "shopping",      label: "Shopping" },
-  { id: "health",        label: "Health" },
-  { id: "income",        label: "Income" },
-  { id: "other",         label: "Other" },
-];
-
 const OnboardingWizard = ({ onComplete }) => {
   const [step, setStep] = useOB(0);
   const [name, setName] = useOB('');
@@ -59,10 +48,7 @@ const OnboardingWizard = ({ onComplete }) => {
   const [workoutDays, setWorkoutDays] = useOB([]);
   const [workoutSplit, setWorkoutSplit] = useOB(null);
   // Connect
-  const [plaidStatus, setPlaidStatus] = useOB('idle');
   const [calStatus, setCalStatus] = useOB('idle');
-  const [transactions, setTransactions] = useOB([]);
-  const [txnCats, setTxnCats] = useOB({});
   const [saving, setSaving] = useOB(false);
 
   // Hover previews live theme; click locks selection
@@ -94,52 +80,6 @@ const OnboardingWizard = ({ onComplete }) => {
     prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]
   );
 
-  const connectPlaid = async () => {
-    if (!window.Plaid) {
-      window.__toast?.('Plaid not loaded — add PLAID_CLIENT_ID to .env', 'error');
-      return;
-    }
-    setPlaidStatus('connecting');
-    try {
-      const r = await fetch('/api/plaid/link_token', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }
-      });
-      const d = await r.json();
-      if (d.error) { setPlaidStatus('idle'); window.__toast?.(d.error, 'error'); return; }
-      // Persist link_token so OAuth banks can resume after the redirect (see app.jsx).
-      localStorage.setItem('mc_plaid_link_token', d.link_token);
-      const handler = window.Plaid.create({
-        token: d.link_token,
-        onSuccess: async (publicToken, metadata) => {
-          await fetch('/api/plaid/exchange', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ public_token: publicToken, institution: metadata?.institution })
-          });
-          localStorage.removeItem('mc_plaid_link_token');
-          setPlaidStatus('connected');
-          window.__toast?.('Bank account connected', 'success');
-          // Fetch recent transactions for categorization
-          try {
-            const tr = await fetch('/api/plaid/transactions');
-            const td = await tr.json();
-            if (td.transactions && td.transactions.length > 0) {
-              const txns = td.transactions.slice(0, 20);
-              setTransactions(txns);
-              const cats = {};
-              txns.forEach(t => { cats[t.id] = t.category || 'other'; });
-              setTxnCats(cats);
-            }
-          } catch {}
-        },
-        onExit: () => { localStorage.removeItem('mc_plaid_link_token'); if (plaidStatus !== 'connected') setPlaidStatus('idle'); },
-      });
-      handler.open();
-    } catch {
-      setPlaidStatus('idle');
-      window.__toast?.('Plaid connection failed', 'error');
-    }
-  };
-
   const connectCalendar = async () => {
     setCalStatus('connecting');
     try {
@@ -162,12 +102,6 @@ const OnboardingWizard = ({ onComplete }) => {
     setSaving(true);
     const themes = window.THEMES || [];
     const theme = themes.find(t => t.id === selectedTheme) || null;
-    if (transactions.length > 0) {
-      await fetch('/api/plaid/categorize', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ categories: txnCats })
-      }).catch(() => {});
-    }
     await fetch('/api/onboarding', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -389,64 +323,13 @@ const OnboardingWizard = ({ onComplete }) => {
 
       <div className="ob-connect-card" style={{ marginTop: 20 }}>
         <div className="ob-connect-icon">
-          <Icon name="wallet" size={18} style={{ color: plaidStatus === 'connected' ? 'var(--accent-2)' : 'var(--accent)' }} />
+          <Icon name="wallet" size={18} style={{ color: 'var(--accent)' }} />
         </div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 500, fontSize: 13 }}>Bank Accounts</div>
-          <div style={{ color: 'var(--ink-3)', fontSize: 11.5, marginTop: 2 }}>Auto-import transactions via Plaid</div>
+          <div style={{ fontWeight: 500, fontSize: 13 }}>Finance</div>
+          <div style={{ color: 'var(--ink-3)', fontSize: 11.5, marginTop: 2 }}>Export your transactions from Rocket Money to a Google Drive folder, then connect Drive and set that folder in Settings → Integrations. The Finance card’s “Sync from Drive” pulls them in.</div>
         </div>
-        {plaidStatus === 'connected' ? (
-          <span className="tag mint">Connected</span>
-        ) : (
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button className="btn primary" onClick={connectPlaid}
-              disabled={plaidStatus === 'connecting'}
-              style={{ fontSize: 11.5, padding: '5px 10px' }}>
-              <Icon name={plaidStatus === 'connecting' ? "loader" : "wallet"} size={12} />
-              {plaidStatus === 'connecting' ? 'Opening…' : 'Connect'}
-            </button>
-            <button className="btn ghost" onClick={() => setPlaidStatus('skipped')}
-              style={{ fontSize: 11.5, padding: '5px 10px', color: 'var(--ink-3)' }}>
-              Skip
-            </button>
-          </div>
-        )}
       </div>
-
-      {/* Transaction categorization — shown after Plaid connects */}
-      {plaidStatus === 'connected' && transactions.length > 0 && (
-        <div style={{ marginTop: 14 }}>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--ink-4)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>
-            Categorize recent transactions
-          </div>
-          <div style={{ border: '1px solid var(--line)', borderRadius: 'var(--r)', overflow: 'hidden' }}>
-            {transactions.map((t, i) => (
-              <div key={t.id} style={{
-                display: 'grid', gridTemplateColumns: '1fr auto',
-                gap: 10, alignItems: 'center',
-                padding: '8px 12px',
-                borderBottom: i < transactions.length - 1 ? '1px solid var(--line-soft)' : 'none',
-                background: i % 2 === 0 ? 'var(--surface)' : 'var(--bg-2)',
-              }}>
-                <div>
-                  <div style={{ fontSize: 12, color: 'var(--ink)', fontWeight: 500 }}>{t.name}</div>
-                  <div style={{ fontSize: 11, color: 'var(--ink-4)', fontFamily: 'var(--font-mono)', marginTop: 1 }}>
-                    ${Math.abs(t.amount).toFixed(2)} · {t.date}
-                  </div>
-                </div>
-                <select className="input"
-                  style={{ width: 140, fontSize: 11.5, padding: '4px 8px' }}
-                  value={txnCats[t.id] || 'other'}
-                  onChange={e => setTxnCats(prev => ({ ...prev, [t.id]: e.target.value }))}>
-                  {TXN_CATS.map(c => (
-                    <option key={c.id} value={c.id}>{c.label}</option>
-                  ))}
-                </select>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       <div className="ob-connect-card" style={{ marginTop: 10 }}>
         <div className="ob-connect-icon">
@@ -514,13 +397,12 @@ const OnboardingWizard = ({ onComplete }) => {
             )}
           </div>
         )}
-        {(plaidStatus === 'connected' || calStatus === 'connected') && (
+        {calStatus === 'connected' && (
           <div style={{ display: 'flex', gap: 6, marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--line-soft)' }}>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-4)', letterSpacing: '0.08em', textTransform: 'uppercase', marginRight: 2, alignSelf: 'center' }}>
               Connected
             </div>
-            {plaidStatus === 'connected' && <span className="tag mint" style={{ gap: 4 }}><Icon name="wallet" size={10} />Plaid</span>}
-            {calStatus === 'connected' && <span className="tag mint" style={{ gap: 4 }}><Icon name="calendar" size={10} />Calendar</span>}
+            <span className="tag mint" style={{ gap: 4 }}><Icon name="calendar" size={10} />Calendar</span>
           </div>
         )}
       </div>

@@ -71,6 +71,7 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
   const [driveStatus, setDriveStatus] = useST(null);
   const [sheetFinance, setSheetFinance] = useST('');
   const [sheetContacts, setSheetContacts] = useST('');
+  const [importFolder, setImportFolder] = useST('');
   const [driveSyncing, setDriveSyncing] = useST(null);
   const [driveMsg, setDriveMsg] = useST({});
   const [me, setMe] = useST(null);
@@ -97,6 +98,7 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
       });
       if (drive.sheet_finance) setSheetFinance(drive.sheet_finance);
       if (drive.sheet_contacts) setSheetContacts(drive.sheet_contacts);
+      if (drive.finance_import_folder) setImportFolder(drive.finance_import_folder);
     });
   }, [section]);
 
@@ -146,7 +148,7 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
   const saveSheets = async () => {
     const r = await fetch('/api/drive/config', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sheet_finance: sheetFinance.trim(), sheet_contacts: sheetContacts.trim() }),
+      body: JSON.stringify({ sheet_finance: sheetFinance.trim(), sheet_contacts: sheetContacts.trim(), finance_import_folder: importFolder.trim() }),
     });
     const d = await r.json();
     if (d.ok) window.__toast?.('Sheet IDs saved', 'success');
@@ -172,6 +174,18 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
     const msg = d.ok ? `Pushed ${d.count != null ? d.count + ' rows' : ''}`.trim() : (d.error || 'Push failed');
     setDriveMsg(prev => ({ ...prev, [key]: msg }));
     setTimeout(() => setDriveMsg(prev => ({ ...prev, [key]: null })), 4000);
+  };
+
+  // Import the newest Rocket Money CSV export from the configured Drive folder into the Sheet.
+  const importRocketMoney = async () => {
+    setDriveSyncing('import');
+    const r = await fetch('/api/finance/import/drive');
+    const d = await r.json();
+    setDriveSyncing(null);
+    const msg = (!r.ok || d.error) ? (d.error || 'Import failed')
+      : `Imported ${d.written || 0}` + (d.skipped ? `, skipped ${d.skipped}` : '') + (d.failed ? `, ${d.failed} failed` : '');
+    setDriveMsg(prev => ({ ...prev, import: msg }));
+    setTimeout(() => setDriveMsg(prev => ({ ...prev, import: null })), 6000);
   };
 
   const applyTheme = (th) => {
@@ -401,6 +415,25 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
               <div style={{ fontSize: 11, color: 'var(--accent-2)', marginTop: 5 }}>
                 {driveMsg.finances || driveMsg['push-finances']}
               </div>
+            )}
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 600, marginBottom: 6, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Rocket Money import folder</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input className="input" placeholder="Google Drive folder URL or ID"
+                value={importFolder} onChange={e => setImportFolder(e.target.value)}
+                style={{ flex: 1, minWidth: 180, fontSize: 11.5 }} />
+              <button className="btn" style={{ fontSize: 11, padding: '4px 9px', whiteSpace: 'nowrap' }}
+                onClick={importRocketMoney} disabled={!importFolder || driveSyncing === 'import'}>
+                {driveSyncing === 'import' ? '…' : '↓ Sync now'}
+              </button>
+            </div>
+            <div style={{ fontSize: 10.5, color: 'var(--ink-4)', marginTop: 5 }}>
+              Upload your Rocket Money CSV export to this Drive folder; Sync imports the newest one’s recent spending into the Finance Sheet.
+            </div>
+            {driveMsg.import && (
+              <div style={{ fontSize: 11, color: 'var(--accent-2)', marginTop: 5 }}>{driveMsg.import}</div>
             )}
           </div>
 

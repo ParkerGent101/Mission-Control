@@ -94,7 +94,7 @@ strong{color:var(--accent-2);font-weight:400}
 
   <h2>2. Data the application processes</h2>
   <ul>
-    <li><strong>Financial data</strong> &mdash; account balances, transactions, holdings, and budget figures, obtained through connected financial institutions (via Plaid), Google Sheets, and manual entry.</li>
+    <li><strong>Financial data</strong> &mdash; transactions and budget figures, obtained from Rocket Money transaction exports (CSV files the operator uploads to Google Drive), Google Sheets, and manual entry.</li>
     <li><strong>Identity data</strong> &mdash; the Google account email used to sign in.</li>
     <li><strong>Productivity data</strong> &mdash; calendar events, contacts, tasks, notes, health/habit logs, and band/work data entered by or synced for the operator.</li>
     <li><strong>Credentials</strong> &mdash; OAuth tokens and API keys required to operate integrations (stored securely; see &sect;5).</li>
@@ -105,8 +105,7 @@ strong{color:var(--accent-2);font-weight:400}
 
   <h2>4. Third-party services (sub-processors)</h2>
   <ul>
-    <li><strong>Plaid</strong> &mdash; connects to financial institutions to retrieve account and transaction data, at the operator&rsquo;s instruction. Used only to deliver the finance features.</li>
-    <li><strong>Google</strong> &mdash; identity/sign-in (OAuth/OIDC), Calendar, Drive/Sheets, and hosting (Cloud Run, Cloud Storage, Secret Manager).</li>
+    <li><strong>Google</strong> &mdash; identity/sign-in (OAuth/OIDC), Calendar, Drive/Sheets (including reading the Rocket Money CSV exports the operator uploads), and hosting (Cloud Run, Cloud Storage, Secret Manager).</li>
     <li><strong>Anthropic</strong> &mdash; powers AI assistant features; only the content the operator submits for a given request is sent.</li>
   </ul>
   <p>Each receives only the minimum data necessary for its function, under its own terms.</p>
@@ -119,7 +118,7 @@ strong{color:var(--accent-2);font-weight:400}
   </ul>
 
   <h2>6. Retention &amp; deletion</h2>
-  <p>Data is retained only while useful to the operator and can be deleted on demand (in-app data reset, disconnecting financial institutions to revoke Plaid tokens, and secret rotation).</p>
+  <p>Data is retained only while useful to the operator and can be deleted on demand (in-app data reset, removing the source export files from Google Drive, and secret rotation).</p>
 
   <h2>7. Rights &amp; control</h2>
   <p>As the sole data subject and operator, Parker Gent has full control over all data in the system, including the ability to access, correct, export, and delete it, and to revoke any third-party connection at any time.</p>

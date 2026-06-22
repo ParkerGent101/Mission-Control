@@ -405,34 +405,6 @@ const App = () => {
     fetch('/api/onboarding').then(r => r.json()).then(d => setNeedsOnboarding(d.needed)).catch(() => setNeedsOnboarding(false));
   }, []);
 
-  // Plaid OAuth handoff: OAuth banks (Fidelity, Chase, etc.) authenticate on the bank's
-  // site, then redirect the browser back here with ?oauth_state_id=... . Re-open Plaid
-  // Link with the stored link_token + receivedRedirectUri to finish the connection.
-  useEffectApp(() => {
-    if (!window.location.search.includes('oauth_state_id')) return;
-    const clearUrl = () => window.history.replaceState({}, document.title, window.location.pathname);
-    const token = localStorage.getItem('mc_plaid_link_token');
-    if (!token || !window.Plaid) { clearUrl(); return; }
-    try {
-      const handler = window.Plaid.create({
-        token,
-        receivedRedirectUri: window.location.href,
-        onSuccess: async (publicToken, metadata) => {
-          await fetch('/api/plaid/exchange', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ public_token: publicToken, institution: metadata?.institution }),
-          });
-          localStorage.removeItem('mc_plaid_link_token');
-          clearUrl();
-          window.__toast?.('Bank account connected', 'success');
-          window.dispatchEvent(new CustomEvent('mc:refresh'));   // flips Finance to "Sync bank"
-        },
-        onExit: () => { localStorage.removeItem('mc_plaid_link_token'); clearUrl(); },
-      });
-      handler.open();
-    } catch { localStorage.removeItem('mc_plaid_link_token'); clearUrl(); }
-  }, []);
-
   useEffectApp(() => {
     window.__toast = (msg, type = "success") => {
       const id = Date.now() + Math.random();

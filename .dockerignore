@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 *.pyo
 .git/
+.claude/
 token.json
 drive_token.json
 credentials.json
