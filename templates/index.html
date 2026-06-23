@@ -378,6 +378,11 @@
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
     scrollbar-gutter: stable;
+    /* Soft top/bottom fade so the list dissolves into the card frame instead of
+       hard-clipping at maxHeight — keeps the scroll area visually part of the
+       warm app rather than looking cut off. */
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 18px), transparent 100%);
+            mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 18px), transparent 100%);
   }
   /* Make any inline overflowY:auto also momentum-scroll on iOS */
   [style*="overflowY:auto"], [style*="overflow-y:auto"] {
@@ -1765,8 +1770,10 @@ html.mc-bg,html.mc-bg body{background:#06120b}
   // Reveal the moment React mounts (after a short minimum hold so it isn't a flash).
   var seen = !!sessionStorage.getItem(BK);
   try{ sessionStorage.setItem(BK,'1'); }catch(e){}
-  var t0=Date.now(), MIN = seen ? 250 : 1200, mounted=false;
-  function maybe(){ if(mounted && Date.now()-t0>=MIN) done(); }
+  var t0=Date.now(), MIN = seen ? 250 : 800, mounted=false, animDone=true;
+  // animDone defaults true (repeat/reduced-motion loads have no scroll); first load sets it
+  // false until the terminal finishes scrolling, so the crossfade waits for the cmd run to end.
+  function maybe(){ if(mounted && animDone && Date.now()-t0>=MIN) done(); }
   var root=document.getElementById('root');
   if(root){
     var mo=new MutationObserver(function(){
@@ -1815,9 +1822,11 @@ html.mc-bg,html.mc-bg body{background:#06120b}
 
   // compositor-driven scroll: keeps moving even while Babel blocks the main thread
   var H=window.innerHeight, P=pre.scrollHeight, dist=Math.max(0,P-H+60), dur=Math.max(2200,dist*0.9);
+  animDone=false;                                                       // first-load only (runs after the seen/reduced early-returns)
   if(pre.animate){
-    pre.animate([{transform:'translateY(0)'},{transform:'translateY(-'+dist+'px)'}],{duration:dur,easing:'linear',fill:'forwards'});
-  }
+    var _anim=pre.animate([{transform:'translateY(0)'},{transform:'translateY(-'+dist+'px)'}],{duration:dur,easing:'linear',fill:'forwards'});
+    _anim.onfinish=function(){ animDone=true; maybe(); };               // scroll finished → allow the crossfade
+  } else { animDone=true; }
 })();
 </script>
 {% endraw %}

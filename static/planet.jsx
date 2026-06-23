@@ -353,7 +353,7 @@ const PL_buildFleet = (seed) => {
   const fr = mulberry32(hashStr('mc-war-fleet|' + (seed || todayStr())));
   const ships = [];
   for (let i = 0; i < 3; i++) ships.push({ i, phase: fr() * Math.PI * 2, speed: 0.015 + fr() * 0.015,
-    scale: 0.85 + fr() * 0.5, lancePhase: fr() * 9000, lanceGap: 6000 + fr() * 5000, lanceDur: 650 + fr() * 450, tgtK: -1, _li: -1 });
+    scale: (i === 0 ? 1.45 : 1.0) + fr() * 0.4, lancePhase: fr() * 9000, lanceGap: 6000 + fr() * 5000, lanceDur: 650 + fr() * 450, tgtK: -1, _li: -1 });
   return { ships };
 };
 // a Battlefleet-Gothic capital ship silhouette — armoured prow/ram, stepped gothic cathedral
@@ -518,7 +518,7 @@ const PL_drawFx = (ctx, t, fire, size, intensity, alertMix, reduced, dangerHex, 
 
   // fleet orbit (shared with the render block below): semi-axes + a ship's live screen position.
   // `behind` = hidden over the top of the planet, so the Tyranids can't reach it with a lob.
-  const flA = size * 0.47, flB = size * 0.34;
+  const flA = size * 0.50, flB = size * 0.37;
   const PL_shipPos = (sh) => {
     const th = sh.phase + (t / 1000) * sh.speed, sn = Math.sin(th);
     const sx = cx + flA * Math.cos(th), sy = cy + flB * sn;
@@ -622,7 +622,7 @@ const PL_drawFx = (ctx, t, fire, size, intensity, alertMix, reduced, dangerHex, 
         }
       }
       if (behind) return;
-      const ang = Math.atan2(B * Math.cos(th), -A * sn), len = Math.max(8, size * 0.095) * sh.scale;
+      const ang = Math.atan2(B * Math.cos(th), -A * sn), len = Math.max(12, size * 0.15) * sh.scale;
       ctx.globalAlpha = sn < 0 ? 0.6 : 1;                                          // far (top) arc dimmer for depth
       PL_ship(ctx, sx, sy, ang, len, dangerHex, limbHex, size);                    // red hull, white-hot engine glow
       ctx.globalAlpha = 1;
