@@ -418,13 +418,16 @@ const App = () => {
     return () => clearInterval(id);
   }, []);
 
-  // Auto-refresh all cards every 60s when the tab is visible, plus when the
-  // tab becomes visible after being hidden. Cards subscribe via useRefreshListener.
+  // Auto-refresh all cards every 3 min when the tab is visible, plus immediately
+  // when the tab becomes visible after being hidden (so returning to it is fresh).
+  // The interval is deliberately slow: a backgrounded tab never polls, so this also
+  // lets the Cloud Run instance scale to zero when you walk away. Cards subscribe
+  // via useRefreshListener.
   useEffectApp(() => {
     const fire = () => window.dispatchEvent(new CustomEvent('mc:refresh'));
     const tick = setInterval(() => {
       if (document.visibilityState === 'visible') fire();
-    }, 60_000);
+    }, 180_000);
     const onVisibility = () => { if (document.visibilityState === 'visible') fire(); };
     document.addEventListener('visibilitychange', onVisibility);
     return () => {

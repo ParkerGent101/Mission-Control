@@ -9,6 +9,7 @@ from pathlib import Path
 import json
 import sqlite3
 import sys
+import time
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request, session, redirect
@@ -824,9 +825,7 @@ def get_finances():
         try:
             svc  = _sheets_svc()
             tab  = _month_tab(month) if month else _first_sheet_name(svc, FINANCE_SHEET_ID)
-            rows = svc.spreadsheets().values().get(
-                spreadsheetId=FINANCE_SHEET_ID, range=tab
-            ).execute().get('values', [])
+            rows = _finance_rows(svc, tab)
             return jsonify(_parse_transaction_rows(rows, tab=tab))
         except Exception:
             pass
@@ -842,9 +841,7 @@ def get_finances_budget():
         try:
             svc  = _sheets_svc()
             tab  = _month_tab(month) if month else _first_sheet_name(svc, FINANCE_SHEET_ID)
-            rows = svc.spreadsheets().values().get(
-                spreadsheetId=FINANCE_SHEET_ID, range=tab
-            ).execute().get('values', [])
+            rows = _finance_rows(svc, tab)
             return jsonify(_parse_budget_rows(rows))
         except Exception:
             pass  # fall through to local calculation
@@ -919,6 +916,7 @@ def patch_finances_budget():
             valueInputOption='USER_ENTERED',
             body={'values': [[budgeted]]}
         ).execute()
+        _invalidate_finance_cache()
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -942,12 +940,14 @@ def post_finance():
                 if not written:
                     return jsonify({"error": f"No '{cat}' table found in sheet tab '{tab}'."}), 400
                 target_row, target_col = written
+                _invalidate_finance_cache()
                 return jsonify({"ok": True, "sheet_tab": tab, "sheet_row": target_row, "sheet_col": target_col, "sheet_cols": 2, "sheet_kind": "detail"})
             if cat in BUDGET_TRANSACTION_CATEGORIES:
                 written = _write_budget_transaction(svc, FINANCE_SHEET_ID, tab, rows, cat, desc, amt)
                 if not written:
                     return jsonify({"error": f"No empty '{cat}' budget row found in sheet tab '{tab}'."}), 400
                 target_row, target_col = written
+                _invalidate_finance_cache()
                 return jsonify({"ok": True, "sheet_tab": tab, "sheet_row": target_row, "sheet_col": target_col, "sheet_cols": 1, "sheet_kind": "budget"})
             allowed = ", ".join(["Housing", "Utilities", "Food / Grocery", "Fun", "Gas"])
             return jsonify({"error": f"'{cat}' isn't a transaction-tracked category. Use {allowed}."}), 400
@@ -982,6 +982,7 @@ def delete_finance_sheet():
     try:
         svc = _sheets_svc()
         _clear_sheet_values(svc, FINANCE_SHEET_ID, tab, row, col, cols)
+        _invalidate_finance_cache()
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -990,7 +991,9 @@ def delete_finance_sheet():
 def patch_finance(tid):
     d = request.json or {}
     if FINANCE_SHEET_ID:
-        return _patch_finance_sheet(d)
+        resp = _patch_finance_sheet(d)
+        _invalidate_finance_cache()
+        return resp
     finances = _load(FINANCE_FILE)
     txn = next((t for t in finances if t.get("id") == tid), None)
     if not txn:
@@ -1044,6 +1047,7 @@ def rollover_month():
         ).execute()
         _clear_detail_tables(svc, FINANCE_SHEET_ID, dst_tab)
         _clear_budget_actuals(svc, FINANCE_SHEET_ID, dst_tab)
+        _invalidate_finance_cache()
         return jsonify({"ok": True, "tab": dst_tab, "month": f"{ny}-{str(nm).zfill(2)}"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1553,10 +1557,12 @@ def _record_expense(date, desc, amt, cat):
             spreadsheetId=FINANCE_SHEET_ID, range=tab).execute().get('values', [])
         if cat in DETAIL_TABLE_KEYWORDS:
             if _write_detail_transaction(svc, FINANCE_SHEET_ID, tab, rows, cat, desc, amt, date):
+                _invalidate_finance_cache()
                 return True, {"tab": tab, "kind": "detail"}
             return False, f"No '{cat}' table in tab '{tab}'"
         if cat in BUDGET_TRANSACTION_CATEGORIES:
             if _write_budget_transaction(svc, FINANCE_SHEET_ID, tab, rows, cat, desc, amt):
+                _invalidate_finance_cache()
                 return True, {"tab": tab, "kind": "budget"}
             return False, f"No empty '{cat}' budget row in tab '{tab}'"
         return False, f"'{cat}' isn't a Sheet-tracked category"
@@ -2367,6 +2373,34 @@ def _sheets_svc():
     if not creds.valid:
         creds.refresh(google.auth.transport.requests.Request())
     return build('sheets', 'v4', credentials=creds)
+
+# ── Finance Sheet read cache ─────────────────────────────────────────────────
+# /api/finances and /api/finances/budget both read the same month tab from the
+# finance Sheet, and the Finance card auto-refreshes on a timer — so without a
+# cache every refresh makes redundant Sheets round-trips, each adding ~0.3-0.8s
+# of request latency (billed CPU time on Cloud Run) and Sheets API quota. Cache
+# the raw row read briefly, keyed by tab, and clear it on EVERY write to the
+# finance Sheet so the card never shows stale balances. The short TTL is a
+# backstop in case a write path is ever missed. One gunicorn worker => one shared
+# process-local cache, which is correct for this single-user app.
+_FIN_ROWS_CACHE = {}     # tab -> (monotonic_ts, rows)
+_FIN_CACHE_TTL  = 30     # seconds
+
+def _finance_rows(svc, tab):
+    """Cached read of a finance Sheet tab's raw values. Pure reads only — write
+    handlers must read fresh (and call _invalidate_finance_cache after writing)."""
+    hit = _FIN_ROWS_CACHE.get(tab)
+    if hit and (time.monotonic() - hit[0]) < _FIN_CACHE_TTL:
+        return hit[1]
+    rows = svc.spreadsheets().values().get(
+        spreadsheetId=FINANCE_SHEET_ID, range=tab
+    ).execute().get('values', [])
+    _FIN_ROWS_CACHE[tab] = (time.monotonic(), rows)
+    return rows
+
+def _invalidate_finance_cache():
+    """Drop cached finance Sheet reads. Call after ANY write to the finance Sheet."""
+    _FIN_ROWS_CACHE.clear()
 
 def _month_tab(yyyy_mm):
     """Convert YYYY-MM to full month name for sheet tab lookup."""

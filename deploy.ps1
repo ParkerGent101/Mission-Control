@@ -87,7 +87,8 @@ gcloud run deploy $SERVICE `
     --allow-unauthenticated `
     --memory 512Mi `
     --timeout 120 `
-    --min-instances 1 `
+    --min-instances 0 `
+    --max-instances 3 `
     --set-env-vars $envVars `
     --set-secrets $secretBindings `
     --add-volume "name=data,type=cloud-storage,bucket=$BUCKET" `
