@@ -356,16 +356,48 @@ const PL_buildFleet = (seed) => {
     scale: 0.85 + fr() * 0.5, lancePhase: fr() * 9000, lanceGap: 6000 + fr() * 5000, lanceDur: 650 + fr() * 450, tgtK: -1, _li: -1 });
   return { ships };
 };
-// a capital-ship silhouette (bone hull, dark edge, engine glow at the stern), nose along travel
+// a Battlefleet-Gothic capital ship silhouette — armoured prow/ram, stepped gothic cathedral
+// spires along the dorsal spine, flat keel, and a clustered engine block trailing plasma.
+// Lit from the dorsal side (gradient) for depth; nose points along travel. Tiny-size safe.
 const PL_ship = (ctx, sx, sy, ang, len, hull, glow, size) => {
-  const W = len * 0.34;
+  const L = len, a0 = ctx.globalAlpha;
+  const dark = PL_mix(hull, '#000000', 0.5);                                          // shadowed keel / underhull
+  const lit = PL_mix(hull, glow, 0.32);                                               // sunlit dorsal edge
   ctx.save(); ctx.translate(sx, sy); ctx.rotate(ang);
+
+  // engine plasma plume trailing aft (drawn under the hull so the body masks the near half)
+  const eg = ctx.createRadialGradient(-L * 0.52, 0, 0, -L * 0.52, 0, L * 0.42);
+  eg.addColorStop(0, glow); eg.addColorStop(0.45, PL_mix(glow, hull, 0.45)); eg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.globalAlpha = a0 * 0.55; ctx.fillStyle = eg;
+  ctx.beginPath(); ctx.ellipse(-L * 0.6, 0, L * 0.24, L * 0.13, 0, 0, 7); ctx.fill();
+
+  // hull side profile: armoured prow → two gothic dorsal spires → engine block → flat keel
   ctx.beginPath();
-  ctx.moveTo(len * 0.5, 0); ctx.lineTo(len * 0.1, -W * 0.5); ctx.lineTo(-len * 0.5, -W * 0.42);
-  ctx.lineTo(-len * 0.5, W * 0.42); ctx.lineTo(len * 0.1, W * 0.5); ctx.closePath();
-  ctx.fillStyle = hull; ctx.fill();
-  ctx.lineWidth = Math.max(0.6, size * 0.005); ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.stroke();
-  ctx.beginPath(); ctx.arc(-len * 0.5, 0, W * 0.34, 0, 7); ctx.fillStyle = glow; ctx.shadowColor = glow; ctx.shadowBlur = size * 0.03; ctx.fill(); ctx.shadowBlur = 0;
+  ctx.moveTo(L * 0.50, L * 0.02);                                                     // armoured ram tip (rakes slightly down)
+  ctx.lineTo(L * 0.33, -L * 0.10); ctx.lineTo(L * 0.22, -L * 0.085);                  // heavy prow shoulder → forward deck
+  ctx.lineTo(L * 0.15, -L * 0.22); ctx.lineTo(L * 0.10, -L * 0.30); ctx.lineTo(L * 0.06, -L * 0.20); // foredeck cathedral spire
+  ctx.lineTo(L * 0.02, -L * 0.14);                                                    // saddle between spires
+  ctx.lineTo(-L * 0.04, -L * 0.26); ctx.lineTo(-L * 0.12, -L * 0.26); ctx.lineTo(-L * 0.16, -L * 0.14); // command bridge castle
+  ctx.lineTo(-L * 0.40, -L * 0.13); ctx.lineTo(-L * 0.47, -L * 0.14);                 // aft deck
+  ctx.lineTo(-L * 0.50, -L * 0.12); ctx.lineTo(-L * 0.50, L * 0.12);                  // engine block stern face
+  ctx.lineTo(-L * 0.45, L * 0.13); ctx.lineTo(-L * 0.10, L * 0.14);                   // keel aft → mid
+  ctx.lineTo(L * 0.22, L * 0.12); ctx.lineTo(L * 0.33, L * 0.105);                    // keel forward → heavy under-ram
+  ctx.closePath();
+  const hg = ctx.createLinearGradient(0, -L * 0.30, 0, L * 0.16);                     // dorsal-lit → keel-shadowed
+  hg.addColorStop(0, lit); hg.addColorStop(0.45, hull); hg.addColorStop(1, dark);
+  ctx.globalAlpha = a0; ctx.fillStyle = hg; ctx.fill();
+  ctx.lineWidth = Math.max(0.5, size * 0.004); ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.stroke();
+
+  // gilded Imperial detailing (interior, never overhangs): a brass broadside gun-deck stripe
+  // running the length of the hull + a small aquila glint over the prow
+  ctx.globalAlpha = a0 * 0.72; ctx.strokeStyle = '#d9a441'; ctx.lineCap = 'butt'; ctx.lineWidth = Math.max(0.4, L * 0.02);
+  ctx.beginPath(); ctx.moveTo(L * 0.18, L * 0.02); ctx.lineTo(-L * 0.40, L * 0.025); ctx.stroke();
+  ctx.fillStyle = '#e8c25a'; ctx.beginPath(); ctx.arc(L * 0.27, -L * 0.02, Math.max(0.5, L * 0.025), 0, 7); ctx.fill();
+
+  // clustered engine bells — white-hot plasma exhaust at the stern
+  ctx.globalAlpha = a0; ctx.shadowColor = glow; ctx.shadowBlur = size * 0.035; ctx.fillStyle = glow;
+  for (let k = -1; k <= 1; k++) { ctx.beginPath(); ctx.arc(-L * 0.50, k * L * 0.07, L * 0.05, 0, 7); ctx.fill(); }
+  ctx.shadowBlur = 0;
   ctx.restore();
 };
 
@@ -590,7 +622,7 @@ const PL_drawFx = (ctx, t, fire, size, intensity, alertMix, reduced, dangerHex, 
         }
       }
       if (behind) return;
-      const ang = Math.atan2(B * Math.cos(th), -A * sn), len = Math.max(7, size * 0.085) * sh.scale;
+      const ang = Math.atan2(B * Math.cos(th), -A * sn), len = Math.max(8, size * 0.095) * sh.scale;
       ctx.globalAlpha = sn < 0 ? 0.6 : 1;                                          // far (top) arc dimmer for depth
       PL_ship(ctx, sx, sy, ang, len, dangerHex, limbHex, size);                    // red hull, white-hot engine glow
       ctx.globalAlpha = 1;

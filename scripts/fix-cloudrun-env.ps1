@@ -1,4 +1,4 @@
-# Mission Control — Fix Cloud Run environment variables & secrets
+# Mission Control -Fix Cloud Run environment variables & secrets
 #
 # Adds the missing GITHUB_TOKEN secret and ensures all env vars are correct.
 # Safe to re-run: reads current config and merges rather than replacing.

@@ -352,7 +352,6 @@ const App = () => {
     } catch { return TWEAK_DEFAULTS; }
   });
   const [active, setActive] = useStateApp("dashboard");
-  const [cmdOpen, setCmdOpen] = useStateApp(false);
   const [now, setNow] = useStateApp(new Date());
   const [toasts, setToasts] = useStateApp([]);
   const [showSheet, setShowSheet] = useStateApp(false);
@@ -406,34 +405,6 @@ const App = () => {
     fetch('/api/onboarding').then(r => r.json()).then(d => setNeedsOnboarding(d.needed)).catch(() => setNeedsOnboarding(false));
   }, []);
 
-  // Plaid OAuth handoff: OAuth banks (Fidelity, Chase, etc.) authenticate on the bank's
-  // site, then redirect the browser back here with ?oauth_state_id=... . Re-open Plaid
-  // Link with the stored link_token + receivedRedirectUri to finish the connection.
-  useEffectApp(() => {
-    if (!window.location.search.includes('oauth_state_id')) return;
-    const clearUrl = () => window.history.replaceState({}, document.title, window.location.pathname);
-    const token = localStorage.getItem('mc_plaid_link_token');
-    if (!token || !window.Plaid) { clearUrl(); return; }
-    try {
-      const handler = window.Plaid.create({
-        token,
-        receivedRedirectUri: window.location.href,
-        onSuccess: async (publicToken, metadata) => {
-          await fetch('/api/plaid/exchange', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ public_token: publicToken, institution: metadata?.institution }),
-          });
-          localStorage.removeItem('mc_plaid_link_token');
-          clearUrl();
-          window.__toast?.('Bank account connected', 'success');
-          window.dispatchEvent(new CustomEvent('mc:refresh'));   // flips Finance to "Sync bank"
-        },
-        onExit: () => { localStorage.removeItem('mc_plaid_link_token'); clearUrl(); },
-      });
-      handler.open();
-    } catch { localStorage.removeItem('mc_plaid_link_token'); clearUrl(); }
-  }, []);
-
   useEffectApp(() => {
     window.__toast = (msg, type = "success") => {
       const id = Date.now() + Math.random();
@@ -464,12 +435,7 @@ const App = () => {
 
   useEffectApp(() => {
     const onKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
-        e.preventDefault();
-        setCmdOpen(o => !o);
-      }
       if (e.key === "Escape") {
-        setCmdOpen(false);
         setShowSettings(false);
       }
     };
@@ -489,15 +455,6 @@ const App = () => {
   useEffectApp(() => {
     localStorage.setItem(DASHBOARD_MINIMIZED_KEY, JSON.stringify(dashboardMinimized));
   }, [dashboardMinimized]);
-
-  const onAction = (c) => {
-    if (!c?.action) return;
-    if (c.action === "open:tweaks") {
-      setShowSettings(true);
-    } else if (c.action.startsWith("go:")) {
-      setActive(c.action.split(":")[1]);
-    }
-  };
 
   const handleOnboardingComplete = ({ name, modules: newModules, theme }) => {
     if (name && name.trim()) {
@@ -569,26 +526,15 @@ const App = () => {
             {active === 'dashboard' ? 'Mission Control' : (SIDEBAR_NAV.find(n => n.id === active)?.label || 'Mission Control')}
           </span>
         </div>
-        <div className="topbar-center">
-          <div className="cmdk" onClick={() => setCmdOpen(true)}>
-            <Icon name="search" size={14}/>
-            <span className="cmdk-text">Type a command, or search anything…</span>
-            <span className="kbd">⌘K</span>
-          </div>
-          <span className="pill"><span className="dot"/>localhost:5000</span>
-        </div>
+        <div className="topbar-center"></div>
         <div className="topbar-right">
           <span className="mono topbar-date" style={{ padding: "0 10px", color: "var(--ink-2)" }}>{date}</span>
           <button className="icon-btn" title="Settings" onClick={() => setShowSettings(true)}>
             <Icon name="settings" size={15}/>
           </button>
-          <div title="Logout" onClick={logout} style={{
-            width: 28, height: 28, borderRadius: "50%",
-            background: "linear-gradient(135deg, var(--accent), var(--violet))",
-            display: "inline-flex", alignItems: "center", justifyContent: "center",
-            color: "#fff", fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 600,
-            marginLeft: 4, cursor: "pointer"
-          }}>P</div>
+          <button className="icon-btn" title="Sign out" onClick={logout}>
+            <Icon name="logout" size={15}/>
+          </button>
         </div>
       </div>
 
@@ -610,11 +556,6 @@ const App = () => {
         ))}
         <div style={{ flex: 1 }}/>
         <div className="sb-section">Shortcuts</div>
-        <div className="sb-item" onClick={() => setCmdOpen(true)}>
-          <span className="sb-key">[K]</span>
-          <span className="sb-label">Command palette</span>
-          <span className="sb-badge">⌘K</span>
-        </div>
         <div className="sb-item" onClick={() => setShowSettings(true)}>
           <span className="sb-key">[T]</span>
           <span className="sb-label">Tweaks</span>
@@ -668,13 +609,11 @@ const App = () => {
       <div className="statusbar">
         <span><span className="dot" style={{ display: "inline-block", marginRight: 6 }}/>online</span>
         <span className="sep"/>
-        <span>mission control · localhost:5000</span>
+        <span>mission control</span>
         <span className="sep"/>
         <span>claude · connected</span>
         <span className="spacer"/>
         <span className="mono">{date} · {time}</span>
-        <span className="sep"/>
-        <a onClick={() => setCmdOpen(true)} style={{ cursor: "pointer" }}>⌘K commands</a>
       </div>
 
       {/* Mobile bottom nav */}
@@ -735,9 +674,6 @@ const App = () => {
               ))}
             </div>
             <div style={{display:'flex',gap:8,marginTop:4}}>
-              <button className="btn" style={{flex:1}} onClick={() => { setCmdOpen(true); setShowSheet(false); }}>
-                <Icon name="search" size={13}/>Search ⌘K
-              </button>
               <button className="btn" style={{flex:1}} onClick={() => { setShowSettings(true); setShowSheet(false); }}>
                 <Icon name="settings" size={13}/>Settings
               </button>
@@ -745,8 +681,6 @@ const App = () => {
           </div>
         </div>
       )}
-
-      <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} onAction={onAction} />
 
       {toasts.length > 0 && (
         <div style={{ position:"fixed", bottom:120, right:16, display:"flex", flexDirection:"column", gap:6, zIndex:200, pointerEvents:"none" }}>

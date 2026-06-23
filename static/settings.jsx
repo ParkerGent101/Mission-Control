@@ -71,14 +71,17 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
   const [driveStatus, setDriveStatus] = useST(null);
   const [sheetFinance, setSheetFinance] = useST('');
   const [sheetContacts, setSheetContacts] = useST('');
+  const [importFolder, setImportFolder] = useST('');
   const [driveSyncing, setDriveSyncing] = useST(null);
   const [driveMsg, setDriveMsg] = useST({});
+  const [me, setMe] = useST(null);
 
   useEffectST(() => {
     if (!open) return;
     setProfileName(userName || "");
     setCurPw(""); setNewPw(""); setPwMsg(null); setNameMsg(null);
     setResetConfirm(false);
+    fetch('/api/me').then(r => r.json()).then(setMe).catch(() => {});
   }, [open, userName]);
 
   useEffectST(() => {
@@ -95,6 +98,7 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
       });
       if (drive.sheet_finance) setSheetFinance(drive.sheet_finance);
       if (drive.sheet_contacts) setSheetContacts(drive.sheet_contacts);
+      if (drive.finance_import_folder) setImportFolder(drive.finance_import_folder);
     });
   }, [section]);
 
@@ -144,7 +148,7 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
   const saveSheets = async () => {
     const r = await fetch('/api/drive/config', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sheet_finance: sheetFinance.trim(), sheet_contacts: sheetContacts.trim() }),
+      body: JSON.stringify({ sheet_finance: sheetFinance.trim(), sheet_contacts: sheetContacts.trim(), finance_import_folder: importFolder.trim() }),
     });
     const d = await r.json();
     if (d.ok) window.__toast?.('Sheet IDs saved', 'success');
@@ -170,6 +174,18 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
     const msg = d.ok ? `Pushed ${d.count != null ? d.count + ' rows' : ''}`.trim() : (d.error || 'Push failed');
     setDriveMsg(prev => ({ ...prev, [key]: msg }));
     setTimeout(() => setDriveMsg(prev => ({ ...prev, [key]: null })), 4000);
+  };
+
+  // Import the newest Rocket Money CSV export from the configured Drive folder into the Sheet.
+  const importRocketMoney = async () => {
+    setDriveSyncing('import');
+    const r = await fetch('/api/finance/import/drive');
+    const d = await r.json();
+    setDriveSyncing(null);
+    const msg = (!r.ok || d.error) ? (d.error || 'Import failed')
+      : `Imported ${d.written || 0}` + (d.skipped ? `, skipped ${d.skipped}` : '') + (d.failed ? `, ${d.failed} failed` : '');
+    setDriveMsg(prev => ({ ...prev, import: msg }));
+    setTimeout(() => setDriveMsg(prev => ({ ...prev, import: null })), 6000);
   };
 
   const applyTheme = (th) => {
@@ -200,17 +216,24 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
       </FieldRow>
 
       <SectionHead style={{ marginTop: 24 }}>Security</SectionHead>
-      <FieldRow label="Change Password" desc="Updates the password for this Mission Control instance.">
-        <input className="input" type="password" placeholder="Current password" value={curPw}
-          onChange={e => setCurPw(e.target.value)} style={{ width: 220 }} />
-        <input className="input" type="password" placeholder="New password (min 4 chars)" value={newPw}
-          onChange={e => setNewPw(e.target.value)} style={{ width: 220 }} />
-        <button className="btn primary" onClick={changePassword} disabled={!curPw || !newPw || newPw.length < 4}
-          style={{ alignSelf: 'flex-end' }}>
-          Update password
-        </button>
-        {pwMsg && <span style={{ fontSize: 11, color: pwMsg.ok ? 'var(--accent-2)' : 'var(--danger)' }}>{pwMsg.text}</span>}
+      <FieldRow label="Signed in as" desc="Access is verified through your Google account and its 2-step verification (MFA).">
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--ink-2)' }}>
+          {me && me.email ? me.email : (me && me.password_login ? 'Password session (no Google identity)' : '…')}
+        </span>
       </FieldRow>
+      {me && me.password_login && (
+        <FieldRow label="Change Password" desc="Break-glass fallback only — sign-in normally uses Google.">
+          <input className="input" type="password" placeholder="Current password" value={curPw}
+            onChange={e => setCurPw(e.target.value)} style={{ width: 220 }} />
+          <input className="input" type="password" placeholder="New password (min 4 chars)" value={newPw}
+            onChange={e => setNewPw(e.target.value)} style={{ width: 220 }} />
+          <button className="btn primary" onClick={changePassword} disabled={!curPw || !newPw || newPw.length < 4}
+            style={{ alignSelf: 'flex-end' }}>
+            Update password
+          </button>
+          {pwMsg && <span style={{ fontSize: 11, color: pwMsg.ok ? 'var(--accent-2)' : 'var(--danger)' }}>{pwMsg.text}</span>}
+        </FieldRow>
+      )}
 
       <SectionHead style={{ marginTop: 24 }}>Session</SectionHead>
       <FieldRow label="Re-run Setup" desc="Restart the onboarding wizard to reconfigure your profile, modules, and integrations.">
@@ -395,6 +418,25 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
             )}
           </div>
 
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 600, marginBottom: 6, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Rocket Money import folder</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input className="input" placeholder="Google Drive folder URL or ID"
+                value={importFolder} onChange={e => setImportFolder(e.target.value)}
+                style={{ flex: 1, minWidth: 180, fontSize: 11.5 }} />
+              <button className="btn" style={{ fontSize: 11, padding: '4px 9px', whiteSpace: 'nowrap' }}
+                onClick={importRocketMoney} disabled={!importFolder || driveSyncing === 'import'}>
+                {driveSyncing === 'import' ? '…' : '↓ Sync now'}
+              </button>
+            </div>
+            <div style={{ fontSize: 10.5, color: 'var(--ink-4)', marginTop: 5 }}>
+              Upload your Rocket Money CSV export to this Drive folder; Sync imports the newest one’s recent spending into the Finance Sheet.
+            </div>
+            {driveMsg.import && (
+              <div style={{ fontSize: 11, color: 'var(--accent-2)', marginTop: 5 }}>{driveMsg.import}</div>
+            )}
+          </div>
+
           <div style={{ marginBottom: 12 }}>
             <div style={{ fontSize: 11.5, fontWeight: 600, marginBottom: 6, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Band Contacts Sheet</div>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -498,7 +540,7 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
           ["Stack",      "Flask · React · Claude API"],
           ["Model",      "claude-sonnet-4-6"],
           ["Storage",    "Local JSON · SQLite activity log"],
-          ["Auth",       "Session-based password login"],
+          ["Auth",       "Google sign-in · 2-step verification"],
         ].map(([k, v]) => (
           <div key={k} style={{ display: 'flex', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--line-soft)', alignItems: 'baseline' }}>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-4)', width: 80, flexShrink: 0 }}>{k}</span>
@@ -507,10 +549,11 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
         ))}
       </div>
 
+      <a href="/privacy" target="_blank" rel="noopener" style={{ display: 'inline-block', marginTop: 14, fontSize: 12, color: 'var(--accent)', textDecoration: 'underline' }}>Privacy Policy</a>
+
       <SectionHead style={{ marginTop: 24 }}>Keyboard Shortcuts</SectionHead>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {[
-          ["⌘K",    "Open command palette"],
           ["Enter", "Submit Talk bar"],
           ["Esc",   "Close any open panel"],
         ].map(([k, v]) => (

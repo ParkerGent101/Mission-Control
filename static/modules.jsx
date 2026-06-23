@@ -226,10 +226,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
   const catOverrides = React.useRef({});
   const [budget, setBudget] = React.useState(null);
   const [syncing, setSyncing] = useState(false);
-  const [pending, setPending] = useState(null);   // null = idle; [] = synced w/ nothing new; [...] = review queue
-  const [bankConnected, setBankConnected] = useState(null);  // null = unknown, false = no Plaid items, true = linked
-  const [accounts, setAccounts] = useState([]);   // [{item_id, institution, added}] of linked banks
-  const [connecting, setConnecting] = useState(false);
+  const [importReady, setImportReady] = useState(null);  // null = unknown; true = Drive connected + import folder set
   const [collapsedCats, setCollapsedCats] = useState({});
   const toggleCat = (name) => setCollapsedCats(s => ({...s, [name]: !s[name]}));
   // Mobile: Overview / Transactions / Subscriptions become horizontally swipeable panes.
@@ -267,12 +264,21 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
   useEffect(() => { loadFinances(month); }, [month]);
   useEffect(() => {
     fetch('/api/finances/subscriptions').then(r=>r.json()).then(setSubs).catch(()=>{});
-    fetch('/api/plaid/status').then(r=>r.json()).then(d => { setBankConnected(!!d.connected); setAccounts(d.accounts || []); }).catch(()=>setBankConnected(null));
+    fetch('/api/finance/import/status').then(r=>r.json()).then(d => setImportReady(!!(d.connected && d.folder_configured))).catch(()=>setImportReady(null));
   }, []);
+  // Auto-import the newest Rocket Money CSV from Drive once we know it's set up -- silent,
+  // throttled to at most once / 10 min so revisiting Finance doesn't re-hit Drive & the Sheet.
+  useEffect(() => {
+    if (importReady !== true) return;
+    let last = 0; try { last = +(localStorage.getItem('mc_drive_import_ts') || 0); } catch {}
+    if (Date.now() - last < 10 * 60 * 1000) return;
+    try { localStorage.setItem('mc_drive_import_ts', String(Date.now())); } catch {}
+    syncDrive();
+  }, [importReady]);
   useRefreshListener(() => {
     loadFinances(month);
     fetch('/api/finances/subscriptions').then(r=>r.json()).then(setSubs).catch(()=>{});
-    fetch('/api/plaid/status').then(r=>r.json()).then(d => { setBankConnected(!!d.connected); setAccounts(d.accounts || []); }).catch(()=>{});
+    fetch('/api/finance/import/status').then(r=>r.json()).then(d => setImportReady(!!(d.connected && d.folder_configured))).catch(()=>{});
   });
   const changeMonth = (dir) => {
     const [y, m] = month.split('-').map(Number);
@@ -298,84 +304,29 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
     loadFinances(month);
   };
 
-  // Sheet-tracked expense categories (the only ones Plaid imports can write to).
-  const SHEET_CATS = ["Food / Grocery", "Fun", "Gas", "Housing", "Utilities"];
-
-  const syncBank = async () => {
+  // Sync from Drive: read the newest Rocket Money CSV export from the configured Google
+  // Drive folder and write its spending transactions straight to the Sheet (categorized +
+  // de-duped server-side, recent window only). Runs silently on load (throttled) and
+  // manually via the Sync button.
+  const syncDrive = async (opts = {}) => {
+    if (importReady === false) {
+      if (opts.manual) window.__toast?.('Set your Rocket Money Drive folder in Settings → Integrations first', 'info');
+      return;
+    }
     setSyncing(true);
     try {
-      const r = await fetch('/api/plaid/sync');
+      const r = await fetch('/api/finance/import/drive');
       const d = await r.json();
-      if (!r.ok || d.error) { alert(d.error || 'Bank sync failed'); setSyncing(false); return; }
-      const rows = (d.pending || []).map(t => ({ ...t, include: true }));
-      setPending(rows);
-      if (rows.length === 0) window.__toast?.('No new transactions to import', 'info');
-    } catch { alert('Bank sync failed — is Plaid configured?'); }
+      if (!r.ok || d.error) { if (opts.manual) window.__toast?.(d.error || 'Drive sync failed', 'error'); setSyncing(false); return; }
+      if (d.written > 0) {
+        loadFinances(month);
+        window.__toast?.(`Imported ${d.written} transaction${d.written === 1 ? '' : 's'} from Drive`, 'success');
+      } else if (opts.manual) {
+        window.__toast?.('No new transactions to import', 'info');
+      }
+      if (opts.manual && d.failed) window.__toast?.(`${d.failed} couldn't be written to the Sheet`, 'error');
+    } catch { if (opts.manual) window.__toast?.('Drive sync failed', 'error'); }
     setSyncing(false);
-  };
-
-  // Link a real bank via Plaid Link (mirrors connectPlaid() in onboarding.jsx) so a
-  // bank can be connected outside the first-run onboarding wizard.
-  const connectBank = async () => {
-    if (!window.Plaid) { window.__toast?.('Plaid not loaded — is PLAID_CLIENT_ID set?', 'error'); return; }
-    setConnecting(true);
-    try {
-      const r = await fetch('/api/plaid/link_token', { method:'POST', headers:{'Content-Type':'application/json'} });
-      const d = await r.json();
-      if (!r.ok || d.error) { setConnecting(false); window.__toast?.(d.error || 'Could not start Plaid', 'error'); return; }
-      // Persist the link_token so an OAuth bank (e.g. Fidelity) can resume after it
-      // redirects the page back here — see the OAuth handoff effect in app.jsx.
-      localStorage.setItem('mc_plaid_link_token', d.link_token);
-      const handler = window.Plaid.create({
-        token: d.link_token,
-        onSuccess: async (publicToken, metadata) => {
-          await fetch('/api/plaid/exchange', { method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ public_token: publicToken, institution: metadata?.institution }) });
-          localStorage.removeItem('mc_plaid_link_token');
-          setBankConnected(true); setConnecting(false);
-          window.__toast?.(`${metadata?.institution?.name || 'Bank account'} connected`, 'success');
-          fetch('/api/plaid/status').then(r=>r.json()).then(d => setAccounts(d.accounts || [])).catch(()=>{});
-          syncBank();   // pull the first batch straight into the review queue
-        },
-        onExit: () => { localStorage.removeItem('mc_plaid_link_token'); setConnecting(false); },
-      });
-      handler.open();
-    } catch { setConnecting(false); window.__toast?.('Plaid connection failed', 'error'); }
-  };
-
-  // Remove one linked institution (Plaid item) without touching the others.
-  const disconnectBank = async (itemId, name) => {
-    if (!window.confirm(`Disconnect ${name || 'this account'}? Already-imported transactions stay; new syncing stops. You can reconnect anytime.`)) return;
-    try {
-      const r = await fetch('/api/plaid/disconnect', { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ item_id: itemId }) });
-      const d = await r.json();
-      if (!r.ok || d.error) { window.__toast?.(d.error || 'Disconnect failed', 'error'); return; }
-      setAccounts(a => a.filter(x => x.item_id !== itemId));
-      setBankConnected((d.count | 0) > 0);
-      window.__toast?.('Account disconnected', 'success');
-    } catch { window.__toast?.('Disconnect failed', 'error'); }
-  };
-
-  const importPending = async () => {
-    const chosen = (pending || []).filter(t => t.include);
-    const skip = (pending || []).filter(t => !t.include).map(t => t.id);
-    setSyncing(true);
-    try {
-      if (chosen.length) {
-        const r = await fetch('/api/plaid/import', { method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ transactions: chosen }) });
-        const d = await r.json();
-        if (d.written) window.__toast?.(`Imported ${d.written} transaction${d.written===1?'':'s'} to the Sheet`, 'success');
-        if (d.failed) alert(`${d.failed} couldn’t be imported:\n` + (d.errors||[]).map(e => typeof e==='string'?e:JSON.stringify(e)).join('\n'));
-      }
-      if (skip.length) {
-        await fetch('/api/plaid/skip', { method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ ids: skip }) }).catch(()=>{});
-      }
-    } catch { alert('Import failed'); }
-    setPending(null); setSyncing(false);
-    loadFinances(month);
   };
 
   const addSub = async () => {
@@ -533,55 +484,10 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
         <button className="btn" disabled={rolling} onClick={rolloverMonth} title="Create next month's sheet from this one"><Icon name="file" size={13}/>New month</button>
         <button className="btn" disabled={rolling} onClick={rolloverYear} title="Create a new year's finances file to fill out"><Icon name="calendar" size={13}/>New year</button>
         <button className="btn" onClick={toggleStats} title={hideStats ? "Show income & totals" : "Hide income & totals"}><Icon name={hideStats ? "eye-off" : "eye"} size={13}/>{hideStats ? "Show totals" : "Hide totals"}</button>
-        {bankConnected === false ? (
-          <button className="btn" disabled={connecting} onClick={connectBank} title="Link a bank account via Plaid"><Icon name={connecting ? "loader" : "wallet"} size={13}/>{connecting ? "Connecting…" : "Connect bank"}</button>
-        ) : (
-          <>
-            <button className="btn" disabled={syncing} onClick={syncBank} title="Pull recent transactions from your connected bank (Plaid) for review"><Icon name={syncing ? "loader" : "wallet"} size={13}/>{syncing ? "Syncing…" : "Sync bank"}</button>
-            <button className="btn" disabled={connecting} onClick={connectBank} title="Link another bank or card via Plaid"><Icon name={connecting ? "loader" : "plus"} size={13}/>{connecting ? "Connecting…" : "Add bank"}</button>
-          </>
-        )}
+        <button className="btn" disabled={syncing} onClick={()=>syncDrive({ manual: true })} title="Import the newest Rocket Money CSV export from your Google Drive folder"><Icon name={syncing ? "loader" : "download"} size={13}/>{syncing ? "Syncing…" : "Sync from Drive"}</button>
         <button className="btn primary" onClick={() => setShowAdd(s=>!s)}><Icon name="plus" size={13}/>Add expense</button>
       </>}
     >
-      {accounts.length > 0 && (
-        <div style={{ display:'flex', flexWrap:'wrap', gap:6, alignItems:'center', marginBottom:12 }}>
-          <span style={{ fontFamily:'var(--font-mono)', fontSize:10.5, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--ink-4)' }}>Linked</span>
-          {accounts.map(a => (
-            <span key={a.item_id} style={{ display:'inline-flex', alignItems:'center', gap:6, fontSize:11.5, fontFamily:'var(--font-mono)', letterSpacing:'0.03em', padding:'3px 8px', border:'1px solid var(--line-soft)', borderRadius:4, color:'var(--ink-3)' }}>
-              <Icon name="wallet" size={11}/>{a.institution || 'Bank'}
-              <button onClick={()=>disconnectBank(a.item_id, a.institution)} title="Disconnect this account" style={{ background:'none', border:'none', color:'var(--ink-4)', cursor:'pointer', padding:0, lineHeight:1, fontSize:14 }}>×</button>
-            </span>
-          ))}
-        </div>
-      )}
-      {pending && pending.length > 0 && (
-        <div style={{ padding:'0 0 12px', borderBottom:'1px solid var(--line-soft)', marginBottom:12 }}>
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8, gap:8, flexWrap:'wrap' }}>
-            <div style={{ fontFamily:'var(--font-mono)', fontSize:11, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--accent-2)' }}>
-              Review — {pending.filter(t=>t.include).length} of {pending.length} from bank
-            </div>
-            <div style={{ display:'flex', gap:6 }}>
-              <button className="btn primary" disabled={syncing} onClick={importPending}>Import {pending.filter(t=>t.include).length} to Sheet</button>
-              <button className="btn ghost" onClick={()=>setPending(null)}>Cancel</button>
-            </div>
-          </div>
-          <div style={{ maxHeight:220, overflowY:'auto', display:'flex', flexDirection:'column', gap:4 }}>
-            {pending.map((t, i) => (
-              <div key={t.id} style={{ display:'flex', gap:8, alignItems:'center', fontSize:12.5, opacity: t.include ? 1 : 0.4 }}>
-                <input type="checkbox" checked={t.include} onChange={e=>setPending(p=>p.map((x,j)=>j===i?{...x,include:e.target.checked}:x))} />
-                <span style={{ width:46, color:'var(--ink-4)', fontFamily:'var(--font-mono)', fontSize:11 }}>{(t.date||'').slice(5)}</span>
-                <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={t.name}>{t.name}</span>
-                <span style={{ width:72, textAlign:'right', fontFamily:'var(--font-mono)' }}>{fmtMoney(t.amount,{cents:true})}</span>
-                <select className="input" value={t.category} onChange={e=>setPending(p=>p.map((x,j)=>j===i?{...x,category:e.target.value}:x))} style={{ width:122, padding:'3px 6px' }}>
-                  {SHEET_CATS.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-            ))}
-          </div>
-          <div style={{ marginTop:6, fontSize:11, color:'var(--ink-4)' }}>Unchecked rows are skipped this time and won’t reappear on the next sync.</div>
-        </div>
-      )}
       {showAdd && (
         <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'flex-end', padding:'0 0 12px', borderBottom:'1px solid var(--line-soft)', marginBottom:12 }}>
           <input className="input" placeholder="Description" value={desc} onChange={e=>setDesc(e.target.value)} style={{flex:2,minWidth:120}} />

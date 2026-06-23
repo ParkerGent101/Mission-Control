@@ -1,5 +1,7 @@
 import os
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
+# Google adds/reorders the 'openid' scope on sign-in; don't let oauthlib reject the token for it.
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
 from contextlib import contextmanager
 from datetime import datetime, timedelta, date
@@ -23,9 +25,16 @@ def no_cache_static(response):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
         response.headers["Pragma"] = "no-cache"
     return response
-app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=int(os.environ.get("SESSION_LIFETIME_DAYS", "7")))
 
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "aces2026")
+# Google sign-in: only these accounts may log in. Comma-separated; defaults to Parker's account.
+ALLOWED_LOGIN_EMAILS = [e.strip().lower() for e in os.environ.get(
+    "ALLOWED_LOGIN_EMAILS", "parkergent7@gmail.com").split(",") if e.strip()]
+# Break-glass only: the legacy shared-password login. Off by default so production is
+# password-free (Google sign-in + MFA only). Set ALLOW_PASSWORD_LOGIN=true to re-enable.
+ALLOW_PASSWORD_LOGIN = os.environ.get("ALLOW_PASSWORD_LOGIN", "false").lower() in ("1", "true", "yes")
+GOOGLE_LOGIN_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
 
 BAND_DIR    = Path(os.environ.get("BAND_DIR", "C:/Users/Parker/projects/coming-up-aces"))
 DATA_DIR    = Path(os.environ.get("DATA_DIR", str(Path(__file__).parent / "data")))
@@ -82,7 +91,7 @@ GDRIVE_CONFIG_FILE = DATA_DIR / "drive_config.json"
 
 
 ONBOARDING_FILE   = DATA_DIR / "onboarding.json"
-PLAID_CONFIG_FILE  = DATA_DIR / "plaid_config.json"
+FINANCE_IMPORT_FILE = DATA_DIR / "finance_import.json"   # dedup fingerprints for Rocket Money CSV imports
 USER_CONFIG_FILE   = DATA_DIR / "user_config.json"
 TCPG_FILE          = DATA_DIR / "tcpg.json"
 PRACTICE_FILE      = DATA_DIR / "practice.json"
@@ -111,12 +120,10 @@ POP_CULTURE_EVENTS = [
     {"date": "2026-09-13", "title": "NFL Season Kickoff 2026"},
 ]
 
-PLAID_CLIENT_ID = os.environ.get("PLAID_CLIENT_ID", "")
-PLAID_SECRET    = os.environ.get("PLAID_SECRET", "")
-PLAID_ENV       = os.environ.get("PLAID_ENV", "sandbox")
-# Required for OAuth banks (Fidelity, Chase, etc.): the exact HTTPS URL registered as an
-# allowed redirect URI in the Plaid dashboard. Leave unset for simple credential banks.
-PLAID_REDIRECT_URI = os.environ.get("PLAID_REDIRECT_URI", "")
+# Google Drive folder (ID) where Rocket Money transaction CSV exports are uploaded.
+# Configured at runtime via Settings → Integrations and stored in drive_config.json;
+# this env var is only a deploy-time default.
+FINANCE_IMPORT_FOLDER = os.environ.get("FINANCE_IMPORT_FOLDER", "")
 
 def _load(path, default=None):
     p = Path(path)
@@ -204,7 +211,8 @@ def require_auth():
     p = request.path
     if p.startswith('/static/'):
         return None
-    if p in ('/login', '/api/login', '/api/logout'):
+    if p in ('/login', '/privacy', '/api/login', '/api/logout', '/api/me',
+             '/api/auth/google/start', '/api/auth/google/callback'):
         return None
     if session.get('authenticated'):
         return None
@@ -216,12 +224,19 @@ def require_auth():
 def login_page():
     return render_template("login.html")
 
+@app.route("/privacy")
+def privacy_page():
+    """Public privacy policy page for the application."""
+    return render_template("privacy.html")
+
 def _effective_password():
     override = _load(USER_CONFIG_FILE, {}).get("password")
     return override if override else DASHBOARD_PASSWORD
 
 @app.route("/api/login", methods=["POST"])
 def do_login():
+    if not ALLOW_PASSWORD_LOGIN:
+        return jsonify({"ok": False, "error": "Password login is disabled — use Sign in with Google."}), 403
     data = request.get_json(silent=True) or request.form
     pw = data.get("password", "")
     if pw == _effective_password():
@@ -234,6 +249,55 @@ def do_login():
 def logout():
     session.clear()
     return jsonify({"ok": True})
+
+@app.route("/api/me")
+def whoami():
+    """Public: lets the login page / settings know who's in and whether the password fallback is live."""
+    return jsonify({
+        "authenticated": bool(session.get("authenticated")),
+        "email": session.get("user_email"),
+        "password_login": ALLOW_PASSWORD_LOGIN,
+    })
+
+# ── Google sign-in (identity + MFA via the user's own Google account) ────────────
+@app.route("/api/auth/google/start")
+def google_login_start():
+    if not _has_google_oauth_client():
+        return "Google sign-in isn't configured (missing OAuth client ID/secret).", 500
+    redirect_uri = _request_base_url() + '/api/auth/google/callback'
+    flow = _oauth_flow(GOOGLE_LOGIN_SCOPES, redirect_uri)
+    if flow is None:
+        return "Google sign-in isn't configured.", 500
+    auth_url, state = flow.authorization_url(
+        access_type='online', include_granted_scopes='true', prompt='select_account')
+    session['login_oauth_state'] = state
+    session['login_code_verifier'] = getattr(flow, 'code_verifier', None)
+    return redirect(auth_url)
+
+@app.route("/api/auth/google/callback")
+def google_login_callback():
+    try:
+        from google_auth_oauthlib.flow import Flow  # noqa: F401  (ensure dep present)
+    except ImportError:
+        return "google-auth-oauthlib not installed", 500
+    redirect_uri = _request_base_url() + '/api/auth/google/callback'
+    try:
+        flow = _oauth_flow(GOOGLE_LOGIN_SCOPES, redirect_uri)
+        if flow is None:
+            return "Google sign-in isn't configured.", 400
+        verifier = session.pop('login_code_verifier', None)
+        if verifier:
+            flow.code_verifier = verifier
+        flow.fetch_token(authorization_response=request.url)
+        email = _google_userinfo_email(flow.credentials)
+    except Exception as e:
+        return f"<h2>Sign-in error</h2><pre>{e}</pre><br><a href='/login'>Back</a>", 400
+    if email and email.lower() in ALLOWED_LOGIN_EMAILS:
+        session.permanent = True
+        session["authenticated"] = True
+        session["user_email"] = email
+        return redirect('/')
+    return redirect('/login?denied=' + (email or 'unknown'))
 
 # ── Band tools ─────────────────────────────────────────────────────────────────
 
@@ -1383,6 +1447,8 @@ def user_profile():
 
 @app.route("/api/user/password", methods=["POST"])
 def user_change_password():
+    if not ALLOW_PASSWORD_LOGIN:
+        return jsonify({"error": "Password login is disabled — sign-in uses your Google account."}), 403
     d = request.json or {}
     if d.get("current") != _effective_password():
         return jsonify({"error": "Current password incorrect"}), 401
@@ -1408,7 +1474,7 @@ def data_export():
     import io, zipfile
     from flask import send_file
     buf = io.BytesIO()
-    skip = {"user_config.json", "plaid_config.json", "onboarding.json", "mission_control.db"}
+    skip = {"user_config.json", "finance_import.json", "onboarding.json", "mission_control.db"}
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in DATA_DIR.glob("*.json"):
             if f.name not in skip:
@@ -1474,180 +1540,7 @@ def complete_onboarding():
         _save(HEALTH_FILE, health)
     return jsonify({"ok": True})
 
-# ── Plaid ──────────────────────────────────────────────────────────────────────
-
-def _plaid_client():
-    try:
-        import plaid
-        from plaid.api import plaid_api
-        # plaid-python 39 removed the "development" environment — only Sandbox/Production exist.
-        env_map = {
-            "sandbox":     plaid.Environment.Sandbox,
-            "production":  plaid.Environment.Production,
-        }
-        cfg = plaid.Configuration(
-            host=env_map.get(PLAID_ENV, plaid.Environment.Sandbox),
-            api_key={"clientId": PLAID_CLIENT_ID, "secret": PLAID_SECRET},
-        )
-        return plaid_api.PlaidApi(plaid.ApiClient(cfg)), None
-    except ImportError:
-        return None, "plaid-python not installed — run: pip install plaid-python"
-    except Exception as e:
-        return None, str(e)
-
-@app.route("/api/plaid/link_token", methods=["POST"])
-def plaid_link_token():
-    if not PLAID_CLIENT_ID or not PLAID_SECRET:
-        return jsonify({"error": "Plaid not configured — add PLAID_CLIENT_ID and PLAID_SECRET to .env"}), 400
-    client, err = _plaid_client()
-    if err:
-        return jsonify({"error": err}), 500
-    try:
-        from plaid.model.link_token_create_request import LinkTokenCreateRequest
-        from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
-        from plaid.model.products import Products
-        from plaid.model.country_code import CountryCode
-        ob = _load(ONBOARDING_FILE, {})
-        user_name = ob.get("name", "user")
-        req_kwargs = dict(
-            products=[Products("transactions")],
-            client_name="Mission Control",
-            country_codes=[CountryCode("US")],
-            language="en",
-            user=LinkTokenCreateRequestUser(client_user_id="mc-user", legal_name=user_name),
-        )
-        # OAuth institutions require a registered redirect URI; only send it when configured.
-        if PLAID_REDIRECT_URI:
-            req_kwargs["redirect_uri"] = PLAID_REDIRECT_URI
-        req = LinkTokenCreateRequest(**req_kwargs)
-        resp = client.link_token_create(req)
-        return jsonify({"link_token": resp["link_token"]})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/plaid/exchange", methods=["POST"])
-def plaid_exchange():
-    if not PLAID_CLIENT_ID or not PLAID_SECRET:
-        return jsonify({"error": "Plaid not configured"}), 400
-    body = request.json or {}
-    public_token = body.get("public_token")
-    if not public_token:
-        return jsonify({"error": "Missing public_token"}), 400
-    client, err = _plaid_client()
-    if err:
-        return jsonify({"error": err}), 500
-    try:
-        from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
-        resp = client.item_public_token_exchange(ItemPublicTokenExchangeRequest(public_token=public_token))
-        config = _load(PLAID_CONFIG_FILE, {"items": []})
-        # Plaid Link's onSuccess metadata carries the chosen institution; store its name
-        # so multiple linked accounts (Capital One, SoFi, …) can be told apart and managed.
-        inst = body.get("institution") or {}
-        config["items"].append({
-            "access_token": resp["access_token"],
-            "item_id": resp["item_id"],
-            "institution": inst.get("name") or body.get("institution_name") or "Bank",
-            "institution_id": inst.get("institution_id"),
-            "added": datetime.now().isoformat(),
-        })
-        _save(PLAID_CONFIG_FILE, config)
-        return jsonify({"ok": True, "item_id": resp["item_id"], "institution": inst.get("name")})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/plaid/status", methods=["GET"])
-def plaid_status():
-    config = _load(PLAID_CONFIG_FILE, {"items": []})
-    items = config.get("items", [])
-    # Surface the linked institutions (never the access tokens) so the Finance card can
-    # list connected accounts and offer per-account disconnect.
-    accounts = [{
-        "item_id": it.get("item_id"),
-        "institution": it.get("institution") or "Bank",
-        "added": it.get("added"),
-    } for it in items]
-    return jsonify({"connected": len(items) > 0, "count": len(items), "accounts": accounts})
-
-@app.route("/api/plaid/disconnect", methods=["POST"])
-def plaid_disconnect():
-    """Remove a single connected Plaid item by item_id: invalidate it at Plaid
-    (best-effort) and drop it locally so its transactions stop syncing."""
-    item_id = (request.json or {}).get("item_id")
-    if not item_id:
-        return jsonify({"error": "Missing item_id"}), 400
-    config = _load(PLAID_CONFIG_FILE, {"items": []})
-    items = config.get("items", [])
-    target = next((it for it in items if it.get("item_id") == item_id), None)
-    if not target:
-        return jsonify({"error": "Account not found"}), 404
-    client, err = _plaid_client()
-    if client and not err:
-        try:
-            from plaid.model.item_remove_request import ItemRemoveRequest
-            client.item_remove(ItemRemoveRequest(access_token=target["access_token"]))
-        except Exception:
-            pass   # local removal proceeds even if the Plaid call fails
-    config["items"] = [it for it in items if it.get("item_id") != item_id]
-    _save(PLAID_CONFIG_FILE, config)
-    return jsonify({"ok": True, "count": len(config["items"])})
-
-@app.route("/api/plaid/transactions", methods=["GET"])
-def plaid_transactions():
-    config = _load(PLAID_CONFIG_FILE, {"items": []})
-    items = config.get("items", [])
-    if not items:
-        return jsonify({"error": "No Plaid accounts connected"}), 400
-    plaid_c, err = _plaid_client()
-    if err:
-        return jsonify({"error": err}), 500
-    try:
-        from plaid.model.transactions_get_request import TransactionsGetRequest
-        from plaid.model.transactions_get_request_options import TransactionsGetRequestOptions
-        import datetime as dt
-        end_date = dt.date.today()
-        start_date = end_date - dt.timedelta(days=30)
-        req = TransactionsGetRequest(
-            access_token=items[0]["access_token"],
-            start_date=start_date,
-            end_date=end_date,
-            options=TransactionsGetRequestOptions(count=50),
-        )
-        resp = plaid_c.transactions_get(req)
-        txns = []
-        for t in resp["transactions"]:
-            raw_cats = t.get("category") or []
-            cat = raw_cats[0].lower().replace(" ", "_") if raw_cats else "other"
-            txns.append({
-                "id": t["transaction_id"],
-                "name": t.get("merchant_name") or t["name"],
-                "amount": float(t["amount"]),
-                "date": t["date"].isoformat() if hasattr(t["date"], "isoformat") else str(t["date"]),
-                "category": cat,
-            })
-        return jsonify({"transactions": txns})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/plaid/categorize", methods=["POST"])
-def plaid_categorize():
-    d = request.json or {}
-    categories = d.get("categories", {})
-    config = _load(PLAID_CONFIG_FILE, {"items": []})
-    config["category_map"] = {**config.get("category_map", {}), **categories}
-    _save(PLAID_CONFIG_FILE, config)
-    return jsonify({"ok": True, "saved": len(categories)})
-
-def _plaid_to_finance_category(plaid_cats, name=""):
-    """Map a Plaid transaction's category/merchant onto a Sheet-tracked finance
-    category. Defaults to 'Fun' (always Sheet-writable) so nothing is un-importable."""
-    blob = " ".join(str(c).lower() for c in (plaid_cats or [])) + " " + str(name or "").lower()
-    if any(k in blob for k in ("gas station", "gas", "fuel")):                                  return "Gas"
-    if any(k in blob for k in ("supermarket", "groceries", "grocery", "food store")):           return "Food / Grocery"
-    if any(k in blob for k in ("rent", "mortgage")):                                            return "Housing"
-    if any(k in blob for k in ("internet", "cable", "electric", "water", "utilit", "telephone")): return "Utilities"
-    if any(k in blob for k in ("restaurant", "fast food", "coffee", "dining", "food and drink", "bar", "pub")): return "Fun"
-    if any(k in blob for k in ("entertainment", "recreation", "movie", "music", "game")):       return "Fun"
-    return "Fun"
+# ── Finance import: Rocket Money CSV from Google Drive ───────────────────────────
 
 def _record_expense(date, desc, amt, cat):
     """Write one expense to the finance Sheet (detail or budget table) or the local
@@ -1670,90 +1563,169 @@ def _record_expense(date, desc, amt, cat):
     tool_add_transaction(desc, amt, "expense", cat, date)
     return True, {"kind": "local"}
 
-@app.route("/api/plaid/sync", methods=["GET"])
-def plaid_sync():
-    """Pull recent expenses from every connected Plaid item, auto-categorize, and
-    return a de-duplicated review queue. Does NOT write anything to the Sheet."""
-    config = _load(PLAID_CONFIG_FILE, {"items": []})
-    items = config.get("items", [])
-    if not items:
-        return jsonify({"error": "No Plaid accounts connected"}), 400
-    plaid_c, err = _plaid_client()
-    if err:
-        return jsonify({"error": err}), 500
-    seen = set(config.get("imported_ids", [])) | set(config.get("skipped_ids", []))
-    try:
-        from plaid.model.transactions_get_request import TransactionsGetRequest
-        from plaid.model.transactions_get_request_options import TransactionsGetRequestOptions
-        import datetime as dt
-        try:
-            days = max(1, min(90, int(request.args.get("days", 30))))
-        except (TypeError, ValueError):
-            days = 30
-        end_date = dt.date.today()
-        start_date = end_date - dt.timedelta(days=days)
-        pending = []
-        for it in items:
-            req = TransactionsGetRequest(
-                access_token=it["access_token"], start_date=start_date, end_date=end_date,
-                options=TransactionsGetRequestOptions(count=100))
-            resp = plaid_c.transactions_get(req)
-            for t in resp["transactions"]:
-                tid = t["transaction_id"]
-                amt = float(t["amount"])
-                if tid in seen or amt <= 0:   # already handled, or inflow/refund (expenses only)
-                    continue
-                name = t.get("merchant_name") or t["name"]
-                pending.append({
-                    "id": tid, "name": name, "amount": amt,
-                    "date": t["date"].isoformat() if hasattr(t["date"], "isoformat") else str(t["date"]),
-                    "category": _plaid_to_finance_category(t.get("category"), name),
-                })
-        pending.sort(key=lambda x: x["date"], reverse=True)
-        return jsonify({"pending": pending, "count": len(pending)})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+# Rocket Money's "Category" -> a Sheet-tracked bucket. The finance Sheet only has
+# detail/budget tables for Gas, Food / Grocery, Housing and Utilities; everything else
+# (dining, shopping, entertainment, …) collapses to 'Fun' so every spend row is importable.
+def _rocket_to_finance_category(rm_cat, name=""):
+    blob = (str(rm_cat or "").lower() + " " + str(name or "").lower())
+    if any(k in blob for k in ("gas", "fuel", "auto & transport", "transport")):  return "Gas"
+    if any(k in blob for k in ("grocer", "groceries")):                           return "Food / Grocery"
+    if any(k in blob for k in ("rent", "mortgage")):                              return "Housing"
+    if any(k in blob for k in ("bills & utilities", "utilit", "internet", "cable",
+                               "electric", "water", "phone")):                    return "Utilities"
+    return "Fun"
 
-@app.route("/api/plaid/import", methods=["POST"])
-def plaid_import():
-    """Write the chosen reviewed transactions to the finance Sheet and remember their
-    Plaid ids so they never import twice."""
-    d = request.json or {}
-    txns = d.get("transactions", [])
-    config = _load(PLAID_CONFIG_FILE, {"items": []})
-    imported = set(config.get("imported_ids", []))
-    written, failed, errors = 0, 0, []
-    for t in txns:
-        tid = t.get("id")
-        if not tid or tid in imported:
+# Rocket Money "Category" values that are NOT new discretionary spend, so they never hit
+# the budget Sheet regardless of amount sign: a credit-card payment, transfer or investment
+# can appear as a positive "money out" on the funding account but isn't spending to track.
+RM_NONSPEND_CATS = {
+    "credit card payment", "internal transfers", "transfers", "transfer",
+    "investment", "investments", "buy", "sell", "income", "paycheck",
+}
+
+def _normalize_import_date(s):
+    """Rocket Money exports YYYY-MM-DD; tolerate MM/DD/YYYY too. Falls back to the raw
+    string (the Sheet writer only needs the YYYY-MM prefix to pick the month tab)."""
+    s = str(s or "").strip()
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y"):
+        try:
+            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return s
+
+def _parse_rocket_csv(raw_bytes):
+    """Parse a Rocket Money transaction-export CSV into a list of
+    {date, name, amount, category, ignored}. Header-driven and tolerant to column-name
+    variants; dates normalized to YYYY-MM-DD. Amount keeps Rocket Money's sign
+    (positive = money out / spending; negative = income / credit)."""
+    import csv, io
+    text = raw_bytes.decode("utf-8-sig", errors="replace") if isinstance(raw_bytes, (bytes, bytearray)) else str(raw_bytes)
+    reader = csv.DictReader(io.StringIO(text))
+    def pick(d, *keys):
+        for k in keys:
+            if (d.get(k) or "").strip():
+                return d[k].strip()
+        return ""
+    rows = []
+    for raw in reader:
+        d = {(k or "").strip().lower(): (v or "") for k, v in raw.items()}
+        try:
+            amount = float(str(d.get("amount", "")).replace("$", "").replace(",", "").strip() or 0)
+        except ValueError:
+            amount = 0.0
+        rows.append({
+            "date": _normalize_import_date(pick(d, "date", "original date")),
+            "name": pick(d, "name", "custom name", "description"),
+            "amount": amount,
+            "category": pick(d, "category"),
+            "ignored": pick(d, "ignored from"),
+        })
+    return rows
+
+def _rocket_is_nonspend(row):
+    """True for Rocket Money rows that must NOT hit the budget Sheet: income/credits
+    (amount <= 0 — Rocket Money signs spending positive), transfers / card payments /
+    investments, still-pending charges (they re-post later with a changed fingerprint →
+    would double-import), and rows the user marked 'Ignored From' in Rocket Money."""
+    if (row.get("amount") or 0) <= 0:
+        return True
+    cat = str(row.get("category") or "").strip().lower()
+    if cat in RM_NONSPEND_CATS or "transfer" in cat:
+        return True
+    if "PENDING" in str(row.get("name") or "").upper():
+        return True
+    if str(row.get("ignored") or "").strip():
+        return True
+    return False
+
+def _rocket_fingerprint(date, amount, name):
+    """Stable id for a Rocket Money row (the export has none) so a re-uploaded export that
+    overlaps a prior one doesn't double-import the same transaction."""
+    import hashlib
+    key = f"{date}|{float(amount):.2f}|{str(name).strip().lower()}"
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()
+
+@app.route("/api/finance/import/status", methods=["GET"])
+def finance_import_status():
+    """Whether the Finance card can sync: is a Drive import folder configured and is the
+    Drive OAuth connection live. (Sheet writes use separate ADC creds, so write failures
+    surface per-row in /api/finance/import/drive, not here.)"""
+    cfg = _load(GDRIVE_CONFIG_FILE, {})
+    folder = cfg.get("finance_import_folder") or FINANCE_IMPORT_FOLDER
+    _, err = _drive_files_service()
+    return jsonify({"connected": err is None, "folder_configured": bool(folder), "error": err})
+
+@app.route("/api/finance/import/drive", methods=["GET"])
+def finance_import_drive():
+    """Read the newest Rocket Money CSV export from the configured Drive folder, parse the
+    spending transactions, categorize them and write them to the finance Sheet — skipping
+    income/transfers/payments/pending/ignored rows and any already-imported row (by
+    fingerprint). Pass ?preview=1 to return the categorized rows WITHOUT writing."""
+    preview = request.args.get("preview") in ("1", "true", "yes")
+    cfg = _load(GDRIVE_CONFIG_FILE, {})
+    folder = cfg.get("finance_import_folder") or FINANCE_IMPORT_FOLDER
+    if not folder:
+        return jsonify({"error": "No Drive import folder configured — set it in Settings → Integrations"}), 400
+    raw, meta = _drive_newest_csv(folder)
+    if raw is None:
+        return jsonify({"error": meta}), 400
+    try:
+        rows = _parse_rocket_csv(raw)
+    except Exception as e:
+        return jsonify({"error": f"Could not parse CSV: {e}"}), 400
+    # Only import recent transactions: a full-history export would flood old month tabs and
+    # blow the request timeout / Sheets write quota. Dedup (below) handles re-uploads. Widen
+    # the window with ?days= (e.g. to backfill an older month).
+    try:
+        days = max(1, min(180, int(request.args.get("days", 60))))
+    except (TypeError, ValueError):
+        days = 60
+    cutoff = (datetime.now().date() - timedelta(days=days)).isoformat()
+
+    state = _load(FINANCE_IMPORT_FILE, {"imported": []})
+    imported = set(state.get("imported", []))
+    written, failed, skipped, scanned, errors, preview_rows = 0, 0, 0, 0, [], []
+    for r in rows:
+        scanned += 1
+        if (r["date"] or "") < cutoff:          # outside the import window
+            skipped += 1
+            continue
+        if _rocket_is_nonspend(r):
+            skipped += 1
+            continue
+        fp = _rocket_fingerprint(r["date"], r["amount"], r["name"])
+        if fp in imported:
+            skipped += 1
+            continue
+        cat = _rocket_to_finance_category(r.get("category"), r.get("name"))
+        if preview:
+            preview_rows.append({"date": r["date"], "name": r["name"],
+                                 "amount": round(abs(r["amount"]), 2), "category": cat})
             continue
         try:
-            ok, detail = _record_expense(
-                t.get("date") or datetime.now().strftime("%Y-%m-%d"),
-                t.get("name", "Bank transaction"),
-                float(t.get("amount", 0)),
-                t.get("category", "Fun"))
+            ok, detail = _record_expense(r["date"], r["name"] or "Transaction", abs(r["amount"]), cat)
             if ok:
-                imported.add(tid); written += 1
+                imported.add(fp); written += 1
+                if written % 50 == 0:           # persist progress so a timeout can't re-import
+                    state["imported"] = list(imported); _save(FINANCE_IMPORT_FILE, state)
             else:
-                failed += 1; errors.append(detail)
+                failed += 1
+                if isinstance(detail, str) and detail not in errors:
+                    errors.append(detail)
         except Exception as e:
-            failed += 1; errors.append(str(e))
-    config["imported_ids"] = list(imported)
-    _save(PLAID_CONFIG_FILE, config)
-    return jsonify({"ok": True, "written": written, "failed": failed, "errors": errors[:5]})
+            failed += 1
+            if str(e) not in errors:
+                errors.append(str(e))
+    if preview:
+        return jsonify({"ok": True, "preview": True, "file": meta, "window_days": days,
+                        "scanned": scanned, "skipped": skipped,
+                        "count": len(preview_rows), "rows": preview_rows[:200]})
+    state["imported"] = list(imported)
+    _save(FINANCE_IMPORT_FILE, state)
+    return jsonify({"ok": True, "file": meta, "window_days": days, "written": written,
+                    "failed": failed, "skipped": skipped, "scanned": scanned, "errors": errors[:5]})
 
-@app.route("/api/plaid/skip", methods=["POST"])
-def plaid_skip():
-    """Remember transactions the user chose not to import so they stop reappearing."""
-    d = request.json or {}
-    ids = [i for i in d.get("ids", []) if i]
-    config = _load(PLAID_CONFIG_FILE, {"items": []})
-    skipped = set(config.get("skipped_ids", []))
-    skipped.update(ids)
-    config["skipped_ids"] = list(skipped)
-    _save(PLAID_CONFIG_FILE, config)
-    return jsonify({"ok": True, "skipped": len(ids)})
 
 # ── Calendar overview ─────────────────────────────────────────────────────────
 
@@ -2376,6 +2348,11 @@ def _extract_sheet_id(url_or_id):
     import re
     m = re.search(r'/spreadsheets/d/([a-zA-Z0-9_-]+)', url_or_id)
     return m.group(1) if m else url_or_id.strip()
+
+def _extract_drive_folder_id(url_or_id):
+    import re
+    m = re.search(r'/folders/([a-zA-Z0-9_-]+)', url_or_id or "")
+    return m.group(1) if m else (url_or_id or "").strip()
 
 def _first_sheet_name(sheets_svc, sheet_id):
     meta = sheets_svc.spreadsheets().get(spreadsheetId=sheet_id, fields='sheets.properties.title').execute()
@@ -3013,8 +2990,10 @@ def _google_oauth_client_config():
         "redirect_uris": [
             "http://localhost:5000/api/drive/callback",
             "http://localhost:5000/api/calendar/callback",
+            "http://localhost:5000/api/auth/google/callback",
             "https://mission-control-568559213462.us-central1.run.app/api/drive/callback",
             "https://mission-control-568559213462.us-central1.run.app/api/calendar/callback",
+            "https://mission-control-568559213462.us-central1.run.app/api/auth/google/callback",
         ],
     }
     if GOOGLE_OAUTH_PROJECT_ID:
@@ -3032,6 +3011,21 @@ def _oauth_flow(scopes, redirect_uri):
     if not config:
         return None
     return Flow.from_client_config(config, scopes=scopes, redirect_uri=redirect_uri)
+
+def _google_userinfo_email(creds):
+    """Return the verified email for a freshly-authorized Google sign-in, or None."""
+    try:
+        from google.auth.transport.requests import AuthorizedSession
+        resp = AuthorizedSession(creds).get(
+            "https://www.googleapis.com/oauth2/v3/userinfo", timeout=10)
+        info = resp.json()
+    except Exception:
+        return None
+    email = info.get("email")
+    verified = info.get("email_verified")
+    if email and verified in (True, "true", None):
+        return email
+    return None
 
 def _gdrive_service():
     try:
@@ -3059,6 +3053,64 @@ def _gdrive_service():
             return None, "auth_required"
     return build('sheets', 'v4', credentials=creds), None
 
+def _drive_files_service():
+    """Google Drive v3 client for listing/downloading files in a folder, using the same
+    OAuth token as _gdrive_service (the Drive scope is already granted via GDRIVE_SCOPES)."""
+    try:
+        from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request
+        from googleapiclient.discovery import build
+    except ImportError:
+        return None, "not_installed"
+    if not _has_google_oauth_client():
+        return None, "setup_required"
+    creds = None
+    if GDRIVE_TOKEN_FILE.exists():
+        try:
+            creds = Credentials.from_authorized_user_file(str(GDRIVE_TOKEN_FILE), GDRIVE_SCOPES)
+        except Exception:
+            return None, "auth_required"
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            try:
+                creds.refresh(Request())
+                GDRIVE_TOKEN_FILE.write_text(creds.to_json())
+            except Exception:
+                return None, "auth_required"
+        else:
+            return None, "auth_required"
+    return build('drive', 'v3', credentials=creds), None
+
+def _drive_newest_csv(folder_id):
+    """Return (raw_bytes, filename) for the most-recently-modified .csv in the given Drive
+    folder, or (None, err_message). Uploaded CSVs keep mimeType text/csv; a CSV that was
+    converted to a Google Sheet (application/vnd.google-apps.spreadsheet) is skipped."""
+    svc, err = _drive_files_service()
+    if err:
+        return None, f"Drive not connected: {err}"
+    try:
+        import io as _io
+        from googleapiclient.http import MediaIoBaseDownload
+        resp = svc.files().list(
+            q=f"'{folder_id}' in parents and trashed=false",
+            orderBy="modifiedTime desc", pageSize=50,
+            fields="files(id,name,mimeType,modifiedTime)",
+            supportsAllDrives=True, includeItemsFromAllDrives=True,
+        ).execute()
+        files = resp.get("files", [])
+        csv_file = next((f for f in files
+                         if f.get("name", "").lower().endswith(".csv") or f.get("mimeType") == "text/csv"), None)
+        if not csv_file:
+            return None, "No .csv file found in that Drive folder"
+        buf = _io.BytesIO()
+        downloader = MediaIoBaseDownload(buf, svc.files().get_media(fileId=csv_file["id"]))
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+        return buf.getvalue(), csv_file["name"]
+    except Exception as e:
+        return None, str(e)
+
 @app.route("/api/credentials/upload", methods=["POST"])
 def upload_credentials():
     d = request.json or {}
@@ -3077,7 +3129,8 @@ def upload_credentials():
 @app.route("/api/drive/status")
 def drive_status():
     cfg = _load(GDRIVE_CONFIG_FILE, {})
-    base = {"sheet_finance": cfg.get("sheet_finance", ""), "sheet_contacts": cfg.get("sheet_contacts", "")}
+    base = {"sheet_finance": cfg.get("sheet_finance", ""), "sheet_contacts": cfg.get("sheet_contacts", ""),
+            "finance_import_folder": cfg.get("finance_import_folder", "") or FINANCE_IMPORT_FOLDER}
     if not _has_google_oauth_client():
         return jsonify({**base, "connected": False, "setup_required": True})
     _, err = _gdrive_service()
@@ -3143,6 +3196,8 @@ def drive_config():
         cfg["sheet_finance"] = _extract_sheet_id(d["sheet_finance"])
     if "sheet_contacts" in d and d["sheet_contacts"]:
         cfg["sheet_contacts"] = _extract_sheet_id(d["sheet_contacts"])
+    if "finance_import_folder" in d:
+        cfg["finance_import_folder"] = _extract_drive_folder_id(d["finance_import_folder"])
     _save(GDRIVE_CONFIG_FILE, cfg)
     return jsonify({"ok": True})
 

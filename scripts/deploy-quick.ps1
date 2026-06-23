@@ -29,8 +29,8 @@ $SAFE_SOURCE = @("app.py", "requirements.txt", "Dockerfile", ".dockerignore", "d
 $SAFE_DATA   = @(
     "shows.json","band_songs.json","band_contacts.json","band_content.json",
     "finances.json","savings.json","health.json","agenda.json","tasks.json",
-    "reminders.json","work_tasks.json","reading.json","gaming.json",
-    "holidays.json","journal.json","subscriptions.json","drive_config.json"
+    "reminders.json","work_tasks.json",
+    "holidays.json","subscriptions.json","drive_config.json"
 )
 
 Write-Host "==> Mission Control: Quick Deploy" -ForegroundColor Cyan
