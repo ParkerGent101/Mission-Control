@@ -22,11 +22,12 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "mc-change-this-secret-key-2026")
 
-# Serve .jsx as JavaScript so the browser types it correctly and Flask-Compress
-# will gzip it (its default allowlist covers text/javascript, not octet-stream).
+# Serve .jsx as JavaScript (correct content-type for the dev Babel path).
 mimetypes.add_type("text/javascript", ".jsx")
-# Gzip responses (the large HTML shell, JSON API payloads, JS/CSS). Flask-Compress
-# negotiates Accept-Encoding, sets Vary, and skips tiny/already-compressed bodies.
+# Gzip ONLY the HTML shell (large, fetched every navigation). JSON/JS are excluded:
+# per-request API compression costs CPU+memory for ~no benefit to a single user on a
+# fast link, and those extra buffers added to the memory pressure under concurrent load.
+app.config["COMPRESS_MIMETYPES"] = ["text/html", "text/css"]
 Compress(app)
 
 @app.after_request

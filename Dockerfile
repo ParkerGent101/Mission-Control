@@ -35,7 +35,9 @@ ENV PRECOMPILED_ASSETS=1
 
 EXPOSE 8080
 
-# --threads 8: the dashboard fires many /api/* calls at once, each blocking on a
-# Sheets/GCS/Anthropic round-trip. With 1 sync worker they serialized; gunicorn
-# auto-promotes to the gthread worker when threads>1 so they run concurrently.
-CMD exec gunicorn --bind 0.0.0.0:${PORT} --workers 1 --threads 8 --timeout 120 --log-level info app:app
+# 1 sync worker (serial). NOTE: --threads 8 (gthread) was tried for parallel /api/*
+# loads but OOM-killed the worker on the 512Mi instance — the dashboard fires ~15
+# concurrent calls and 8 threads each holding Sheets data + response blew past 512Mi
+# (SIGKILL -> 503s). Serial caps peak memory to one request. For real parallelism,
+# raise --memory (in deploy.ps1) FIRST, then re-add --threads.
+CMD exec gunicorn --bind 0.0.0.0:${PORT} --workers 1 --timeout 120 --log-level info app:app
