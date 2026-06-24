@@ -308,15 +308,18 @@ def tool_list_shows():
         return "No shows in shows.json yet."
     return "\n".join(f"{i}. {s['date']} | {s['event']} | {s['venue']}, {s['city']}" for i, s in enumerate(shows))
 
-def tool_add_show(date, event, venue, city, tickets="", notes=""):
+def tool_add_show(date, event, venue, city, tickets="", notes="", doors="", time=""):
+    # doors/time are 24h "HH:MM" (or "") — stored as-is in shows.json; the website formats to 12h.
     shows = _load(SHOWS_FILE)
-    shows.append({"date": date, "event": event, "venue": venue, "city": city, "tickets": tickets, "notes": notes})
+    shows.append({"date": date, "event": event, "venue": venue, "city": city,
+                  "doors": doors, "time": time, "tickets": tickets, "notes": notes})
     _save(SHOWS_FILE, shows)
     push_result = tool_push_site(f"Add show: {event} at {venue}")
+    doors_line = f"Doors: {doors}\n" if doors else ""
     _gcal_create_event(
         title=f"🎸 {event}",
-        date_str=date, time_str="",
-        description=f"Coming Up Aces show\nVenue: {venue}\n{notes}".strip(),
+        date_str=date, time_str=time,
+        description=f"Coming Up Aces show\nVenue: {venue}\n{doors_line}{notes}".strip(),
         location=f"{venue}, {city}",
     )
     return f"Show added: {event} — {venue}, {city} on {date}. {push_result}"
@@ -325,7 +328,7 @@ def tool_edit_show(index: int, fields: dict):
     shows = _load(SHOWS_FILE)
     if not (0 <= index < len(shows)):
         return f"No show at index {index}."
-    allowed = {"date", "event", "venue", "city", "tickets", "notes"}
+    allowed = {"date", "event", "venue", "city", "doors", "time", "tickets", "notes"}
     for k, v in fields.items():
         if k in allowed:
             shows[index][k] = v
@@ -571,7 +574,7 @@ TOOL_MAP = {
 
 TOOLS = [
     {"name":"list_shows","description":"List all shows","input_schema":{"type":"object","properties":{}}},
-    {"name":"add_show","description":"Add a show to comingupaces.net","input_schema":{"type":"object","properties":{"date":{"type":"string"},"event":{"type":"string"},"venue":{"type":"string"},"city":{"type":"string"},"tickets":{"type":"string"},"notes":{"type":"string"}},"required":["date","event","venue","city"]}},
+    {"name":"add_show","description":"Add a show to comingupaces.net","input_schema":{"type":"object","properties":{"date":{"type":"string"},"event":{"type":"string"},"venue":{"type":"string"},"city":{"type":"string"},"doors":{"type":"string","description":"Doors-open time, 24h HH:MM e.g. '20:00'"},"time":{"type":"string","description":"Show start time, 24h HH:MM e.g. '21:00'"},"tickets":{"type":"string"},"notes":{"type":"string"}},"required":["date","event","venue","city"]}},
     {"name":"remove_show","description":"Remove a show by index","input_schema":{"type":"object","properties":{"index":{"type":"integer"}},"required":["index"]}},
     {"name":"add_video","description":"Add a video to band site","input_schema":{"type":"object","properties":{"title":{"type":"string"},"url":{"type":"string"},"date":{"type":"string"}},"required":["title","url"]}},
     {"name":"push_site","description":"Push band site live","input_schema":{"type":"object","properties":{"message":{"type":"string"}}}},
@@ -668,7 +671,7 @@ def post_show():
     d = request.json or {}
     if not d.get("event"):
         return jsonify({"error": "event field is required"}), 400
-    message = tool_add_show(d["date"], d["event"], d["venue"], d["city"], d.get("tickets",""), d.get("notes",""))
+    message = tool_add_show(d["date"], d["event"], d["venue"], d["city"], d.get("tickets",""), d.get("notes",""), d.get("doors",""), d.get("time",""))
     status = 502 if "Push failed:" in message else 200
     return jsonify({"message": message, "ok": status == 200}), status
 
