@@ -7,6 +7,12 @@ __pycache__/
 *.pyo
 *.pyd
 .python-version
+
+# Precompiled JSX→JS build artifacts (generated in the Docker build, served in prod).
+# Never committed — the .jsx are the source of truth.
+static/*.js
+node_modules/
+
 .venv/
 venv/
 env/

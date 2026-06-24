@@ -1839,19 +1839,33 @@ html.mc-bg,html.mc-bg body{background:#06120b}
 
   <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
-  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
   <!-- three.js UMD (global THREE) — drives the 3D war-planet globe in planet.jsx. Pinned to
        0.149.0, which still ships a global build/three.min.js (UMD dropped in r150+). -->
   <script src="https://unpkg.com/three@0.149.0/build/three.min.js" crossorigin="anonymous"></script>
 
+  {% if precompiled %}
+  <!-- Production: JSX precompiled to plain JS at build time (Dockerfile stage 1) — no
+       in-browser Babel download/transpile. Same load order as the dev path below.
+       planet.js defines DonutChart; loads after modules.js, before app.js renders. -->
+  <script src="/static/tweaks-panel.js?v={{ asset_version }}"></script>
+  <script src="/static/icons.js?v={{ asset_version }}"></script>
+  <script src="/static/modules.js?v={{ asset_version }}"></script>
+  <script src="/static/planet.js?v={{ asset_version }}"></script>
+  <script src="/static/onboarding.js?v={{ asset_version }}"></script>
+  <script src="/static/settings.js?v={{ asset_version }}"></script>
+  <script src="/static/app.js?v={{ asset_version }}"></script>
+  {% else %}
+  <!-- Dev (localhost, PRECOMPILED_ASSETS unset): in-browser Babel transpiles JSX on the
+       fly so edits show on refresh with no build step. planet.jsx defines DonutChart;
+       loads after modules.jsx, before app.jsx triggers the first render. -->
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
   <script type="text/babel" src="/static/tweaks-panel.jsx?v={{ asset_version }}"></script>
   <script type="text/babel" src="/static/icons.jsx?v={{ asset_version }}"></script>
   <script type="text/babel" src="/static/modules.jsx?v={{ asset_version }}"></script>
-  <!-- planet.jsx defines DonutChart (the 3D war globe); loads after modules.jsx so the const
-       is declared once, before app.jsx triggers the first render -->
   <script type="text/babel" src="/static/planet.jsx?v={{ asset_version }}"></script>
   <script type="text/babel" src="/static/onboarding.jsx?v={{ asset_version }}"></script>
   <script type="text/babel" src="/static/settings.jsx?v={{ asset_version }}"></script>
   <script type="text/babel" src="/static/app.jsx?v={{ asset_version }}"></script>
+  {% endif %}
 </body>
 </html>

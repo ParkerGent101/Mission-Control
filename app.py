@@ -686,7 +686,12 @@ def _asset_version():
     import hashlib
     try:
         h = hashlib.md5()
-        for f in sorted((Path(__file__).parent / "static").glob("*.jsx")):
+        sdir = Path(__file__).parent / "static"
+        # Hash both source .jsx (dev) and precompiled .js (prod); whichever set is
+        # served, the hash moves when a file changes (a deploy regenerates the .js
+        # with fresh mtimes; a local edit changes the .jsx).
+        files = sorted(list(sdir.glob("*.jsx")) + list(sdir.glob("*.js")), key=lambda p: p.name)
+        for f in files:
             st = f.stat()
             h.update(f"{f.name}:{st.st_size}:{int(st.st_mtime)}".encode())
         return h.hexdigest()[:12]
@@ -695,7 +700,13 @@ def _asset_version():
 
 @app.route("/")
 def index():
-    return render_template("index.html", asset_version=_asset_version())
+    return render_template(
+        "index.html",
+        asset_version=_asset_version(),
+        # Prod image bakes PRECOMPILED_ASSETS=1 → serve plain .js (no in-browser Babel).
+        # Unset locally → dev serves .jsx via Babel-standalone (hot-reload, no build step).
+        precompiled=os.environ.get("PRECOMPILED_ASSETS") == "1",
+    )
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
