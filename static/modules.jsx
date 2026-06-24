@@ -1722,7 +1722,7 @@ const HealthCard = ({ cardProps = {} } = {}) => {
         {/* Donut + calorie bar (positioned BELOW the search row) */}
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 10 }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-            <DonutChart data={macroGlobe} size={130} war labels={false} alert={totalCal > calGoal} whole={calGoal} seed={viewDate} landNeutral="oklch(0.50 0.15 312)" />
+            <DonutChart data={macroGlobe} size={130} war spread labels={false} alert={totalCal > calGoal} whole={calGoal} seed={viewDate} landNeutral="oklch(0.50 0.15 312)" />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               {macroData.map(({ label, grams, color }) => (
                 <div key={label} style={{ display: 'flex', gap: 5, alignItems: 'center' }}>

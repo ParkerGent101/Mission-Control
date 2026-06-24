@@ -247,7 +247,7 @@ const PL_faceSpans = (data, conq) => {
 const PL_ownerAt = (spans, pos) => spans.find(s => pos >= s.start && pos < s.end) || null;
 
 // ─── paint the world into the equirectangular texture at the current (eased) conquered frac ──
-const PL_paint = (ctx, W, H, world, spans, conq, pal, hatches) => {
+const PL_paint = (ctx, W, H, world, spans, conq, pal, hatches, spread) => {
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = world.rockWorld ? pal.rock : pal.ocean;
   ctx.fillRect(0, 0, W, H);
@@ -261,20 +261,37 @@ const PL_paint = (ctx, W, H, world, spans, conq, pal, hatches) => {
   world.continents.forEach(c => {
     // How much of THIS continent's conquest-range [c.a, c.b] is taken: a straddler is partly taken
     // (its conquered island is centroid-scaled by √localConq so AREA grows linearly with conquest).
-    const e = Math.min(c.b, conq);                                                  // conquered up to here within [c.a, c.b]
-    const conquered = c.a < conq;
-    const straddles = c.a < conq && c.b > conq;
-    const localConq = straddles ? (conq - c.a) / (c.b - c.a) : 0;
-    const baseScale = conquered ? (straddles ? Math.sqrt(PL_clamp01(localConq)) : 1) : 0;
-    // Split the conquered land among factions by AREA = their share of the conquered span. The macro/
-    // category spans that overlap this continent's conquered range each get a concentric ring; ring
-    // area = baseScale²·frac, so total land per faction == its calorie/spend share (disjoint across
-    // continents, but proportional overall — so protein/carbs/fat ALL read even with one continent taken).
-    const rangeLen = Math.max(1e-9, e - c.a);
-    const segs = conquered ? spans.map(s => {
-      const ov = Math.min(s.end, e) - Math.max(s.start, c.a);
-      return ov > 1e-9 ? { color: s.color, hatch: s.hatch, frac: ov / rangeLen } : null;
-    }).filter(Boolean) : [];
+    // SPREAD mode flips the distribution: instead of conquering continents in sequence up to `conq`,
+    // EVERY continent is claimed to the same fraction `conq` of its own area. Total conquered land is
+    // unchanged (Σ frac·conq == conq·world), but the claim reads across all landmasses as thin coastal
+    // territory rather than a few fully-taken continents — and each continent shows ALL factions, split
+    // by value share, so protein/carbs/fat (or every spend category) read on every island.
+    let conquered, straddles, baseScale, localConq, segs;
+    if (spread) {
+      conquered = conq > 1e-6;
+      localConq = PL_clamp01(conq);
+      straddles = conquered && conq < 0.999;                                        // every partial claim keeps a battle front until the world is full
+      baseScale = conquered ? Math.sqrt(localConq) : 0;
+      segs = conquered ? spans.map(s => {
+        const f = (s.end - s.start) / Math.max(1e-9, conq);                         // faction's value share of the claim (∑ = 1)
+        return f > 1e-9 ? { color: s.color, hatch: s.hatch, frac: f } : null;
+      }).filter(Boolean) : [];
+    } else {
+      const e = Math.min(c.b, conq);                                                // conquered up to here within [c.a, c.b]
+      conquered = c.a < conq;
+      straddles = c.a < conq && c.b > conq;
+      localConq = straddles ? (conq - c.a) / (c.b - c.a) : 0;
+      baseScale = conquered ? (straddles ? Math.sqrt(PL_clamp01(localConq)) : 1) : 0;
+      // Split the conquered land among factions by AREA = their share of the conquered span. The macro/
+      // category spans that overlap this continent's conquered range each get a concentric ring; ring
+      // area = baseScale²·frac, so total land per faction == its calorie/spend share (disjoint across
+      // continents, but proportional overall — so protein/carbs/fat ALL read even with one continent taken).
+      const rangeLen = Math.max(1e-9, e - c.a);
+      segs = conquered ? spans.map(s => {
+        const ov = Math.min(s.end, e) - Math.max(s.start, c.a);
+        return ov > 1e-9 ? { color: s.color, hatch: s.hatch, frac: ov / rangeLen } : null;
+      }).filter(Boolean) : [];
+    }
     const scaleC = (s) => c.pts.map(p => [c.cxp + (p[0] - c.cxp) * s, c.cyp + (p[1] - c.cyp) * s]);
     const fillHatch = (idx, dx) => { const pat = ctx.createPattern(hatches[idx], 'repeat'); if (pat) { ctx.fillStyle = pat; ctx.fill(); } };
     const rings = PL_insets(c.pts, c.cxp, c.cyp);                                    // terrace contour lines
@@ -931,7 +948,7 @@ const ReactorGauge = (props) => {
 
 // ─── the war planet (3D) ─────────────────────────────────────────────────────────────────
 const WarPlanet = (props) => {
-  const { data, size = 110, alert = false, whole = 0, ocean, landNeutral, seed, landRatio } = props;
+  const { data, size = 110, alert = false, whole = 0, ocean, landNeutral, seed, landRatio, spread = false } = props;
   const glRef = usePLRef(null);    // WebGL canvas
   const fxRef = usePLRef(null);    // 2D fx canvas
   const S = usePLRef({});          // mutable scene/animation state, survives data-driven re-renders
@@ -1028,7 +1045,7 @@ const WarPlanet = (props) => {
     st.spans = PL_faceSpans(st.data, st.conqDisplay);
     st.paused = false;
 
-    const repaint = () => { PL_paint(tctx, TW, TH, world, st.spans, st.conqDisplay, pal, hatches); tex.needsUpdate = true; };
+    const repaint = () => { PL_paint(tctx, TW, TH, world, st.spans, st.conqDisplay, pal, hatches, spread); tex.needsUpdate = true; };
     const applyAlert = () => {
       const m = st.alertMix;
       mat.color.setRGB(1, 1 - m * 0.62, 1 - m * 0.66);                              // multiply the map toward red
