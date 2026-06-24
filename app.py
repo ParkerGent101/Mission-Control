@@ -133,10 +133,15 @@ def _load(path, default=None):
         try:
             client = _gcs()
             if client:
+                # Single GCS round-trip: download directly and treat a missing
+                # object as the fallback. The old exists()+download pair doubled
+                # the GCS reads on every _load — the hottest call in the app.
+                from google.api_core.exceptions import NotFound
                 blob = client.bucket(GCS_BUCKET).blob(p.name)
-                if blob.exists():
+                try:
                     return json.loads(blob.download_as_text())
-                return fallback
+                except NotFound:
+                    return fallback
         except Exception:
             pass
     if not p.exists():
@@ -3548,7 +3553,8 @@ def get_brief():
     )
 
     try:
-        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+        # Reuse the module-level Anthropic client instead of constructing a new
+        # one (and a new HTTPS connection pool) on every brief request.
         resp = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=150,
