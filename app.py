@@ -21,10 +21,27 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "mc-change-this-secret-key-2026")
 
 @app.after_request
-def no_cache_static(response):
-    if request.path.startswith("/static/") or request.path.startswith("/api/"):
+def cache_headers(response):
+    p = request.path
+    if p.startswith("/api/"):
+        # Dynamic data — never cache.
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
         response.headers["Pragma"] = "no-cache"
+    elif p.startswith("/static/"):
+        if request.args.get("v"):
+            # Versioned asset (?v=<hash>): the URL changes whenever the file's
+            # contents change, so the browser can cache it forever and skip the
+            # revalidation round-trip entirely. A deploy (or local edit) bumps the
+            # hash -> new URL -> fresh fetch. The old policy was no-store, which
+            # re-downloaded every JSX file on every page load (pure waste of Cloud
+            # Run egress + per-request latency on each visit).
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            response.headers.pop("Pragma", None)
+        else:
+            # Un-versioned /static/ request: still revalidate via ETag (a cheap 304)
+            # instead of re-downloading the body in full.
+            response.headers["Cache-Control"] = "no-cache"
+            response.headers.pop("Pragma", None)
     return response
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=int(os.environ.get("SESSION_LIFETIME_DAYS", "7")))
 
@@ -652,9 +669,24 @@ def run_agent(messages, model="claude-sonnet-4-6"):
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
+def _asset_version():
+    """Short hash of the static JSX files' size+mtime. Changes whenever any asset
+    changes (a deploy or a local edit), so the versioned ?v=<hash> URLs in
+    index.html bust the browser's immutable cache exactly when — and only when —
+    the code actually changes. Computed per index load (~7 stat() calls)."""
+    import hashlib
+    try:
+        h = hashlib.md5()
+        for f in sorted((Path(__file__).parent / "static").glob("*.jsx")):
+            st = f.stat()
+            h.update(f"{f.name}:{st.st_size}:{int(st.st_mtime)}".encode())
+        return h.hexdigest()[:12]
+    except Exception:
+        return "0"
+
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", asset_version=_asset_version())
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
@@ -3569,72 +3601,6 @@ def get_brief():
     _save(BRIEF_FILE, result)
     return jsonify(result)
 
-# ── Today Hub ──────────────────────────────────────────────────────────────────
-
-@app.route("/api/today")
-def get_today():
-    today = datetime.now().date().isoformat()
-    today_dt = datetime.now().date()
-
-    agenda = [i for i in _load(AGENDA_FILE) if i.get("date") == today]
-    health = _load(HEALTH_FILE)
-    habits_today = health.get("habits", {}).get(today, {})
-    habit_list = health.get("habit_list", [])
-    work = [t for t in _load(WORK_FILE) if not t.get("done") and t.get("priority") == "high"][:5]
-
-    return jsonify({"agenda": agenda, "habits": {"today": habits_today, "list": habit_list}, "work_priority": work})
-
-# ── Agenda ─────────────────────────────────────────────────────────────────────
-
-@app.route("/api/agenda", methods=["GET"])
-def get_agenda():
-    return jsonify(_load(AGENDA_FILE))
-
-@app.route("/api/agenda", methods=["POST"])
-def post_agenda():
-    d = request.json
-    items = _load(AGENDA_FILE)
-    aid = max((a["id"] for a in items), default=0) + 1
-    label = d.get("label") or d.get("text", "")
-    date_str = d.get("date", datetime.now().strftime("%Y-%m-%d"))
-    time_str = d.get("time", "")
-    items.append({
-        "id": aid, "time": time_str, "label": label,
-        "tag": d.get("tag", ""), "done": False, "date": date_str,
-    })
-    _save(AGENDA_FILE, items)
-    _log("agenda", "add", label)
-    _gcal_create_event(
-        title=label,
-        date_str=date_str, time_str=time_str,
-        duration_min=30,
-        description=f"Agenda — {d.get('tag','')}",
-    )
-    return jsonify({"id": aid})
-
-@app.route("/api/agenda/<int:aid>/toggle", methods=["POST"])
-def toggle_agenda(aid):
-    items = _load(AGENDA_FILE)
-    item = next((i for i in items if i["id"] == aid), None)
-    if not item:
-        return jsonify({"error": "not found"}), 404
-    was_done = item.get("done", False)
-    if not was_done:
-        items = [i for i in items if i["id"] != aid]
-        _save(AGENDA_FILE, items)
-        _log("agenda", "done", item.get("label", ""))
-        return jsonify({"done": True, "removed": True})
-    item["done"] = False
-    _save(AGENDA_FILE, items)
-    return jsonify({"done": False})
-
-@app.route("/api/agenda/<int:aid>", methods=["DELETE"])
-def delete_agenda(aid):
-    items = _load(AGENDA_FILE)
-    items = [i for i in items if i["id"] != aid]
-    _save(AGENDA_FILE, items)
-    return jsonify({"ok": True})
-
 # ── Health ─────────────────────────────────────────────────────────────────────
 
 @app.route("/api/health", methods=["GET"])
@@ -4071,75 +4037,6 @@ def delete_health_food():
         total_today = sum(int(f.get("calories", 0) or 0) for f in food_log.get(date, []))
         _health_sheet_update_daily(date, {"Cal Eaten": total_today})
     return jsonify({"ok": True, "sheet_deleted": sheet_result["deleted"]})
-
-# ── Work ───────────────────────────────────────────────────────────────────────
-
-@app.route("/api/work", methods=["GET"])
-def get_work():
-    return jsonify(_load(WORK_FILE))
-
-@app.route("/api/work", methods=["POST"])
-def post_work():
-    d = request.json
-    items = _load(WORK_FILE)
-    wid = max((w["id"] for w in items), default=0) + 1
-    item = {
-        "id": wid, "title": d.get("title", ""), "project": d.get("project", ""),
-        "priority": d.get("priority", "normal"), "done": False,
-        "created": datetime.now().strftime("%Y-%m-%d")
-    }
-    if d.get("notes"):
-        item["notes"] = d["notes"]
-    if d.get("due_date"):
-        item["due_date"] = d["due_date"]
-    items.append(item)
-    _save(WORK_FILE, items)
-    _log("work", "add", d.get("title", ""), d.get("project", ""))
-    return jsonify({"id": wid})
-
-@app.route("/api/work/<int:wid>/done", methods=["POST"])
-def done_work(wid):
-    items = _load(WORK_FILE)
-    done = next((i for i in items if i["id"] == wid), None)
-    items = [i for i in items if i["id"] != wid]
-    _save(WORK_FILE, items)
-    if done:
-        _log("work", "done", done.get("title", ""), done.get("project", ""))
-    return jsonify({"ok": True})
-
-@app.route("/api/work/<int:wid>", methods=["DELETE"])
-def delete_work(wid):
-    items = _load(WORK_FILE)
-    deleted = next((i for i in items if i["id"] == wid), None)
-    items = [i for i in items if i["id"] != wid]
-    _save(WORK_FILE, items)
-    if deleted:
-        _log("work", "delete", deleted.get("title", ""), deleted.get("project", ""))
-    return jsonify({"ok": True})
-
-# ── Activity Log ───────────────────────────────────────────────────────────────
-
-@app.route("/api/activity")
-def get_activity():
-    module = request.args.get("module", "")
-    limit = min(int(request.args.get("limit", 100)), 500)
-    with _db() as conn:
-        if module:
-            rows = conn.execute(
-                "SELECT * FROM activity_log WHERE module=? ORDER BY ts DESC LIMIT ?",
-                (module, limit)
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM activity_log ORDER BY ts DESC LIMIT ?", (limit,)
-            ).fetchall()
-    return jsonify([dict(r) for r in rows])
-
-@app.route("/api/activity", methods=["DELETE"])
-def clear_activity():
-    with _db() as conn:
-        conn.execute("DELETE FROM activity_log")
-    return jsonify({"ok": True})
 
 # ── TCPG Monitor ───────────────────────────────────────────────────────────────
 
