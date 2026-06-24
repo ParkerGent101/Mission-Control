@@ -16,4 +16,7 @@ ENV DATA_DIR=/data
 
 EXPOSE 8080
 
-CMD exec gunicorn --bind 0.0.0.0:${PORT} --workers 1 --timeout 120 --log-level info app:app
+# --threads 8: the dashboard fires many /api/* calls at once, each blocking on a
+# Sheets/GCS/Anthropic round-trip. With 1 sync worker they serialized; gunicorn
+# auto-promotes to the gthread worker when threads>1 so they run concurrently.
+CMD exec gunicorn --bind 0.0.0.0:${PORT} --workers 1 --threads 8 --timeout 120 --log-level info app:app

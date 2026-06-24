@@ -10,15 +10,24 @@ import json
 import sqlite3
 import sys
 import time
+import mimetypes
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request, session, redirect
+from flask_compress import Compress
 import anthropic
 
 load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", "mc-change-this-secret-key-2026")
+
+# Serve .jsx as JavaScript so the browser types it correctly and Flask-Compress
+# will gzip it (its default allowlist covers text/javascript, not octet-stream).
+mimetypes.add_type("text/javascript", ".jsx")
+# Gzip responses (the large HTML shell, JSON API payloads, JS/CSS). Flask-Compress
+# negotiates Accept-Encoding, sets Vary, and skips tiny/already-compressed bodies.
+Compress(app)
 
 @app.after_request
 def cache_headers(response):
