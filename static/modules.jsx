@@ -1473,10 +1473,14 @@ const HealthCard = ({ cardProps = {} } = {}) => {
     setSugOpen(false);
   };
 
-  const deleteFood = (idx) => {
-    setFoodLog(prev => prev.filter((_, i) => i !== idx));
+  // Foods are shown collapsed (one row per name, e.g. "rice cake ×2"), so the × button
+  // removes the whole group — every entry with that name for the day. The DELETE route
+  // already supports name-based clears (local JSON + the Food sheet) when given { name }.
+  const deleteFoodGroup = (name) => {
+    const key = (name || '').trim();
+    setFoodLog(prev => prev.filter(f => (f.name || '').trim() !== key));
     fetch('/api/health/food', { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ index: idx, date: viewDate }) })
+      body: JSON.stringify({ name: key, date: viewDate }) })
       .then(r => { if (!r.ok) throw 0; })
       .catch(() => { toastErr("Couldn’t remove that food — reloading."); });
     setTimeout(load, 300);
@@ -1547,6 +1551,23 @@ const HealthCard = ({ cardProps = {} } = {}) => {
   const totalProtein = foodLog.reduce((s, f) => s + f.protein,  0);
   const totalCarbs   = foodLog.reduce((s, f) => s + f.carbs,    0);
   const totalFat     = foodLog.reduce((s, f) => s + f.fat,      0);
+  // Collapse duplicate foods into one row: logging "rice cake" twice shows as a single
+  // "rice cake ×2" entry with its calories/macros summed, instead of two separate rows.
+  // Keyed by trimmed name; first-seen order preserved.
+  const foodGroups = (() => {
+    const order = [], map = Object.create(null);
+    foodLog.forEach((f) => {
+      const key = (f.name || '').trim();
+      if (!map[key]) { map[key] = { name: key, count: 0, calories: 0, protein: 0, carbs: 0, fat: 0 }; order.push(key); }
+      const g = map[key];
+      g.count    += 1;
+      g.calories += f.calories || 0;
+      g.protein  += f.protein  || 0;
+      g.carbs    += f.carbs    || 0;
+      g.fat      += f.fat      || 0;
+    });
+    return order.map(k => map[k]);
+  })();
   const foodQuery    = foodName.trim().toLowerCase();
   const foodMatches  = (foodQuery ? foodSug.filter(s => s.name.toLowerCase().includes(foodQuery)) : foodSug).slice(0, 6);
   // Three clearly-distinct faction colours so the war planet's territories — and the tracer
@@ -1774,14 +1795,16 @@ const HealthCard = ({ cardProps = {} } = {}) => {
             </div>
             {foodLog.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 8 }}>
-                {foodLog.map((item, i) => (
-                  <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto auto auto', gap: 5, fontSize: 10.5, alignItems: 'center', padding: '2px 0', borderBottom: '1px solid var(--line-soft)' }}>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
-                    <span className="mono" style={{ fontSize: 10 }}>{item.calories}<span className="muted-2" style={{ fontSize: 9, marginLeft: 1 }}>kcal</span></span>
-                    <span className="mono" style={{ fontSize: 10, color: 'var(--accent)' }}>P{item.protein}g</span>
-                    <span className="mono" style={{ fontSize: 10, color: 'var(--warn)' }}>C{item.carbs}g</span>
-                    <span className="mono" style={{ fontSize: 10, color: 'var(--info)' }}>F{item.fat}g</span>
-                    <button className="btn ghost" style={{ padding: '1px 5px', fontSize: 10, lineHeight: 1 }} onClick={() => deleteFood(i)}>×</button>
+                {foodGroups.map((g, i) => (
+                  <div key={g.name + i} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto auto auto', gap: 5, fontSize: 10.5, alignItems: 'center', padding: '2px 0', borderBottom: '1px solid var(--line-soft)' }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {g.name}{g.count > 1 && <span className="muted-2 mono" style={{ fontSize: 9.5, marginLeft: 4 }}>×{g.count}</span>}
+                    </span>
+                    <span className="mono" style={{ fontSize: 10 }}>{g.calories}<span className="muted-2" style={{ fontSize: 9, marginLeft: 1 }}>kcal</span></span>
+                    <span className="mono" style={{ fontSize: 10, color: 'var(--accent)' }}>P{g.protein}g</span>
+                    <span className="mono" style={{ fontSize: 10, color: 'var(--warn)' }}>C{g.carbs}g</span>
+                    <span className="mono" style={{ fontSize: 10, color: 'var(--info)' }}>F{g.fat}g</span>
+                    <button className="btn ghost" style={{ padding: '1px 5px', fontSize: 10, lineHeight: 1 }} onClick={() => deleteFoodGroup(g.name)}>×</button>
                   </div>
                 ))}
               </div>
