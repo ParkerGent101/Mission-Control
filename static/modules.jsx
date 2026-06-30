@@ -218,7 +218,9 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
   const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`);
   const [txns, setTxns] = useState([]);
   const [subs, setSubs] = useState([]);
-  const [roommate, setRoommate] = useState(null);   // {items:[{label,full,half}], total} from the Sheet's "roommate payment" section
+  const [roommate, setRoommate] = useState(null);   // {items:[{label,full,half}], total} — roommate's half of the utilities
+  const [showRoomEdit, setShowRoomEdit] = useState(false);   // roommate-payment editor open
+  const [roomRows, setRoomRows] = useState([]);              // [{label, amount}] being edited (full bills)
   const [showAdd, setShowAdd] = useState(false);
   const [showAddSub, setShowAddSub] = useState(false);
   const [desc, setDesc] = useState(""); const [amt, setAmt] = useState(""); const [type, setType] = useState("expense"); const [cat, setCat] = useState("Housing");
@@ -368,6 +370,31 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
     if (res.sheet_status && !['cleared','not_configured','not_found'].includes(res.sheet_status)) {
       alert(`Removed from the app, but the Sheet update failed (${res.sheet_status}). It may reappear on next sync.`);
     }
+  };
+
+  // Roommate payment editor — the utilities the roommate splits 50/50 (full bills in,
+  // halved for the income line). Stored in the app so it doesn't depend on the Sheet.
+  const openRoomEdit = () => {
+    const rows = (roommate && roommate.items && roommate.items.length)
+      ? roommate.items.map(it => ({ label: it.label, amount: String(it.full) }))
+      : [{ label: 'Electricity', amount: '' }, { label: 'Internet', amount: '' }, { label: 'Water', amount: '' }];
+    setRoomRows(rows);
+    setShowRoomEdit(true);
+  };
+  const setRoomRow = (i, field, val) => setRoomRows(rs => rs.map((r,j) => j===i ? { ...r, [field]: val } : r));
+  const addRoomRow = () => setRoomRows(rs => [...rs, { label: '', amount: '' }]);
+  const removeRoomRow = (i) => setRoomRows(rs => rs.filter((_,j) => j!==i));
+  const saveRoom = async () => {
+    const items = roomRows.map(r => ({ label: (r.label||'').trim(), amount: r.amount }))
+                          .filter(r => r.label && r.amount !== '' && !isNaN(parseFloat(r.amount)));
+    try {
+      const r = await fetch('/api/finances/roommate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ items }) });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw 0;
+      setRoommate(d.total > 0 ? d : null);
+      setShowRoomEdit(false);
+      window.__toast?.(items.length ? 'Roommate payment updated' : 'Roommate payment cleared', 'success');
+    } catch { window.__toast?.('Couldn’t save roommate payment', 'error'); }
   };
 
   // Edit an existing expense transaction (amount / description); category stays the same.
@@ -695,17 +722,38 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
                 style={{minWidth:34,minHeight:34,padding:0,fontSize:16,lineHeight:1,color:"var(--ink-3)"}}>×</button>
             </div>
           ))}
-          {/* Roommate payment — the roommate's half of the utilities (read live from the
-              Sheet's "roommate payment" section). A single income credit line; also folded
-              into the Income total above. */}
-          {roommate && roommate.total > 0 && (
-            <div style={{marginTop:subs.length?6:0,paddingTop:8,borderTop:'1px solid var(--line)'}}>
-              <div className="txn" style={{gridTemplateColumns:"1fr auto",alignItems:"center",padding:"5px 4px"}}>
-                <div><div className="merchant" style={{color:"var(--accent-2)"}}>Roommate payment</div><div className="meta">income · utilities split</div></div>
+          {/* Roommate payment — utilities the roommate splits 50/50, entered in-app. A single
+              income credit line (also folded into the Income total above) with an editor. */}
+          <div style={{marginTop:subs.length?6:0,paddingTop:8,borderTop:'1px solid var(--line)'}}>
+            {roommate && roommate.total > 0 ? (
+              <div className="txn" style={{gridTemplateColumns:"1fr auto auto",alignItems:"center",padding:"5px 4px"}}>
+                <div><div className="merchant" style={{color:"var(--accent-2)"}}>Roommate payment</div><div className="meta">income · {(roommate.items||[]).map(it=>it.label).join(' + ')} ÷2</div></div>
                 <span className="amount" style={{color:"var(--accent-2)"}}>+{fmtMoney(roommate.total)}</span>
+                <button className="btn ghost" aria-label="Edit roommate payment" title="Edit roommate payment" onClick={openRoomEdit}
+                  style={{minWidth:34,minHeight:34,padding:0,fontSize:13,lineHeight:1,color:"var(--ink-3)"}}>✎</button>
               </div>
-            </div>
-          )}
+            ) : !showRoomEdit && (
+              <button className="btn ghost" onClick={openRoomEdit} style={{fontSize:11,color:"var(--ink-3)",padding:"4px 4px"}}><Icon name="plus" size={12}/>Set up roommate payment</button>
+            )}
+            {showRoomEdit && (
+              <div style={{display:'flex',flexDirection:'column',gap:6,marginTop:6,padding:'8px',background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid var(--line)'}}>
+                <div className="muted-2 mono" style={{fontSize:10,letterSpacing:'.06em'}}>ROOMMATE PAYMENT · split 50/50</div>
+                {roomRows.map((r,i)=>(
+                  <div key={i} style={{display:'flex',gap:6}}>
+                    <input className="input" placeholder="Utility (e.g. Electricity)" value={r.label} onChange={e=>setRoomRow(i,'label',e.target.value)} style={{flex:1,fontSize:12}}/>
+                    <input className="input" placeholder="$ full bill" type="number" value={r.amount} onChange={e=>setRoomRow(i,'amount',e.target.value)} style={{width:84,fontSize:12}}/>
+                    <button className="btn ghost" aria-label="Remove row" title="Remove" onClick={()=>removeRoomRow(i)} style={{minWidth:30,padding:0,fontSize:15,lineHeight:1,color:"var(--ink-3)"}}>×</button>
+                  </div>
+                ))}
+                <button className="btn ghost" onClick={addRoomRow} style={{fontSize:11,alignSelf:'flex-start',color:"var(--ink-3)"}}><Icon name="plus" size={11}/>Add utility</button>
+                <div className="muted-2 mono" style={{fontSize:10}}>Roommate owes ½ of the total{(() => { const t = roomRows.reduce((s,r)=>s+(parseFloat(r.amount)||0),0); return t>0 ? ` = ${fmtMoney(t/2)}` : ''; })()}</div>
+                <div style={{display:'flex',gap:6}}>
+                  <button className="btn primary" onClick={saveRoom} style={{fontSize:11}}>Save</button>
+                  <button className="btn ghost" onClick={()=>setShowRoomEdit(false)} style={{fontSize:11}}>Cancel</button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
         </div>
       </div>

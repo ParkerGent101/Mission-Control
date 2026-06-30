@@ -968,12 +968,31 @@ def _parse_roommate_section(rows):
     total = round(sum(it["full"] for it in items) / 2.0, 2)
     return {"items": items, "total": total}
 
+def _roommate_from_items(items):
+    """Compute the roommate's half of each {label, amount} line + the total (Σfull/2)."""
+    out = []
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        label = str(it.get("label", "")).strip()
+        try:
+            amt = float(str(it.get("amount", "")).replace("$", "").replace(",", "").strip())
+        except (TypeError, ValueError):
+            continue
+        if label:
+            out.append({"label": label, "full": round(amt, 2), "half": round(amt / 2.0, 2)})
+    total = round(sum(i["full"] for i in out) / 2.0, 2)
+    return {"items": out, "total": total}
+
 @app.route("/api/finances/roommate", methods=["GET"])
 def get_finances_roommate():
-    """What the roommate owes this period: half of each line item in the finance
-    Sheet's '<year>' tab 'roommate payment' section. Read live from the Sheet so it
-    stays in sync; falls back to ROOMMATE_FILE (or an empty result) if the Sheet is
-    unavailable. Frontend hides the line when total is 0."""
+    """What the roommate owes this period: half of each utility line. The in-app config
+    (ROOMMATE_FILE, edited via POST below) is authoritative; if none is saved we fall back
+    to the finance Sheet's '<year>' tab 'roommate payment' section. Frontend hides the line
+    when total is 0."""
+    cfg = _load(ROOMMATE_FILE, None)
+    if isinstance(cfg, dict) and cfg.get("items"):
+        return jsonify({"ok": True, "source": "config", **_roommate_from_items(cfg["items"])})
     if FINANCE_SHEET_ID:
         try:
             svc = _sheets_svc()
@@ -982,15 +1001,31 @@ def get_finances_roommate():
             if result["items"]:
                 return jsonify({"ok": True, "source": "sheet", **result})
         except Exception:
-            pass  # fall through to local fallback
-    fb = _load(ROOMMATE_FILE, None)
-    if isinstance(fb, dict) and fb.get("items"):
-        # The fallback file holds raw {label, amount}; reuse the same halving logic by
-        # feeding the parser a synthetic header + rows.
-        rows = [["roommate payment"]] + [[it.get("label", ""), it.get("amount", "")]
-                                         for it in fb["items"]]
-        return jsonify({"ok": True, "source": "local", **_parse_roommate_section(rows)})
+            pass
     return jsonify({"ok": False, "items": [], "total": 0.0})
+
+@app.route("/api/finances/roommate", methods=["POST"])
+def post_finances_roommate():
+    """Save the roommate utilities the user enters in the app: {items:[{label, amount}]}.
+    Stored in ROOMMATE_FILE (full bills); the GET halves them. An empty list clears it
+    (so GET falls back to the Sheet)."""
+    d = request.json or {}
+    raw = d.get("items", [])
+    if not isinstance(raw, list):
+        return jsonify({"ok": False, "error": "items must be a list"}), 400
+    clean = []
+    for it in raw:
+        if not isinstance(it, dict):
+            continue
+        label = str(it.get("label", "")).strip()
+        try:
+            amt = float(str(it.get("amount", "")).replace("$", "").replace(",", "").strip())
+        except (TypeError, ValueError):
+            continue
+        if label:
+            clean.append({"label": label, "amount": round(amt, 2)})
+    _save(ROOMMATE_FILE, {"items": clean})
+    return jsonify({"ok": True, "source": "config", **_roommate_from_items(clean)})
 
 @app.route("/api/finances/budget", methods=["PATCH"])
 def patch_finances_budget():
