@@ -120,6 +120,7 @@ GDRIVE_CONFIG_FILE = DATA_DIR / "drive_config.json"
 
 ONBOARDING_FILE   = DATA_DIR / "onboarding.json"
 FINANCE_IMPORT_FILE = DATA_DIR / "finance_import.json"   # dedup fingerprints for Rocket Money CSV imports
+ROOMMATE_FILE      = DATA_DIR / "roommate_payment.json"  # local fallback for the Sheet "roommate payment" section
 USER_CONFIG_FILE   = DATA_DIR / "user_config.json"
 TCPG_FILE          = DATA_DIR / "tcpg.json"
 PRACTICE_FILE      = DATA_DIR / "practice.json"
@@ -916,6 +917,76 @@ def get_finances_budget():
     # Return empty categories so the Finance card uses its built-in default budgets
     # (FIN_CATS) and derives actuals from the transactions + subscriptions itself.
     return jsonify({"income": income, "expense": expense, "categories": []})
+
+def _parse_roommate_section(rows):
+    """Find the 'roommate payment' section in the year tab and return each line item
+    with the roommate's HALF share (the bills are split 50/50). Reads whatever items
+    live under the header, so it tracks the Sheet — no hardcoded amounts.
+
+    Returns {"items": [{"label","full","half"}], "total"} where total is the sum of
+    the halves; empty if the section isn't found."""
+    def _num(cell):
+        s = str(cell).replace("$", "").replace(",", "").strip()
+        if not s:
+            return None
+        try:
+            return float(s)
+        except ValueError:
+            return None
+
+    if not rows:
+        return {"items": [], "total": 0.0}
+    # Locate the section header (a cell containing "roommate").
+    start = None
+    for i, row in enumerate(rows):
+        if any("roommate" in str(c).strip().lower() for c in row):
+            start = i + 1
+            break
+    if start is None:
+        return {"items": [], "total": 0.0}
+
+    items = []
+    for row in rows[start:]:
+        cells = [str(c).strip() for c in row]
+        if not any(cells):                 # blank row ends the section
+            if items:
+                break
+            continue
+        label = next((c for c in cells if c and _num(c) is None), None)
+        amount = next((_num(c) for c in cells if _num(c) is not None), None)
+        if label is not None and amount is not None:
+            items.append({"label": label, "full": round(amount, 2),
+                          "half": round(amount / 2.0, 2)})
+        elif label and amount is None and items:
+            break                          # a new text-only header ends the section
+        if len(items) >= 20:               # safety cap
+            break
+    total = round(sum(it["full"] for it in items) / 2.0, 2)
+    return {"items": items, "total": total}
+
+@app.route("/api/finances/roommate", methods=["GET"])
+def get_finances_roommate():
+    """What the roommate owes this period: half of each line item in the finance
+    Sheet's '<year>' tab 'roommate payment' section. Read live from the Sheet so it
+    stays in sync; falls back to ROOMMATE_FILE (or an empty result) if the Sheet is
+    unavailable. Frontend hides the line when total is 0."""
+    if FINANCE_SHEET_ID:
+        try:
+            svc = _sheets_svc()
+            rows = _finance_rows(svc, str(datetime.now().year))
+            result = _parse_roommate_section(rows)
+            if result["items"]:
+                return jsonify({"ok": True, "source": "sheet", **result})
+        except Exception:
+            pass  # fall through to local fallback
+    fb = _load(ROOMMATE_FILE, None)
+    if isinstance(fb, dict) and fb.get("items"):
+        # The fallback file holds raw {label, amount}; reuse the same halving logic by
+        # feeding the parser a synthetic header + rows.
+        rows = [["roommate payment"]] + [[it.get("label", ""), it.get("amount", "")]
+                                         for it in fb["items"]]
+        return jsonify({"ok": True, "source": "local", **_parse_roommate_section(rows)})
+    return jsonify({"ok": False, "items": [], "total": 0.0})
 
 @app.route("/api/finances/budget", methods=["PATCH"])
 def patch_finances_budget():
