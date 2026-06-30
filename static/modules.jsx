@@ -1474,13 +1474,20 @@ const HealthCard = ({ cardProps = {} } = {}) => {
   };
 
   // Foods are shown collapsed (one row per name, e.g. "rice cake ×2"), so the × button
-  // removes the whole group — every entry with that name for the day. The DELETE route
-  // already supports name-based clears (local JSON + the Food sheet) when given { name }.
-  const deleteFoodGroup = (name) => {
+  // removes ONE instance of that food — "rice cake ×2" → "rice cake", then gone on the
+  // next click. We delete the LAST logged entry of that name by index; foodLog mirrors
+  // the backend's append-ordered food_log, so the index lines up with the DELETE route's
+  // index path (which also clears the matching Food sheet row).
+  const decrementFood = (name) => {
     const key = (name || '').trim();
-    setFoodLog(prev => prev.filter(f => (f.name || '').trim() !== key));
+    let idx = -1;
+    for (let i = foodLog.length - 1; i >= 0; i--) {
+      if ((foodLog[i].name || '').trim() === key) { idx = i; break; }
+    }
+    if (idx < 0) return;
+    setFoodLog(prev => prev.filter((_, i) => i !== idx));
     fetch('/api/health/food', { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: key, date: viewDate }) })
+      body: JSON.stringify({ index: idx, date: viewDate }) })
       .then(r => { if (!r.ok) throw 0; })
       .catch(() => { toastErr("Couldn’t remove that food — reloading."); });
     setTimeout(load, 300);
@@ -1804,7 +1811,7 @@ const HealthCard = ({ cardProps = {} } = {}) => {
                     <span className="mono" style={{ fontSize: 10, color: 'var(--accent)' }}>P{g.protein}g</span>
                     <span className="mono" style={{ fontSize: 10, color: 'var(--warn)' }}>C{g.carbs}g</span>
                     <span className="mono" style={{ fontSize: 10, color: 'var(--info)' }}>F{g.fat}g</span>
-                    <button className="btn ghost" style={{ padding: '1px 5px', fontSize: 10, lineHeight: 1 }} onClick={() => deleteFoodGroup(g.name)}>×</button>
+                    <button className="btn ghost" title={g.count > 1 ? 'Remove one' : 'Remove'} style={{ padding: '1px 5px', fontSize: 10, lineHeight: 1 }} onClick={() => decrementFood(g.name)}>×</button>
                   </div>
                 ))}
               </div>
