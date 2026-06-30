@@ -447,7 +447,8 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
     } finally { setRolling(false); }
   };
 
-  const totalIn  = budget ? budget.income  : txns.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount, 0);
+  const roomTotal = (roommate && roommate.total) ? roommate.total : 0;   // roommate's reimbursement counts as income
+  const totalIn  = (budget ? budget.income  : txns.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount, 0)) + roomTotal;
   const totalEx  = budget ? budget.expense : txns.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount), 0);
   const net = totalIn - totalEx;
   const [my, mm] = month.split('-');
@@ -694,20 +695,15 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
                 style={{minWidth:34,minHeight:34,padding:0,fontSize:16,lineHeight:1,color:"var(--ink-3)"}}>×</button>
             </div>
           ))}
-          {/* Roommate share — half of each utility from the Sheet's "roommate payment"
-              section, shown as a credit (money owed TO you), with the breakdown beneath. */}
+          {/* Roommate payment — the roommate's half of the utilities (read live from the
+              Sheet's "roommate payment" section). A single income credit line; also folded
+              into the Income total above. */}
           {roommate && roommate.total > 0 && (
             <div style={{marginTop:subs.length?6:0,paddingTop:8,borderTop:'1px solid var(--line)'}}>
               <div className="txn" style={{gridTemplateColumns:"1fr auto",alignItems:"center",padding:"5px 4px"}}>
-                <div><div className="merchant" style={{color:"var(--accent-2)"}}>Roommate</div><div className="meta">owes you · split 50/50</div></div>
+                <div><div className="merchant" style={{color:"var(--accent-2)"}}>Roommate payment</div><div className="meta">income · utilities split</div></div>
                 <span className="amount" style={{color:"var(--accent-2)"}}>+{fmtMoney(roommate.total)}</span>
               </div>
-              {(roommate.items||[]).map((it,i)=>(
-                <div key={i} className="txn" style={{gridTemplateColumns:"1fr auto",alignItems:"center",padding:"2px 4px 2px 14px"}}>
-                  <div className="meta" style={{fontSize:10.5}}>{it.label}</div>
-                  <span className="amount muted-2" style={{fontSize:10.5}}>{fmtMoney(it.half)}</span>
-                </div>
-              ))}
             </div>
           )}
         </div>

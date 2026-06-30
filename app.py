@@ -953,7 +953,11 @@ def _parse_roommate_section(rows):
                 break
             continue
         label = next((c for c in cells if c and _num(c) is None), None)
-        amount = next((_num(c) for c in cells if _num(c) is not None), None)
+        # Use the LARGEST number in the row, not the first: some rows have a stray
+        # empty/0 cell (or a pre-computed half) before the real bill, which made
+        # "first number" read e.g. water as 0. The full bill is the max either way.
+        nums = [n for n in (_num(c) for c in cells) if n is not None]
+        amount = max(nums) if nums else None
         if label is not None and amount is not None:
             items.append({"label": label, "full": round(amount, 2),
                           "half": round(amount / 2.0, 2)})
