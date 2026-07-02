@@ -611,6 +611,7 @@
   }
   .btn.primary:hover { background: color-mix(in oklch, var(--accent) 28%, var(--surface-2)); }
   .btn.ghost { background: transparent; }
+  .btn:disabled, .btn[disabled] { opacity: .4; cursor: default; pointer-events: none; }
 
   .progress {
     height: 6px; width: 100%; background: var(--surface-2); border-radius: 999px; overflow: hidden;

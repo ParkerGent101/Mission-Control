@@ -145,7 +145,16 @@ const App = () => {
     const onKey = (e) => {
       if (e.key === "Escape") {
         setShowSettings(false);
+        return;
       }
+      // Sidebar hotkeys ([D]ashboard, [F]inance, … [T]weaks) — skip while typing or with modifiers.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = e.target;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
+      const k = e.key.length === 1 ? e.key.toUpperCase() : "";
+      if (k === "T") { setShowSettings(true); return; }
+      const nav = SIDEBAR_NAV.find(n => n.key === k);
+      if (nav) setActive(nav.id);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

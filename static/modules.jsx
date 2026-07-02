@@ -17,6 +17,26 @@ const useRefreshListener = (loadFn) => {
 const toastErr = (m = "Couldn’t save — check your connection and try again") =>
   (window.__toast ? window.__toast(m, "error") : console.error(m));
 
+// Fetch-lifecycle line for card lists: a themed "loading" line during the first fetch,
+// a red retry line when it failed. Renders nothing once data is in — so an empty list
+// can honestly say "no data" instead of masquerading as one while the request is in flight.
+const LoadState = ({ loading, error, onRetry, what = "data" }) => {
+  if (loading) return <div className="muted-2 mono" style={{fontSize:11,padding:'8px 0',letterSpacing:'.05em'}}>AWAITING {String(what).toUpperCase()} …</div>;
+  if (error) return (
+    <div className="mono" style={{fontSize:11,padding:'8px 0',color:'var(--danger)',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+      <span>Couldn’t load {what}.</span>
+      {onRetry && <button className="btn ghost" style={{fontSize:10.5,padding:'2px 8px'}} onClick={onRetry}>Retry</button>}
+    </div>
+  );
+  return null;
+};
+
+// Container-level Enter-to-submit for multi-field forms: attach to the form's wrapper div
+// so every text input submits on Enter (buttons/checkboxes/selects are left alone).
+const submitOnEnter = (fn) => (e) => {
+  if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') { e.preventDefault(); fn(); }
+};
+
 const fmtMoney = (n, opts = {}) => {
   const sign = n < 0 ? "-" : "";
   const v = Math.abs(n);
@@ -246,8 +266,10 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
     return nv;
   });
 
+  const [finLoading, setFinLoading] = useState(true);
+  const [finError, setFinError] = useState(false);
   const loadFinances = (m) => {
-    fetch(`/api/finances?month=${m}`).then(r=>r.json()).then(data => {
+    fetch(`/api/finances?month=${m}`).then(r=>{ if(!r.ok) throw 0; return r.json(); }).then(data => {
       setTxns((Array.isArray(data) ? data : []).map(t => ({
         merchant: t.description,
         cat: catOverrides.current[t.id] ?? normFinCat(t.category, t.description),
@@ -258,13 +280,16 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
         sheet_tab: t.sheet_tab, sheet_row: t.sheet_row, sheet_col: t.sheet_col,
         sheet_cols: t.sheet_cols, sheet_kind: t.sheet_kind
       })));
-    }).catch(()=>{});
+      setFinLoading(false); setFinError(false);
+    }).catch(()=>{ setFinLoading(false); setFinError(true); });
     fetch(`/api/finances/budget?month=${m}`).then(r=>r.json()).then(data => {
       if (!data.error) setBudget(data);
     }).catch(()=>{});
   };
 
-  useEffect(() => { loadFinances(month); }, [month]);
+  // Show the loading line on mount and when the viewed month changes (but not on the
+  // silent background refresh, which also calls loadFinances).
+  useEffect(() => { setFinLoading(true); loadFinances(month); }, [month]);
   useEffect(() => {
     fetch('/api/finances/subscriptions').then(r=>r.json()).then(setSubs).catch(()=>{});
     fetch('/api/finances/roommate').then(r=>r.json()).then(d => setRoommate(d && d.ok ? d : null)).catch(()=>{});
@@ -297,14 +322,17 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
   };
 
   const logExpense = async () => {
-    if (!desc || !amt) return;
-    const res = await fetch('/api/finances', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ description: desc, amount: parseFloat(amt), type, category: cat, date: todayLocal() }) });
-    if (!res.ok) {
-      const body = await res.json().catch(()=>({}));
-      alert(body.error || `Failed to add expense (${res.status})`);
-      return;
-    }
+    if (!desc.trim() || !amt) return;
+    try {
+      const res = await fetch('/api/finances', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ description: desc, amount: parseFloat(amt), type, category: cat, date: todayLocal() }) });
+      if (!res.ok) {
+        const body = await res.json().catch(()=>({}));
+        toastErr(body.error || `Couldn’t add that — try again (${res.status}).`);
+        return;
+      }
+    } catch { toastErr("Couldn’t add that — check your connection."); return; }
+    window.__toast?.(`${type === 'income' ? 'Income' : 'Expense'} logged — ${desc.trim()} ${fmtMoney(parseFloat(amt) || 0)}`, 'success');
     setDesc(''); setAmt(''); setShowAdd(false);
     loadFinances(month);
   };
@@ -348,7 +376,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
         const msg = res.sheet_status === 'section_full'
           ? "Saved locally — the Subscriptions section in your Sheet has no empty rows. Add a blank row and re-sync."
           : `Saved locally — Sheet write failed (${res.sheet_status}).`;
-        alert(msg);
+        window.__toast?.(msg, 'error');
       }
       if (editing) setSubs(s => s.map(x => x.id===subEditId ? { ...x, ...payload } : x));
       else setSubs(s => [...s, { id: res.id, ...payload }]);
@@ -368,7 +396,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
     setSubs(s => s.filter(x => x.id !== sid));
     const res = await fetch(`/api/finances/subscriptions/${sid}`, { method:'DELETE' }).then(r=>r.json()).catch(()=>({}));
     if (res.sheet_status && !['cleared','not_configured','not_found'].includes(res.sheet_status)) {
-      alert(`Removed from the app, but the Sheet update failed (${res.sheet_status}). It may reappear on next sync.`);
+      toastErr(`Removed from the app, but the Sheet update failed (${res.sheet_status}). It may reappear on next sync.`);
     }
   };
 
@@ -421,29 +449,39 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
       loadFinances(month);
     } catch { toastErr("Couldn’t save that change — reverting."); setTxns(prev); }
   };
-  const promptEditAmount = (t) => {
-    const v = prompt("Amount ($):", Math.abs(t.amount).toFixed(2));
-    if (v == null) return;
-    const n = parseFloat(v);
-    if (isNaN(n) || n < 0) { toastErr("Enter a valid amount."); return; }
-    editTxn(t, { amount: n });
-  };
-  const promptEditDesc = (t) => {
-    const v = prompt("Description:", t.merchant || "");
-    if (v == null) return;
-    editTxn(t, { description: v.trim() });
+  // Inline txn editing (amount / description): click swaps the value for an input;
+  // Enter or blur commits, Escape cancels. Replaces the old OS prompt() dialogs.
+  const [txnEdit, setTxnEdit] = useState(null);   // {id, field:'amount'|'desc', val}
+  const commitTxnEdit = () => {
+    setTxnEdit(te => {
+      if (!te) return null;
+      const t = txns.find(x => x.id === te.id);
+      if (!t) return null;
+      if (te.field === 'amount') {
+        const n = parseFloat(te.val);
+        if (isNaN(n) || n < 0) { toastErr("Enter a valid amount."); return null; }
+        if (n !== Math.abs(t.amount)) editTxn(t, { amount: n });
+      } else {
+        const v = (te.val || '').trim();
+        if (v && v !== t.merchant) editTxn(t, { description: v });
+      }
+      return null;
+    });
   };
 
-  // Edit a category's monthly budgeted amount (writes column E in the Sheet).
-  const editBudget = (c) => {
-    const v = prompt(`Monthly budget for ${c.name} ($):`, String(c.budget || c.budgeted || 0));
-    if (v == null) return;
-    const n = parseFloat(v);
-    if (isNaN(n) || n < 0) { toastErr("Enter a valid amount."); return; }
-    fetch('/api/finances/budget', { method:'PATCH', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ month, category: c.name, budgeted: n }) })
-      .then(async r => { if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.error || 'failed'); } loadFinances(month); })
-      .catch(err => toastErr(err.message ? `Couldn’t update budget — ${err.message}` : "Couldn’t update budget."));
+  // Inline budget editing (writes column E in the Sheet).
+  const [budgetEdit, setBudgetEdit] = useState(null);   // {name, val}
+  const commitBudgetEdit = () => {
+    setBudgetEdit(be => {
+      if (!be) return null;
+      const n = parseFloat(be.val);
+      if (isNaN(n) || n < 0) { toastErr("Enter a valid amount."); return null; }
+      fetch('/api/finances/budget', { method:'PATCH', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ month, category: be.name, budgeted: n }) })
+        .then(async r => { if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.error || 'failed'); } loadFinances(month); })
+        .catch(err => toastErr(err.message ? `Couldn’t update budget — ${err.message}` : "Couldn’t update budget."));
+      return null;
+    });
   };
 
   const [rolling, setRolling] = useState(false);
@@ -456,9 +494,9 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
       const res = await fetch('/api/finances/rollover/month', { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ month }) });
       const body = await res.json().catch(()=>({}));
-      if (!res.ok) { alert(body.error || `Rollover failed (${res.status})`); return; }
+      if (!res.ok) { toastErr(body.error || `Rollover failed (${res.status})`); return; }
       if (body.month) setMonth(body.month);
-      alert(`Created the ${body.tab} sheet.`);
+      window.__toast?.(`Created the ${body.tab} sheet.`, 'success');
     } finally { setRolling(false); }
   };
   const rolloverYear = async () => {
@@ -469,7 +507,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
       const res = await fetch('/api/finances/rollover/year', { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ month }) });
       const body = await res.json().catch(()=>({}));
-      if (!res.ok) { alert(body.error || `Year rollover failed (${res.status})`); return; }
+      if (!res.ok) { toastErr(body.error || `Year rollover failed (${res.status})`); return; }
       if (body.url && confirm(`Created "Finances ${body.year}". Open it now?`)) window.open(body.url, '_blank');
     } finally { setRolling(false); }
   };
@@ -520,16 +558,16 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
       </>}
     >
       {showAdd && (
-        <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'flex-end', padding:'0 0 12px', borderBottom:'1px solid var(--line-soft)', marginBottom:12 }}>
-          <input className="input" placeholder="Description" value={desc} onChange={e=>setDesc(e.target.value)} style={{flex:2,minWidth:120}} />
-          <input className="input" placeholder="Amount" type="number" value={amt} onChange={e=>setAmt(e.target.value)} style={{width:80}} />
+        <div onKeyDown={submitOnEnter(logExpense)} style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'flex-end', padding:'0 0 12px', borderBottom:'1px solid var(--line-soft)', marginBottom:12 }}>
+          <input className="input" placeholder="Description *" autoFocus value={desc} onChange={e=>setDesc(e.target.value)} style={{flex:2,minWidth:120}} />
+          <input className="input" placeholder="Amount *" type="number" value={amt} onChange={e=>setAmt(e.target.value)} style={{width:80}} />
           <select className="input" value={type} onChange={e=>setType(e.target.value)} style={{width:96}}>
             <option value="expense">Expense</option><option value="income">Income</option>
           </select>
           <select className="input" value={cat} onChange={e=>setCat(e.target.value)} style={{width:130}}>
             {FIN_CAT_NAMES.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
-          <button className="btn primary" onClick={logExpense}>LOG</button>
+          <button className="btn primary" onClick={logExpense} disabled={!desc.trim() || !amt}>LOG</button>
           <button className="btn ghost" onClick={()=>setShowAdd(false)}>✕</button>
         </div>
       )}
@@ -559,7 +597,14 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
                 <div key={i} className="bar-row">
                   <div className="cat"><span className="swatch" style={{background:c.color}}/><span className="cat-name">{c.name}</span></div>
                   <div className="amt">{fmtMoney(c.actual)}</div>
-                  <div className="amt muted-2" onClick={()=>editBudget(c)} title="Edit budget" style={{cursor:'pointer'}}>/ {fmtMoney(c.budget,{cents:false})}</div>
+                  {budgetEdit && budgetEdit.name === c.name
+                    ? <input className="input" autoFocus type="number" value={budgetEdit.val}
+                        onChange={e=>setBudgetEdit(x=>({...x, val:e.target.value}))}
+                        onKeyDown={e=>{ if(e.key==='Enter') commitBudgetEdit(); if(e.key==='Escape') setBudgetEdit(null); }}
+                        onBlur={commitBudgetEdit}
+                        style={{width:72,height:22,fontSize:11,padding:'1px 5px'}}/>
+                    : <div className="amt muted-2" onClick={()=>setBudgetEdit({name:c.name, val:String(c.budget||c.budgeted||0)})} title="Edit budget"
+                        style={{cursor:'pointer',textDecoration:'underline dotted',textDecorationColor:'var(--ink-4)',textUnderlineOffset:3}}>/ {fmtMoney(c.budget,{cents:false})}</div>}
                   <div className="pct" style={{color:over?"var(--danger)":"var(--ink-3)"}}>{Math.round(pct)}%</div>
                   <div className="mini-bar"><div className="fill" style={{width:Math.min(100,pct)+"%",background:over?"var(--danger)":"var(--accent-2)"}}/></div>
                 </div>
@@ -585,7 +630,9 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
         <div className="fin-pane fin-pane-txns">
         <div>
           <div className="section-h"><span>Transactions</span><span className="line"/><span className="muted-2" style={{fontSize:10.5}}>{txns.filter(t=>t.amount<0).length} expenses</span></div>
-          {txns.length === 0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 0'}}>No transactions this month.</div>}
+          {(finLoading || finError)
+            ? <LoadState loading={finLoading} error={finError} onRetry={()=>{ setFinLoading(true); loadFinances(month); }} what="transactions"/>
+            : txns.length === 0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 0'}}>No transactions this month.</div>}
           <div className="scroll-pane" style={{maxHeight:480,marginRight:-4,paddingRight:4}}>
           {(() => {
             const groups = {};
@@ -625,7 +672,13 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
                       <div key={t.id||i} className="txn" style={{gridTemplateColumns:"10px 1fr auto auto auto",gap:6,alignItems:'center',paddingLeft:18}}>
                         <span className="cat-dot" style={{background:t.amount>0?"var(--accent-2)":FIN_CAT_COLOR[nc]||"var(--ink-4)"}}/>
                         <div>
-                          <div className="merchant" {...(t.amount<0 ? {onClick:()=>promptEditDesc(t), title:"Edit description", style:{cursor:'pointer'}} : {})}>{t.merchant}</div>
+                          {txnEdit && txnEdit.id === t.id && txnEdit.field === 'desc'
+                            ? <input className="input" autoFocus value={txnEdit.val}
+                                onChange={e=>setTxnEdit(x=>({...x, val:e.target.value}))}
+                                onKeyDown={e=>{ if(e.key==='Enter') commitTxnEdit(); if(e.key==='Escape') setTxnEdit(null); }}
+                                onBlur={commitTxnEdit}
+                                style={{height:24,fontSize:12,padding:'2px 6px',width:'100%',maxWidth:220}}/>
+                            : <div className="merchant" {...(t.amount<0 ? {onClick:()=>setTxnEdit({id:t.id, field:'desc', val:t.merchant||''}), title:"Edit description", style:{cursor:'pointer'}} : {})}>{t.merchant}</div>}
                           <div className="meta">{t.date}</div>
                         </div>
                         {t.amount < 0
@@ -658,26 +711,35 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
                               {t.amount > 0 ? 'income' : normFinCat(t.cat)}
                             </span>
                         }
-                        <span className="amount" style={{color:t.amount>0?"var(--accent-2)":"var(--ink)", cursor:t.amount<0?'pointer':'default'}}
-                          {...(t.amount<0 ? {onClick:()=>promptEditAmount(t), title:"Edit amount"} : {})}>
-                          {t.amount>0?"+":""}{fmtMoney(Math.abs(t.amount))}
-                        </span>
-                        <span style={{cursor:"pointer",color:"var(--ink-4)",padding:"0 2px",lineHeight:1}} title="Remove"
+                        {txnEdit && txnEdit.id === t.id && txnEdit.field === 'amount'
+                          ? <input className="input" autoFocus type="number" value={txnEdit.val}
+                              onChange={e=>setTxnEdit(x=>({...x, val:e.target.value}))}
+                              onKeyDown={e=>{ if(e.key==='Enter') commitTxnEdit(); if(e.key==='Escape') setTxnEdit(null); }}
+                              onBlur={commitTxnEdit}
+                              style={{width:76,height:24,fontSize:12,padding:'2px 6px'}}/>
+                          : <span className="amount" style={{color:t.amount>0?"var(--accent-2)":"var(--ink)", cursor:t.amount<0?'pointer':'default'}}
+                              {...(t.amount<0 ? {onClick:()=>setTxnEdit({id:t.id, field:'amount', val:Math.abs(t.amount).toFixed(2)}), title:"Edit amount"} : {})}>
+                              {t.amount>0?"+":""}{fmtMoney(Math.abs(t.amount))}
+                            </span>}
+                        <button className="btn ghost" aria-label="Remove transaction" title="Remove"
+                          style={{minWidth:28,minHeight:28,padding:0,fontSize:15,lineHeight:1,color:"var(--ink-4)"}}
                           onClick={async()=>{
+                            if (!confirm(`Delete "${t.merchant}" (${fmtMoney(Math.abs(t.amount))})?${t.source === 'sheet' ? ' This also clears it from the Sheet.' : ''}`)) return;
                             if (t.source === 'sheet') {
                               if (t.sheet_tab == null || t.sheet_row == null || t.sheet_col == null) return;
                               const qs = new URLSearchParams({tab: t.sheet_tab, row: t.sheet_row, col: t.sheet_col});
                               if (t.sheet_cols) qs.set("cols", t.sheet_cols);
                               const res = await fetch(`/api/finances/sheet?${qs}`,{method:"DELETE"});
-                              if (!res.ok) { alert("Could not delete from Google Sheet — check OAuth scope."); return; }
+                              if (!res.ok) { toastErr("Couldn’t delete from the Google Sheet — check OAuth scope."); return; }
                             } else {
                               await fetch(`/api/finances/${t.id}`,{method:"DELETE"});
                             }
                             delete catOverrides.current[t.id];
+                            window.__toast?.('Transaction deleted', 'info');
                             loadFinances(month);
                           }}>
                           ×
-                        </span>
+                        </button>
                       </div>
                     );
                   })}
@@ -696,16 +758,16 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
             <button className="btn" style={{padding:'4px 10px',fontSize:11}} onClick={()=>{ if(showAddSub){ setShowAddSub(false); setSubEditId(null); } else { setSubEditId(null); setSubName(''); setSubAcct(''); setSubAmt(''); setSubDue(''); setShowAddSub(true); } }}><Icon name="plus" size={12}/>Add</button>
           </div>
           {showAddSub && (
-            <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:8,padding:'8px',background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid var(--line)'}}>
+            <div onKeyDown={submitOnEnter(addSub)} style={{display:'flex',flexDirection:'column',gap:6,marginBottom:8,padding:'8px',background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid var(--line)'}}>
               {subEditId!=null && <div className="muted-2 mono" style={{fontSize:10,letterSpacing:'.06em'}}>EDIT SUBSCRIPTION</div>}
-              <input className="input" placeholder="Name (e.g. Netflix)" value={subName} onChange={e=>setSubName(e.target.value)} style={{fontSize:12}}/>
+              <input className="input" placeholder="Name (e.g. Netflix) *" value={subName} onChange={e=>setSubName(e.target.value)} style={{fontSize:12}}/>
               <div style={{display:'flex',gap:6}}>
                 <input className="input" placeholder="Account" value={subAcct} onChange={e=>setSubAcct(e.target.value)} style={{flex:1,fontSize:12}}/>
-                <input className="input" placeholder="$0.00" type="number" value={subAmt} onChange={e=>setSubAmt(e.target.value)} style={{width:72,fontSize:12}}/>
+                <input className="input" placeholder="$0.00 *" type="number" value={subAmt} onChange={e=>setSubAmt(e.target.value)} style={{width:72,fontSize:12}}/>
               </div>
               <div style={{display:'flex',gap:6}}>
                 <input className="input" placeholder="Due (e.g. 15th)" value={subDue} onChange={e=>setSubDue(e.target.value)} style={{flex:1,fontSize:12}}/>
-                <button className="btn primary" onClick={addSub} style={{fontSize:11}}>{subEditId!=null?'Save':'Add'}</button>
+                <button className="btn primary" onClick={addSub} disabled={!subName || !subAmt} style={{fontSize:11}}>{subEditId!=null?'Save':'Add'}</button>
                 <button className="btn ghost" onClick={()=>{ setShowAddSub(false); setSubEditId(null); setSubName(''); setSubAcct(''); setSubAmt(''); setSubDue(''); }} style={{fontSize:11}}>✕</button>
               </div>
             </div>
@@ -800,8 +862,10 @@ const BandCard = ({ cardProps = {} } = {}) => {
     if (ni !== i) setBandTab(BAND_TABS[ni]);
   };
 
+  const [bandLoading, setBandLoading] = useState(true);
+  const [bandError, setBandError] = useState(false);
   const loadShows = () => {
-    return fetch('/api/shows').then(r=>r.json()).then(data => {
+    return fetch('/api/shows').then(r=>{ if(!r.ok) throw 0; return r.json(); }).then(data => {
       const today = new Date();
       today.setHours(0,0,0,0);
       const upcoming = data
@@ -815,7 +879,8 @@ const BandCard = ({ cardProps = {} } = {}) => {
         days: Math.round((new Date(s.date+'T12:00:00')-today)/86400000),
         status: 'confirmed', notes: s.notes
       })));
-    }).catch(()=>{});
+      setBandLoading(false); setBandError(false);
+    }).catch(()=>{ setBandLoading(false); setBandError(true); });
   };
 
   const removeShow = async (g) => {
@@ -844,8 +909,10 @@ const BandCard = ({ cardProps = {} } = {}) => {
 
   const pushSite = async () => {
     setPushing(true);
-    const d = await fetch('/api/site/push', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:'Update shows and content'})}).then(r=>r.json());
-    alert(d.message);
+    try {
+      const d = await fetch('/api/site/push', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:'Update shows and content'})}).then(r=>r.json());
+      window.__toast?.(d.message || 'Pushed to comingupaces.net', 'success');
+    } catch { toastErr('Push failed — try again.'); }
     setPushing(false);
   };
 
@@ -940,14 +1007,24 @@ const BandCard = ({ cardProps = {} } = {}) => {
       const r = await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
       if (!r.ok) throw 0;
       setSongs(await r.json());
-    } catch { toastErr("Couldn’t update songs — reloading."); reloadSongs(); }
+      return true;
+    } catch { toastErr("Couldn’t update songs — reloading."); reloadSongs(); return false; }
   };
   const addListSong = (key, url) => { const v = draftVal(key).trim(); if (!v) return; songReq(url, 'POST', { song: v }); setDraft(key, ''); };
-  const removeListSong = (url, song) => songReq(url, 'DELETE', { song });
+  const removeListSong = async (url, song) => { if (await songReq(url, 'DELETE', { song })) window.__toast?.(`Removed "${song}"`, 'info'); };
   const addSetlistSong = (name) => { const k = 'sl:'+name, v = draftVal(k).trim(); if (!v) return; songReq('/api/band/songs/setlist/song','POST',{ setlist:name, song:v }); setDraft(k, ''); };
-  const removeSetlistSong = (name, song) => songReq('/api/band/songs/setlist/song','DELETE',{ setlist:name, song });
+  const removeSetlistSong = async (name, song) => { if (await songReq('/api/band/songs/setlist/song','DELETE',{ setlist:name, song })) window.__toast?.(`Removed "${song}" from ${name}`, 'info'); };
   const createSetlist = () => { const v = newSetlist.trim(); if (!v) return; songReq('/api/band/songs/setlist','POST',{ name:v }); setNewSetlist(''); };
-  const renameSetlist = (name) => { const nn = prompt('Rename setlist:', name); if (!nn || !nn.trim() || nn.trim()===name) return; songReq('/api/band/songs/setlist','PATCH',{ name, new_name:nn.trim() }); };
+  // Inline setlist rename (replaces the OS prompt): ✎ swaps the name for an input.
+  const [slRename, setSlRename] = useState(null);   // {name, val}
+  const commitSlRename = () => {
+    setSlRename(sr => {
+      if (!sr) return null;
+      const nn = (sr.val || '').trim();
+      if (nn && nn !== sr.name) songReq('/api/band/songs/setlist','PATCH',{ name: sr.name, new_name: nn });
+      return null;
+    });
+  };
   const deleteSetlist = (name) => { if (!confirm(`Delete setlist "${name}"?`)) return; songReq('/api/band/songs/setlist','DELETE',{ name }); };
 
   const nextGig = gigs[0];
@@ -986,11 +1063,11 @@ const BandCard = ({ cardProps = {} } = {}) => {
       </>}
     >
       {showAddShow && (
-        <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:10,padding:'10px',background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid var(--line)'}}>
+        <div onKeyDown={submitOnEnter(addShow)} style={{display:'flex',flexDirection:'column',gap:6,marginBottom:10,padding:'10px',background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid var(--line)'}}>
           <div className="muted-2 mono" style={{fontSize:10.5,letterSpacing:'.06em'}}>ADD SHOW</div>
           <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
             <input className="input" type="date" value={newShow.date} onChange={e=>setNewShow(s=>({...s,date:e.target.value}))} style={{width:140,fontSize:12}}/>
-            <input className="input" placeholder="Venue name" value={newShow.venue} onChange={e=>setNewShow(s=>({...s,venue:e.target.value}))} style={{flex:1,minWidth:120,fontSize:12}}/>
+            <input className="input" placeholder="Venue name *" value={newShow.venue} onChange={e=>setNewShow(s=>({...s,venue:e.target.value}))} style={{flex:1,minWidth:120,fontSize:12}}/>
           </div>
           <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
             <input className="input" placeholder="City, State" value={newShow.city} onChange={e=>setNewShow(s=>({...s,city:e.target.value}))} style={{flex:1,fontSize:12}}/>
@@ -1006,7 +1083,7 @@ const BandCard = ({ cardProps = {} } = {}) => {
             <input className="input" type="url" placeholder="Tickets URL (optional)" value={newShow.tickets} onChange={e=>setNewShow(s=>({...s,tickets:e.target.value}))} style={{flex:1,fontSize:12}}/>
           </div>
           <div style={{display:'flex',gap:6,justifyContent:'flex-end'}}>
-            <button className="btn primary" onClick={addShow} style={{fontSize:11}}>Add show</button>
+            <button className="btn primary" onClick={addShow} disabled={!newShow.date || !newShow.venue} style={{fontSize:11}}>Add show</button>
             <button className="btn ghost" onClick={()=>setShowAddShow(false)} style={{fontSize:11}}>✕</button>
           </div>
         </div>
@@ -1026,7 +1103,7 @@ const BandCard = ({ cardProps = {} } = {}) => {
       {/* ── Shows tab ── */}
       {bandTab==='shows' && <>
       {editShowIdx != null && (
-        <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:10,padding:'10px',background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid color-mix(in oklch,var(--violet) 30%,var(--line))'}}>
+        <div onKeyDown={submitOnEnter(saveEditShow)} style={{display:'flex',flexDirection:'column',gap:6,marginBottom:10,padding:'10px',background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid color-mix(in oklch,var(--violet) 30%,var(--line))'}}>
           <div className="muted-2 mono" style={{fontSize:10.5,letterSpacing:'.06em'}}>EDIT SHOW</div>
           <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
             <input className="input" type="date" value={editShow.date} onChange={e=>setEditShow(s=>({...s,date:e.target.value}))} style={{width:140,fontSize:12}}/>
@@ -1062,7 +1139,10 @@ const BandCard = ({ cardProps = {} } = {}) => {
         </div>
       )}
       <div className="section-h"><span>Next Show</span><span className="line"/></div>
-      {nextGig ? (
+      {(bandLoading || bandError) && !gigs.length && (
+        <LoadState loading={bandLoading} error={bandError} onRetry={()=>{ setBandLoading(true); loadShows(); }} what="shows"/>
+      )}
+      {(gigs.length > 0 || (!bandLoading && !bandError)) && (nextGig ? (
         <div style={{
           background:"linear-gradient(135deg,color-mix(in oklch,var(--violet) 14%,var(--surface-2)),var(--surface-2))",
           border:"1px solid color-mix(in oklch,var(--violet) 30%,var(--line))",
@@ -1087,7 +1167,7 @@ const BandCard = ({ cardProps = {} } = {}) => {
         </div>
       ) : (
         <div className="muted mono" style={{fontSize:11,padding:'8px 0'}}>No upcoming shows.</div>
-      )}
+      ))}
 
       {gigs.slice(1,4).map((g,i) => (
         <div key={i} style={{display:"grid",gridTemplateColumns:"1fr auto auto auto",gap:6,padding:"5px 0",borderBottom:"1px solid var(--line-soft)",alignItems:"center"}}>
@@ -1114,16 +1194,24 @@ const BandCard = ({ cardProps = {} } = {}) => {
         {(songs.setlists||[]).map((sl,i) => (
           <div key={i} style={{marginBottom:14}}>
             <div className="section-h">
-              <span style={{fontWeight:600}}>{sl.name}</span><span className="line"/>
+              {slRename && slRename.name === sl.name
+                ? <input className="input" autoFocus value={slRename.val}
+                    onChange={e=>setSlRename(x=>({...x, val:e.target.value}))}
+                    onKeyDown={e=>{ if(e.key==='Enter') commitSlRename(); if(e.key==='Escape') setSlRename(null); }}
+                    onBlur={commitSlRename}
+                    style={{height:24,fontSize:12,padding:'2px 6px',maxWidth:180}}/>
+                : <span style={{fontWeight:600}}>{sl.name}</span>}
+              <span className="line"/>
               <span className="muted-2 mono" style={{fontSize:10}}>{sl.songs.length} songs · ~{Math.round(sl.songs.length * 5)} min</span>
-              <button className="btn ghost" title="Rename setlist" style={{padding:'2px 6px',fontSize:11}} onClick={()=>renameSetlist(sl.name)}>✎</button>
+              <button className="btn ghost" title="Rename setlist" style={{padding:'2px 6px',fontSize:11}} onClick={()=>setSlRename({name:sl.name, val:sl.name})}>✎</button>
               <button className="btn ghost" title="Delete setlist" style={{padding:'2px 6px',fontSize:12,color:'var(--ink-4)'}} onClick={()=>deleteSetlist(sl.name)}>×</button>
             </div>
             <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'2px 12px'}}>
               {sl.songs.map((s,j) => (
                 <div key={j} style={{display:'flex',alignItems:'center',gap:4,fontSize:11.5,padding:'2px 0',borderBottom:'1px solid var(--line-soft)'}}>
                   <span style={{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{j+1}. {s}</span>
-                  <span onClick={()=>removeSetlistSong(sl.name, s)} title="Remove" style={{cursor:'pointer',color:'var(--ink-4)',padding:'0 3px',fontSize:13,lineHeight:1}}>×</span>
+                  <button className="btn ghost" onClick={()=>removeSetlistSong(sl.name, s)} title={`Remove "${s}"`} aria-label={`Remove ${s}`}
+                    style={{minWidth:24,minHeight:24,padding:0,fontSize:13,lineHeight:1,color:'var(--ink-4)'}}>×</button>
                 </div>
               ))}
             </div>
@@ -1148,7 +1236,8 @@ const BandCard = ({ cardProps = {} } = {}) => {
           {(songs.repertoire||[]).map((s,i) => (
             <div key={i} style={{display:'flex',alignItems:'center',gap:4,fontSize:11,padding:'2px 0',borderBottom:'1px solid var(--line-soft)'}}>
               <span style={{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{i+1}. {s}</span>
-              <span onClick={()=>removeListSong('/api/band/songs/repertoire', s)} title="Remove" style={{cursor:'pointer',color:'var(--ink-4)',padding:'0 3px',fontSize:12,lineHeight:1}}>×</span>
+              <button className="btn ghost" onClick={()=>removeListSong('/api/band/songs/repertoire', s)} title={`Remove "${s}"`} aria-label={`Remove ${s}`}
+                style={{minWidth:24,minHeight:24,padding:0,fontSize:12,lineHeight:1,color:'var(--ink-4)'}}>×</button>
             </div>
           ))}
         </div>
@@ -1165,7 +1254,8 @@ const BandCard = ({ cardProps = {} } = {}) => {
           {(songs.future_songs||[]).map((s,i) => (
             <div key={i} style={{display:'flex',alignItems:'center',gap:4,fontSize:11,padding:'2px 0',borderBottom:'1px solid var(--line-soft)',color:'var(--ink-3)'}}>
               <span style={{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{i+1}. {s}</span>
-              <span onClick={()=>removeListSong('/api/band/songs/future', s)} title="Remove" style={{cursor:'pointer',color:'var(--ink-4)',padding:'0 3px',fontSize:12,lineHeight:1}}>×</span>
+              <button className="btn ghost" onClick={()=>removeListSong('/api/band/songs/future', s)} title={`Remove "${s}"`} aria-label={`Remove ${s}`}
+                style={{minWidth:24,minHeight:24,padding:0,fontSize:12,lineHeight:1,color:'var(--ink-4)'}}>×</button>
             </div>
           ))}
         </div>
@@ -1179,7 +1269,7 @@ const BandCard = ({ cardProps = {} } = {}) => {
         <button className="btn ghost" style={{padding:'2px 6px',fontSize:10.5}} onClick={()=>setShowAddContact(s=>!s)}>+</button>
       </div>
       {showAddContact && (
-        <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:8,padding:'8px',background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid var(--line)'}}>
+        <div onKeyDown={submitOnEnter(addContact)} style={{display:'flex',flexDirection:'column',gap:6,marginBottom:8,padding:'8px',background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid var(--line)'}}>
           <div className="muted-2 mono" style={{fontSize:10,letterSpacing:'.06em'}}>ADD VENUE</div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
             <input className="input" placeholder="Venue name *" value={newContact.venue} onChange={e=>setNewContact(c=>({...c,venue:e.target.value}))} style={{fontSize:11}}/>
@@ -1202,7 +1292,7 @@ const BandCard = ({ cardProps = {} } = {}) => {
           <input className="input" placeholder="↳ Next step / action note" value={newContact.next_step} onChange={e=>setNewContact(c=>({...c,next_step:e.target.value}))} style={{fontSize:11}}/>
           <input className="input" placeholder="Notes" value={newContact.notes} onChange={e=>setNewContact(c=>({...c,notes:e.target.value}))} style={{fontSize:11}}/>
           <div style={{display:'flex',gap:6,justifyContent:'flex-end'}}>
-            <button className="btn primary" onClick={addContact} style={{fontSize:11}}>Add venue</button>
+            <button className="btn primary" onClick={addContact} disabled={!newContact.venue} style={{fontSize:11}}>Add venue</button>
             <button className="btn ghost" onClick={()=>setShowAddContact(false)} style={{fontSize:11}}>✕</button>
           </div>
         </div>
@@ -1235,7 +1325,7 @@ const BandCard = ({ cardProps = {} } = {}) => {
               <button className="btn ghost" style={{padding:'2px 4px',fontSize:12,color:'var(--ink-4)'}} onClick={()=>deleteContact(c.id)} title="Remove">×</button>
             </div>
             {isEditing && (
-              <div style={{display:'flex',flexDirection:'column',gap:5,padding:'8px',margin:'0 0 6px',background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid var(--line)'}}>
+              <div onKeyDown={submitOnEnter(saveContact)} style={{display:'flex',flexDirection:'column',gap:5,padding:'8px',margin:'0 0 6px',background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid var(--line)'}}>
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:5}}>
                   <input className="input" placeholder="Venue name" value={editContact.venue||''} onChange={e=>setEditContact(x=>({...x,venue:e.target.value}))} style={{fontSize:11}}/>
                   <input className="input" placeholder="Contact name" value={editContact.name||''} onChange={e=>setEditContact(x=>({...x,name:e.target.value}))} style={{fontSize:11}}/>
@@ -2259,14 +2349,22 @@ const PracticeCard = ({ cardProps = {} } = {}) => {
   const [sessionMin, setSessionMin] = useState("");
   const [sessionNote, setSessionNote] = useState("");
 
+  const [practiceError, setPracticeError] = useState(false);
   const load = () =>
-    fetch("/api/practice").then(r => r.json()).then(d => setData(d)).catch(() => {});
+    fetch("/api/practice").then(r => { if (!r.ok) throw 0; return r.json(); }).then(d => { setData(d); setPracticeError(false); }).catch(() => setPracticeError(true));
 
   useEffect(() => { load(); }, []);
   useRefreshListener(load);
 
   const cur = data[inst];
-  if (!cur) return null;
+  // While the first fetch is in flight (or failed) render the card shell with a status
+  // line instead of nothing — an absent card that pops in later reads as a glitch.
+  if (!cur) return (
+    <Card {...cardProps} id="practice" num="11" title="Piano Practice" span={cardProps.span || 6}
+      right={<span className="muted-2 mono" style={{ fontSize: 11 }}>🎹 Piano</span>}>
+      <LoadState loading={!practiceError} error={practiceError} onRetry={load} what="practice data"/>
+    </Card>
+  );
 
   const sessions  = cur.sessions  || [];
   const schedule  = (cur.schedule && cur.schedule.length ? cur.schedule : PRACTICE_ROTATION[inst]) || [];
@@ -2441,12 +2539,13 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
   const [manual, setManual] = useState([]);
   const [selectedDay, setSelectedDay] = useState(null);
 
+  const [calError, setCalError] = useState(false);
   const load = () => {
     setLoading(true);
-    fetch('/api/calendar/overview').then(r=>r.json()).then(d=>{
+    fetch('/api/calendar/overview').then(r=>{ if(!r.ok) throw 0; return r.json(); }).then(d=>{
       setEvents(d.events||[]);
-      setLoading(false);
-    }).catch(()=>setLoading(false));
+      setLoading(false); setCalError(false);
+    }).catch(()=>{ setLoading(false); setCalError(true); });
     fetch('/api/calendar/events/manual').then(r=>r.json()).then(d=>setManual(Array.isArray(d)?d:[])).catch(()=>{});
   };
   useEffect(load, []);
@@ -2577,7 +2676,7 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
       </>}
     >
       {form.open && (
-        <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:10,padding:'10px',background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid var(--line)'}}>
+        <div onKeyDown={submitOnEnter(submit)} style={{display:'flex',flexDirection:'column',gap:6,marginBottom:10,padding:'10px',background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid var(--line)'}}>
           <div className="muted-2 mono" style={{fontSize:10.5,letterSpacing:'.06em'}}>{form.id?'EDIT EVENT':'ADD EVENT'}</div>
           <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
             {[['band','Band'],['work','Work'],['piano','Piano'],['birthday','Birthday'],['anniversary','Anniversary'],['other','Other']].map(([id,lbl])=>(
@@ -2593,7 +2692,7 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
             <span className="muted-2" style={{fontSize:12}}>–</span>
             <input className="input" type="time" value={form.end_time} onChange={e=>setForm(f=>({...f,end_time:e.target.value}))} title="End time" style={{width:104,fontSize:12}}/>
           </div>
-          <input className="input" placeholder="Title" value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))} style={{fontSize:12}}/>
+          <input className="input" placeholder="Title *" value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))} style={{fontSize:12}}/>
           {!annual && (
             <div style={{display:'flex',gap:4,alignItems:'center',flexWrap:'wrap'}}>
               <span className="muted-2 mono" style={{fontSize:10,letterSpacing:'.06em',marginRight:2}}>REPEATS</span>
@@ -2621,7 +2720,7 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
           {annual && <div className="muted-2 mono" style={{fontSize:10}}>Saved to Google Calendar as a yearly event.</div>}
           {form.recurring==='weekly' && <div className="muted-2 mono" style={{fontSize:10}}>Repeats weekly on the selected days.</div>}
           <div style={{display:'flex',gap:6,justifyContent:'flex-end'}}>
-            <button className="btn primary" onClick={submit} disabled={saving} style={{fontSize:11}}>{saving?'Saving…':(form.id?'Save':'Add event')}</button>
+            <button className="btn primary" onClick={submit} disabled={saving || !form.title.trim() || !form.date} style={{fontSize:11}}>{saving?'Saving…':(form.id?'Save':'Add event')}</button>
             <button className="btn ghost" onClick={()=>setForm(blankForm)} style={{fontSize:11}}>✕</button>
           </div>
         </div>
@@ -2634,6 +2733,9 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
           <button className="btn ghost" style={{padding:'2px 8px',fontSize:12}} onClick={nextMonth}>›</button>
         </div>
       </div>
+      {(loading || calError) && !events.length && (
+        <LoadState loading={loading} error={calError} onRetry={load} what="events"/>
+      )}
 
       {(() => {
         const grid = (

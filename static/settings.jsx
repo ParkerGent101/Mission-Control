@@ -335,10 +335,10 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
                 const file = e.target.files[0];
                 if (!file) return;
                 const text = await file.text();
-                try { JSON.parse(text); } catch { alert('Invalid JSON file'); return; }
+                try { JSON.parse(text); } catch { window.__toast?.('Invalid JSON file', 'error'); return; }
                 const res = await fetch('/api/credentials/upload', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: text }) });
-                if (res.ok) { alert('Uploaded! Reloading…'); window.location.reload(); }
-                else { const d = await res.json(); alert('Upload failed: ' + (d.error || 'unknown error')); }
+                if (res.ok) { window.__toast?.('Uploaded — reloading…', 'success'); setTimeout(() => window.location.reload(), 700); }
+                else { const d = await res.json().catch(() => ({})); window.__toast?.('Upload failed: ' + (d.error || 'unknown error'), 'error'); }
               }} />
           </label>
         </div>
