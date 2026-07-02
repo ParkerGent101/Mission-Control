@@ -1726,9 +1726,14 @@ html.mc-bg,html.mc-bg body{background:#06120b}
    still crossfades into the app, instead of vanishing instantly. */
 #mcboot.mc-quiet pre,#mcboot.mc-quiet .scan,#mcboot.mc-quiet .topfade,#mcboot.mc-quiet .ignite{display:none}
 @media (prefers-reduced-motion:reduce){#root{transition:none}}
-#mcboot .mcwrap{position:absolute;inset:clamp(10px,2.2vw,26px);overflow:hidden}
-#mcboot pre{position:absolute;left:0;right:0;top:0;margin:0;white-space:pre-wrap;word-break:break-all;
-  font-size:clamp(10px,1.2vw,15px);line-height:1.4;will-change:transform}
+#mcboot .mcwrap{position:absolute;inset:clamp(10px,2.2vw,26px);overflow:hidden;animation:mcdg .7s ease-out .05s}
+/* Degauss wobble on power-on: only the "beam" (text) settles; the glass overlays
+   (.scan/.vig/.ignite) sit outside .mcwrap and stay still. */
+@keyframes mcdg{0%{transform:scale(1)}18%{transform:scale(1.014,.982) skewX(.5deg);filter:brightness(1.7) saturate(1.4)}38%{transform:scale(.995,1.008) skewX(-.25deg);filter:brightness(.85)}62%{transform:scale(1.004,.998);filter:brightness(1.12)}100%{transform:none;filter:none}}
+/* Bottom-anchored console: appending a line IS scrolling (old lines clip off the top). */
+#mcboot pre{position:absolute;left:0;right:0;bottom:0;margin:0;white-space:pre-wrap;word-break:break-all;
+  font-size:clamp(10px,1.2vw,15px);line-height:1.4}
+#mcboot pre>div{min-height:1.4em}
 #mcboot .t{color:#1f8f5e}#mcboot .s{color:#5effa8}#mcboot .ok{color:#f2cb63}
 #mcboot .dim{color:#178050}#mcboot .warn{color:#e8b53a}#mcboot .bad{color:#ff5a4d}
 #mcboot .cur{display:inline-block;width:.6em;height:1.05em;background:#5effa8;vertical-align:-2px;animation:mccur 1s steps(1) infinite}
@@ -1744,7 +1749,7 @@ html.mc-bg,html.mc-bg body{background:#06120b}
   box-shadow:0 0 20px 7px rgba(223,255,233,.9);transform:translateY(-50%) scaleX(0);animation:mcigl .5s cubic-bezier(.7,0,.3,1) forwards}
 @keyframes mcig{0%,55%{background:#000}100%{background:transparent}}
 @keyframes mcigl{0%{transform:translateY(-50%) scaleX(0);height:2px}34%{transform:translateY(-50%) scaleX(1);height:2px;opacity:1}68%{transform:translateY(-50%) scaleX(1);height:100vh;opacity:.4}100%{height:100vh;opacity:0}}
-@media (prefers-reduced-motion:reduce){#mcboot .ignite,#mcboot .ignite i{animation:none}}
+@media (prefers-reduced-motion:reduce){#mcboot .ignite,#mcboot .ignite i,#mcboot .mcwrap{animation:none}}
 </style>
 <div id="mcboot" aria-hidden="true">
   <div class="mcwrap"><pre id="mcpre"></pre><div class="topfade"></div></div>
@@ -1757,9 +1762,9 @@ html.mc-bg,html.mc-bg body{background:#06120b}
   var BK='mc_booted_v1', boot=document.getElementById('mcboot');
   if(!boot){ doc.classList.add('mc-ready'); return; }
   var reduce = matchMedia('(prefers-reduced-motion:reduce)').matches;
-  var iv=null, hidden=false;
+  var iv=null, raf=null, hidden=false;
   function reveal(){ doc.classList.remove('mc-loading'); doc.classList.add('mc-ready'); }
-  function remove(){ if(iv){ clearInterval(iv); iv=null; } reveal(); doc.classList.remove('mc-bg'); if(boot && boot.parentNode) boot.parentNode.removeChild(boot); boot=null; }
+  function remove(){ if(iv){ clearInterval(iv); iv=null; } if(raf){ cancelAnimationFrame(raf); raf=null; } reveal(); doc.classList.remove('mc-bg'); if(boot && boot.parentNode) boot.parentNode.removeChild(boot); boot=null; }
   function done(){ if(hidden || !boot) return; hidden=true; reveal(); boot.classList.add('mcgone'); setTimeout(remove,560); }
 
   // Arm the absolute failsafe FIRST, then hide the app — guarantees #root is
@@ -1767,37 +1772,17 @@ html.mc-bg,html.mc-bg body{background:#06120b}
   setTimeout(done, 9000);
   doc.classList.add('mc-loading','mc-bg');
 
-  // Reveal the moment React mounts (after a short minimum hold so it isn't a flash).
-  var seen = !!sessionStorage.getItem(BK);
-  try{ sessionStorage.setItem(BK,'1'); }catch(e){}
-  var t0=Date.now(), MIN = seen ? 250 : 800, mounted=false, animDone=true;
-  // animDone defaults true (repeat/reduced-motion loads have no scroll); first load sets it
-  // false until the terminal finishes scrolling, so the crossfade waits for the cmd run to end.
-  function maybe(){ if(mounted && animDone && Date.now()-t0>=MIN) done(); }
-  var root=document.getElementById('root');
-  if(root){
-    var mo=new MutationObserver(function(){
-      if(root.childElementCount>0){
-        mounted=true;
-        mo.disconnect();
-        // Append "initialized" message to terminal when React mounts
-        var pre=document.getElementById('mcpre');
-        if(pre) pre.innerHTML += '\n' + ts() + ' <span class="ok">[initialized]</span>';
-        // Give user a moment to see "initialized", then crossfade
-        setTimeout(maybe, 300);
-      }
-    });
-    mo.observe(root,{childList:true});
-    if(root.childElementCount>0){ mounted=true; }
+  // Console emit: the pre is bottom-anchored, so appending a line IS scrolling.
+  // Returns the line element so timeline events can update it in place.
+  var pre=document.getElementById('mcpre');
+  function add(html){
+    if(!pre) return null;
+    var d=document.createElement('div');
+    d.innerHTML=(html && html.length)?html:' ';
+    pre.appendChild(d);
+    while(pre.childElementCount>120) pre.removeChild(pre.firstChild);
+    return d;
   }
-  iv=setInterval(maybe,150);
-  boot.addEventListener('click', done);
-  window.addEventListener('keydown', done, {once:true});
-
-  if(reduce){ remove(); return; }                       // honour reduced-motion: instant, no fade
-  if(seen){ boot.classList.add('mc-quiet'); return; }   // repeat load: calm cover crossfades into app
-
-  // ---- First load this session: full cogitator terminal ----
   var NAMES=['machine-spirit','augur-array','vox-caster','lumen-servitor','noosphere','gellar-field','data-vault','binaric-xcode','scrapcode-scrub','hexgramma-ward','servo-skull','logis-core','manifold-reg','plasma-conduit','void-shield','astropath','rite-actv','purity-seal','cogitator','thermals','reliquary','litany-buf','omnissiah','enginseer','auspex','dataphage','rune-cache','mind-impulse','sacristy','vox-array','pict-decode','warp-watch','temple-bus','servitor-pool'];
   var PATHS=['/sanctum/vault0','/dev/augur0','/dev/vox','/etc/litany.cf','/sys/manifold','/var/reliquary','/dev/cogitator','/sanctum/oils','/proc/spirit','/dev/auspex','/sys/wards','/mnt/datavault'];
   var OK=['[  ok  ]','[ ok ]','[ done ]','[mounted]','[ active ]','[ sync ]','[sealed]'];
@@ -1806,6 +1791,7 @@ html.mc-bg,html.mc-bg body{background:#06120b}
   function hex(n){ return Math.floor(Math.random()*Math.pow(16,n)).toString(16).padStart(n,'0'); }
   function ts(){ clk+=Math.random()*0.04+0.001; return '<span class="t">['+clk.toFixed(6).padStart(11)+']</span>'; }
   function dots(n){ return Array(Math.max(2,20-n)).join('.'); }
+  function pad(name,w){ return name+' '+Array(Math.max(2,(w||26)-name.length)).join('.'); }
   function line(){
     var r=Math.random(), s;
     if(r<0.42){ s=pick(NAMES); return ts()+' init <span class="s">'+s+'</span> '+dots(s.length)+' <span class="ok">'+pick(OK)+'</span>'; }
@@ -1816,17 +1802,120 @@ html.mc-bg,html.mc-bg body{background:#06120b}
     if(r<0.985){ return ts()+' load '+pick(NAMES)+'.so cant '+hex(4)+':'+hex(4); }
     return ts()+' <span class="warn">! sig 0x'+hex(6)+' contained</span> <span class="bad">[purged]</span>';
   }
-  var rows=[], i; for(i=0;i<200;i++) rows.push(line());
-  rows.push('<span class="s">_</span> <span class="cur"></span>');
-  var pre=document.getElementById('mcpre'); pre.innerHTML=rows.join('\n');
 
-  // compositor-driven scroll: keeps moving even while Babel blocks the main thread
-  var H=window.innerHeight, P=pre.scrollHeight, dist=Math.max(0,P-H+60), dur=Math.max(2200,dist*0.9);
-  animDone=false;                                                       // first-load only (runs after the seen/reduced early-returns)
-  if(pre.animate){
-    var _anim=pre.animate([{transform:'translateY(0)'},{transform:'translateY(-'+dist+'px)'}],{duration:dur,easing:'linear',fill:'forwards'});
-    _anim.onfinish=function(){ animDone=true; maybe(); };               // scroll finished → allow the crossfade
-  } else { animDone=true; }
+  // Reveal when React mounts — but on first load never before the POST timeline
+  // has played out (mount fast-forwards it 4x rather than truncating mid-phase).
+  var seen = !!sessionStorage.getItem(BK);
+  try{ sessionStorage.setItem(BK,'1'); }catch(e){}
+  var t0=Date.now(), MIN = seen ? 250 : 2600, mounted=false;
+  var initShown=true, timelineDone=true, promptLine=null, scale=1;
+  // initShown/timelineDone default true (repeat/reduced-motion loads run no timeline);
+  // the first-load path below flips them false until the sequence finishes.
+  function maybe(){ if(mounted && initShown && Date.now()-t0>=MIN) done(); }
+  function showInit(){
+    if(initShown) return; initShown=true;
+    var d=document.createElement('div');
+    d.innerHTML=ts()+' <span class="ok">[initialized]</span>';
+    if(pre){ if(promptLine && promptLine.parentNode===pre) pre.insertBefore(d,promptLine); else pre.appendChild(d); }
+    // Give user a moment to see "initialized", then crossfade
+    setTimeout(maybe,300);
+  }
+  function onMount(){
+    if(mounted) return; mounted=true;
+    scale=4;
+    if(timelineDone) showInit();
+  }
+  var root=document.getElementById('root');
+  if(root){
+    var mo=new MutationObserver(function(){ if(root.childElementCount>0){ mo.disconnect(); onMount(); } });
+    mo.observe(root,{childList:true});
+    if(root.childElementCount>0){ onMount(); }
+  }
+  iv=setInterval(maybe,150);
+  boot.addEventListener('click', done);
+  window.addEventListener('keydown', done, {once:true});
+
+  if(reduce){ remove(); return; }                       // honour reduced-motion: instant, no fade
+  if(seen){ boot.classList.add('mc-quiet'); return; }   // repeat load: calm cover crossfades into app
+
+  // ---- First load this session: BIOS/POST rite ----
+  // The whole timeline is pre-generated as [t, fn] events (all randomness and
+  // string-building happens here, upfront) so event callbacks only touch the DOM.
+  initShown=false; timelineDone=false;
+  var EV=[];
+  function at(t,fn){ EV.push({t:t,fn:fn}); }
+
+  // Phase 0 — power-on banner (appears whole under the ignite flash, like a CRT
+  // warming up onto an in-progress POST)
+  at(60,function(){
+    add('<span class="s">NOOSPHERIC BIOS v2.17</span>  <span class="dim">OMNISSIAH SYSTEMS LTD.</span>');
+    add('<span class="dim">(C) M41 ADEPTUS MECHANICUS, MARS. ALL RITES RESERVED.</span>');
+    add('<span class="dim">'+Array(60).join('=')+'</span>');
+    add('MACHINE-SPIRIT : <span class="s">COGITATOR-CLASS MK.VII</span> / 2 CORES <span class="ok">SANCTIFIED</span>');
+    add('');
+  });
+
+  // Phase 1 — memory test, counting up in place in chunky steps
+  var memRef={}, TOT=131072, STEPS=16, k;
+  at(500,function(){
+    memRef.el=add('COGITATION CELLS : <span class="s">0 KB</span>');
+    memRef.sp=memRef.el?memRef.el.querySelector('.s'):null;
+  });
+  for(k=1;k<STEPS;k++)(function(v,t){
+    at(t,function(){ if(memRef.sp && memRef.sp.parentNode) memRef.sp.textContent=v+' KB'; });
+  })(Math.round(TOT*k/STEPS/1024)*1024, 500+Math.round(750*k/STEPS));
+  at(1280,function(){
+    if(memRef.el && memRef.el.parentNode)
+      memRef.el.innerHTML='COGITATION CELLS : <span class="s">'+TOT+' KB</span> <span class="ok">OK</span>';
+  });
+
+  // Phase 2 — device probes: the dots hang, then the status lands in place
+  function probe(t,name,status,cls,hang){
+    var r={};
+    at(t,function(){ r.el=add(pad(name,26)); });
+    at(t+hang,function(){ if(r.el && r.el.parentNode) r.el.innerHTML+=' <span class="'+cls+'">'+status+'</span>'; });
+  }
+  probe(1350,'AUSPEX ARRAY','[detected]','s',240);
+  probe(1500,'VOX-CASTER MK.IV','[  ok  ]','ok',160);
+  probe(1660,'GELLAR FIELD','[warded]','warn',340);
+  probe(1740,'SERVO-SKULL UPLINK','[detected]','s',120);
+  at(2000,function(){
+    add('');
+    add('<span class="dim">RELIQUARY PRI MASTER : DATAVAULT-88 .... 131072 MB SANCTIFIED</span>');
+    add('<span class="dim">RELIQUARY PRI SLAVE  : NONE</span>');
+    add('<span class="dim">RELIQUARY SEC MASTER : PICT-ENGRAVER RC-7</span>');
+    add('');
+  });
+
+  // Phase 3 — init burst: bursts of 5-12 lines with 80-240ms stalls between them
+  var bt=2100;
+  while(bt<2860){
+    var n=5+Math.floor(Math.random()*8), j;
+    for(j=0;j<n;j++)(function(h,t){ at(t,function(){ add(h); }); })(line(), bt+j*7);
+    bt+=80+Math.random()*160;
+  }
+
+  // Phase 4 — handoff: skip hint + blinking prompt; holds until React mounts
+  at(2900,function(){
+    add('');
+    add('<span class="dim">PRESS ANY KEY TO INTERRUPT RITE</span>');
+    promptLine=add('<span class="s">&gt;</span> <span class="cur"></span>');
+  });
+  EV.sort(function(a,b){ return a.t-b.t; });
+
+  // Time-anchored scheduler: virtual time advances by wall-clock delta x scale,
+  // and every overdue event flushes on the next frame. If Babel blocks the main
+  // thread, output arrives in a console-like burst instead of a frozen glide;
+  // flipping scale on mount never jumps vt (incremental accumulation).
+  var vt=0, lastF=0, ei=0;
+  function tick(now){
+    if(hidden || !boot){ raf=null; return; }
+    vt+=(now-lastF)*scale; lastF=now;
+    while(ei<EV.length && EV[ei].t<=vt) EV[ei++].fn();
+    if(ei<EV.length){ raf=requestAnimationFrame(tick); }
+    else { raf=null; timelineDone=true; if(mounted) showInit(); }
+  }
+  raf=requestAnimationFrame(function(now){ lastF=now; tick(now); });
 })();
 </script>
 {% endraw %}
