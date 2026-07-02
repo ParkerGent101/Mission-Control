@@ -394,6 +394,9 @@ const App = () => {
               <button className="btn" style={{flex:1}} onClick={() => { setShowSettings(true); setShowSheet(false); }}>
                 <Icon name="settings" size={13}/>Settings
               </button>
+              <button className="btn" style={{flex:1}} onClick={logout}>
+                <Icon name="logout" size={13}/>Sign out
+              </button>
             </div>
           </div>
         </div>

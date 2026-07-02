@@ -622,6 +622,9 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
                   <span className="muted mono" style={{fontSize:10}}>{d.label}</span>
                 </div>
               ))}
+              {donutData.length>4 && (
+                <span className="muted-2 mono" style={{fontSize:9.5,paddingLeft:13}}>+{donutData.length-4} more</span>
+              )}
             </div>
           )}
         </div>
@@ -1160,10 +1163,8 @@ const BandCard = ({ cardProps = {} } = {}) => {
           </div>
           <button onClick={()=>startEditShow(nextGig)} title="Edit show" className="btn ghost"
             style={{fontSize:10.5,padding:'3px 8px'}}>edit</button>
-          <button onClick={()=>removeShow(nextGig)} title="Remove show"
-            style={{background:'transparent',border:'none',cursor:'pointer',color:'var(--ink-4)',padding:'4px',display:'flex',alignItems:'center',borderRadius:'var(--r-sm)'}}>
-            <Icon name="x" size={14}/>
-          </button>
+          <button className="btn ghost" onClick={()=>removeShow(nextGig)} title="Remove show" aria-label="Remove show"
+            style={{minWidth:28,minHeight:28,padding:0,fontSize:15,lineHeight:1,color:'var(--ink-4)'}}>×</button>
         </div>
       ) : (
         <div className="muted mono" style={{fontSize:11,padding:'8px 0'}}>No upcoming shows.</div>
@@ -1174,10 +1175,8 @@ const BandCard = ({ cardProps = {} } = {}) => {
           <div><div style={{fontSize:12.5}}>{g.venue}</div><div className="muted mono" style={{fontSize:10.5}}>{g.city} · {g.date}{showTimes(g) && <> · {showTimes(g)}</>}{g.tickets && <> · <a href={g.tickets} target="_blank" rel="noopener noreferrer" style={{color:'var(--violet)',textDecoration:'none'}}>tickets</a></>}</div></div>
           <span className="tag mint">{g.status}</span>
           <button onClick={()=>startEditShow(g)} title="Edit show" className="btn ghost" style={{fontSize:10,padding:'2px 6px'}}>edit</button>
-          <button onClick={()=>removeShow(g)} title="Remove show"
-            style={{background:'transparent',border:'none',cursor:'pointer',color:'var(--ink-4)',padding:'2px',display:'flex',alignItems:'center',borderRadius:'var(--r-sm)'}}>
-            <Icon name="x" size={12}/>
-          </button>
+          <button className="btn ghost" onClick={()=>removeShow(g)} title="Remove show" aria-label="Remove show"
+            style={{minWidth:24,minHeight:24,padding:0,fontSize:14,lineHeight:1,color:'var(--ink-4)'}}>×</button>
         </div>
       ))}
 
@@ -1232,7 +1231,7 @@ const BandCard = ({ cardProps = {} } = {}) => {
             style={{flex:1,fontSize:11}}/>
           <button className="btn ghost" onClick={()=>addListSong('repertoire','/api/band/songs/repertoire')} style={{fontSize:11}}>+</button>
         </div>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'2px 12px',marginBottom:14}}>
+        <div className="scroll-pane" style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'2px 12px',marginBottom:14,maxHeight:300,marginRight:-4,paddingRight:4}}>
           {(songs.repertoire||[]).map((s,i) => (
             <div key={i} style={{display:'flex',alignItems:'center',gap:4,fontSize:11,padding:'2px 0',borderBottom:'1px solid var(--line-soft)'}}>
               <span style={{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{i+1}. {s}</span>
@@ -1297,6 +1296,7 @@ const BandCard = ({ cardProps = {} } = {}) => {
           </div>
         </div>
       )}
+      <div className="scroll-pane" style={{maxHeight:440,marginRight:-4,paddingRight:4}}>
       {contacts.map((c,i) => {
         const statusColor = c.status==='confirmed'||c.status==='responded' ? 'mint'
           : c.status==='follow up' ? 'amber'
@@ -1355,6 +1355,7 @@ const BandCard = ({ cardProps = {} } = {}) => {
           </div>
         );
       })}
+      </div>
       </>}
       </div>
     </Card>
@@ -1964,7 +1965,7 @@ const HealthCard = ({ cardProps = {} } = {}) => {
                     <span className="mono" style={{ fontSize: 10, color: 'var(--accent)' }}>P{g.protein}g</span>
                     <span className="mono" style={{ fontSize: 10, color: 'var(--warn)' }}>C{g.carbs}g</span>
                     <span className="mono" style={{ fontSize: 10, color: 'var(--info)' }}>F{g.fat}g</span>
-                    <button className="btn ghost" title={g.count > 1 ? 'Remove one' : 'Remove'} style={{ padding: '1px 5px', fontSize: 10, lineHeight: 1 }} onClick={() => decrementFood(g.name)}>×</button>
+                    <button className="btn ghost" title={g.count > 1 ? 'Remove one' : 'Remove'} aria-label={`Remove one ${g.name}`} style={{ minWidth: 24, minHeight: 24, padding: 0, fontSize: 13, lineHeight: 1, color: 'var(--ink-4)' }} onClick={() => decrementFood(g.name)}>×</button>
                   </div>
                 ))}
               </div>
@@ -2702,19 +2703,20 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
                   background: form.recurring===id?'var(--surface-3)':'transparent',
                   borderColor: form.recurring===id?'var(--line)':'transparent'}}>{lbl}</button>
               ))}
-              {form.recurring==='weekly' && ['S','M','T','W','T','F','S'].map((lbl,idx)=>{
+              {form.recurring==='weekly' && ['Su','Mo','Tu','We','Th','Fr','Sa'].map((lbl,idx)=>{
                 const on = (form.weekdays||[]).includes(idx);
                 return <button key={idx} className="btn ghost" title={['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][idx]}
                   onClick={()=>setForm(f=>({...f,weekdays: on ? f.weekdays.filter(w=>w!==idx) : [...(f.weekdays||[]), idx]}))}
-                  style={{padding:'2px 0',width:22,fontSize:10.5,fontFamily:'var(--font-mono)',
+                  style={{padding:'2px 0',width:26,fontSize:10.5,fontFamily:'var(--font-mono)',
                     color:on?'var(--ink)':'var(--ink-4)', background:on?cv(form.category):'transparent',
                     borderColor:on?cv(form.category):'var(--line-soft)'}}>{lbl}</button>;
               })}
             </div>
           )}
           <input className="input" placeholder="Note (optional)" value={form.meta} onChange={e=>setForm(f=>({...f,meta:e.target.value}))} style={{fontSize:12}}/>
-          <label style={{display:'flex',alignItems:'center',gap:6,fontSize:11,color:'var(--ink-3)',cursor: annual?'default':'pointer'}}>
-            <input type="checkbox" checked={form.highlight||annual} disabled={annual} onChange={e=>setForm(f=>({...f,highlight:e.target.checked}))}/>
+          <label onClick={()=>{ if(!annual) setForm(f=>({...f,highlight:!f.highlight})); }}
+            style={{display:'flex',alignItems:'center',gap:6,fontSize:11,color:'var(--ink-3)',cursor: annual?'default':'pointer',opacity: annual?0.65:1}}>
+            <Checkbox checked={form.highlight||annual}/>
             Highlight on month agenda (countdown)
           </label>
           {annual && <div className="muted-2 mono" style={{fontSize:10}}>Saved to Google Calendar as a yearly event.</div>}
