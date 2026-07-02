@@ -1307,8 +1307,8 @@
     --font-sans: 'Share Tech Mono', 'IBM Plex Mono', ui-monospace, monospace;
     --font-mono: 'Share Tech Mono', 'IBM Plex Mono', ui-monospace, monospace;
     --font-serif:'Share Tech Mono', 'IBM Plex Mono', ui-monospace, monospace;
-    --font-display:'Share Tech Mono', 'IBM Plex Mono', ui-monospace, monospace;
-    --font-black:'Share Tech Mono', 'IBM Plex Mono', ui-monospace, monospace;
+    --font-display:'Cinzel Decorative', 'Cinzel', serif;
+    --font-black:'Cinzel Decorative', 'Cinzel', serif;
     /* Angular, mechanical corners */
     --r-sm: 2px;
     --r:    3px;
@@ -1420,7 +1420,7 @@
   .brand { letter-spacing: 0.12em; text-transform: uppercase; font-size: 13px; }
   .brand-name {
     font-family: var(--font-black);
-    font-weight: 700; font-size: 16px; letter-spacing: 0.01em;
+    font-weight: 700; font-size: 16px; letter-spacing: 0.03em;
     color: var(--accent);
     text-shadow: 0 0 13px color-mix(in oklch, var(--accent) 45%, transparent);
   }
@@ -1442,7 +1442,7 @@
   .page-head h1 {
     font-family: var(--font-display);
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.04em;
     font-weight: 900;
     color: var(--bone);
     text-shadow: 0 0 26px color-mix(in oklch, var(--accent) 34%, transparent), 0 2px 0 #000;
@@ -1461,6 +1461,8 @@
     font-family: var(--font-serif); font-size: 12px; line-height: 1;
   }
   .ob-title, .st-head-title { font-family: var(--font-display); }
+  .ob-title { font-weight: 700; letter-spacing: 0.02em; }
+  .st-head-title { font-family: 'Cinzel', serif; font-weight: 600; font-size: 12.5px; letter-spacing: 0.05em; }
 
   /* ── Cards: bolted, gilded armour plating ── */
   .card {
@@ -1563,8 +1565,19 @@
               inset 0 1px 0 color-mix(in oklch, var(--accent) 12%, transparent); }
 
   /* ── Scrollbar: machined rail ── */
-  *::-webkit-scrollbar-thumb { background: var(--line); border: 2px solid var(--bg); border-radius: 2px; }
-  *::-webkit-scrollbar-thumb:hover { background: var(--gold-soft); }
+  *::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg,
+      color-mix(in oklch, var(--gold-soft) 70%, var(--surface-2)),
+      color-mix(in oklch, var(--accent) 38%, var(--surface)));
+    border: 1px solid var(--gold-soft);
+    border-radius: 2px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, var(--gold-soft),
+      color-mix(in oklch, var(--accent) 65%, var(--surface)));
+    border-color: var(--accent);
+    box-shadow: inset 0 0 6px color-mix(in oklch, var(--accent-2) 45%, transparent);
+  }
 
   /* Keep the scanline/vignette overlays out of the mobile flow too */
   @media (max-width: 768px) {
@@ -1706,6 +1719,46 @@
   }
   @keyframes scopeBlink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
   @media (prefers-reduced-motion: reduce) { .scope-caret { animation: none; } }
+
+  /* ── Hover targeting reticle: amber corner brackets snap in around a card.
+     Sits INSIDE the frame (inset 2px) because .card clips overflow. ── */
+  .card-reticle {
+    position: absolute; inset: 2px; z-index: 3;
+    pointer-events: none; opacity: 0; transform: scale(1.02);
+    background:
+      linear-gradient(var(--accent), var(--accent)) left top    / 14px 1.5px,
+      linear-gradient(var(--accent), var(--accent)) left top    / 1.5px 14px,
+      linear-gradient(var(--accent), var(--accent)) right top   / 14px 1.5px,
+      linear-gradient(var(--accent), var(--accent)) right top   / 1.5px 14px,
+      linear-gradient(var(--accent), var(--accent)) left bottom / 14px 1.5px,
+      linear-gradient(var(--accent), var(--accent)) left bottom / 1.5px 14px,
+      linear-gradient(var(--accent), var(--accent)) right bottom/ 14px 1.5px,
+      linear-gradient(var(--accent), var(--accent)) right bottom/ 1.5px 14px;
+    background-repeat: no-repeat;
+    filter: drop-shadow(0 0 4px color-mix(in oklch, var(--accent) 55%, transparent));
+    transition: opacity .15s steps(2, jump-start), transform .15s ease-out;
+  }
+  .card:hover .card-reticle { opacity: 1; transform: scale(1); }
+  @media (prefers-reduced-motion: reduce) { .card-reticle { transition: none; transform: none; } }
+
+  /* ── Statusbar litany + Imperial date ── */
+  .statusbar .litany {
+    color: var(--ink-4); letter-spacing: 0.12em; font-size: 10px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+  }
+  .statusbar .litany-date { color: var(--ink-4); letter-spacing: 0.06em; }
+
+  /* ── Vox-caster toasts: ++ transmission ++ framing + phosphor bloom ── */
+  .toast {
+    letter-spacing: 0.08em;
+    border-color: var(--gold-soft);
+    background: linear-gradient(0deg, rgba(0,0,0,0.35), rgba(0,0,0,0.35)), var(--surface-3);
+    text-shadow: 0 0 6px color-mix(in oklch, var(--accent-2) 40%, transparent);
+    box-shadow: 0 0 16px color-mix(in oklch, var(--accent-2) 18%, transparent),
+                0 4px 20px rgba(0,0,0,0.5);
+  }
+  .toast::before { content: "++\00a0"; opacity: 0.9; }
+  .toast::after  { content: "\00a0++"; opacity: 0.9; }
 </style>
 </head>
 <body>

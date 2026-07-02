@@ -38,6 +38,26 @@ const MODULE_LABELS = [
   ["recurring","Routines","clock"],
 ];
 
+// Statusbar flavor: rotating machine-cult litanies + the date in Imperial dating format.
+const LITANIES = [
+  "THE OMNISSIAH WATCHES",
+  "PRAISE THE MACHINE-SPIRIT",
+  "ALL SYSTEMS SANCTIFIED",
+  "RITES OF MAINTENANCE OBSERVED",
+  "01001111 01001011",
+  "AUSPEX SWEEP NOMINAL",
+  "GELLER FIELD HOLDING",
+  "COGITATION WITHIN TOLERANCES",
+];
+// Imperial dating: check digit 0 + year-fraction (3 digits) + last 3 digits of year + .M3
+const imperialDate = (d) => {
+  const start = new Date(d.getFullYear(), 0, 1);
+  const end = new Date(d.getFullYear() + 1, 0, 1);
+  const frac = String(Math.floor(((d - start) / (end - start)) * 1000)).padStart(3, "0");
+  const yy = String(d.getFullYear() % 1000).padStart(3, "0");
+  return "0 " + frac + " " + yy + ".M3";
+};
+
 const DASHBOARD_MINIMIZED_KEY = "mc_dashboard_minimized";
 
 const readDashboardMinimized = () => {
@@ -329,7 +349,11 @@ const App = () => {
         <span>mission control</span>
         <span className="sep"/>
         <span>claude · connected</span>
+        <span className="sep"/>
+        <span className="litany">{LITANIES[Math.floor(now.getTime() / 45000) % LITANIES.length]}</span>
         <span className="spacer"/>
+        <span className="mono litany-date">{imperialDate(now)}</span>
+        <span className="sep"/>
         <span className="mono">{date} · {time}</span>
       </div>
 

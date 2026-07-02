@@ -24,7 +24,7 @@ const LoadState = ({ loading, error, onRetry, what = "data" }) => {
   if (loading) return <div className="muted-2 mono" style={{fontSize:11,padding:'8px 0',letterSpacing:'.05em'}}>AWAITING {String(what).toUpperCase()} …</div>;
   if (error) return (
     <div className="mono" style={{fontSize:11,padding:'8px 0',color:'var(--danger)',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-      <span>Couldn’t load {what}.</span>
+      <span>MACHINE-SPIRIT UNRESPONSIVE — couldn’t load {what}.</span>
       {onRetry && <button className="btn ghost" style={{fontSize:10.5,padding:'2px 8px'}} onClick={onRetry}>Retry</button>}
     </div>
   );
@@ -152,6 +152,7 @@ const Card = ({ id, num, title, right, children, span = 6, hidden, bodyClass = "
     <div className={`span-${span}`} style={{ display: "flex" }}>
       <div className="card" data-hidden={hidden ? "true" : undefined}
         data-collapsed={!dashboardMinimize && collapsed ? "true" : undefined} style={{ flex: 1 }}>
+        <span className="card-reticle" aria-hidden="true"/>
         <div className="card-head">
           <div className="title">{title}</div>
           <div className="right">
@@ -635,7 +636,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
           <div className="section-h"><span>Transactions</span><span className="line"/><span className="muted-2" style={{fontSize:10.5}}>{txns.filter(t=>t.amount<0).length} expenses</span></div>
           {(finLoading || finError)
             ? <LoadState loading={finLoading} error={finError} onRetry={()=>{ setFinLoading(true); loadFinances(month); }} what="transactions"/>
-            : txns.length === 0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 0'}}>No transactions this month.</div>}
+            : txns.length === 0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 0'}}>AUSPEX CLEAR — no transactions this month.</div>}
           <div className="scroll-pane" style={{maxHeight:480,marginRight:-4,paddingRight:4}}>
           {(() => {
             const groups = {};
@@ -775,7 +776,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
               </div>
             </div>
           )}
-          {subs.length === 0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 4px'}}>No subscriptions yet — tap “Add”.</div>}
+          {subs.length === 0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 4px'}}>NO TITHES REGISTERED — tap “Add”.</div>}
           {subs.map((s,i) => (
             <div key={s.id||i} className="txn" style={{gridTemplateColumns:"1fr auto auto auto",alignItems:"center",padding:"5px 4px"}}>
               <div><div className="merchant">{s.name}</div><div className="meta">{s.acct} · due {s.due}</div></div>
@@ -1167,7 +1168,7 @@ const BandCard = ({ cardProps = {} } = {}) => {
             style={{minWidth:28,minHeight:28,padding:0,fontSize:15,lineHeight:1,color:'var(--ink-4)'}}>×</button>
         </div>
       ) : (
-        <div className="muted mono" style={{fontSize:11,padding:'8px 0'}}>No upcoming shows.</div>
+        <div className="muted mono" style={{fontSize:11,padding:'8px 0'}}>VOX SILENCE — no upcoming shows.</div>
       ))}
 
       {gigs.slice(1,4).map((g,i) => (
@@ -2804,7 +2805,7 @@ const CalendarCard = ({ cardProps = {} } = {}) => {
               <span>{label}</span><span className="line"/>
               <button className="btn ghost" onClick={()=>openAdd(selectedDay)} title="Add event on this day" style={{padding:'2px 7px',fontSize:10.5,fontFamily:'var(--font-mono)',display:'flex',alignItems:'center',gap:3}}><Icon name="plus" size={11}/>Add</button>
             </div>
-            {dayEvents.length===0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 0',textAlign:'center'}}>No events — tap Add to create one.</div>}
+            {dayEvents.length===0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 0',textAlign:'center'}}>NO RITES SCHEDULED — tap Add to create one.</div>}
             {dayEvents.map((e,i)=>(
               <div key={i} style={{display:'grid',gridTemplateColumns:'15px 1fr auto',gap:8,alignItems:'center',padding:'5px 0',borderBottom:'1px solid var(--line-soft)'}}>
                 <Icon name={ICON[e.type]||'calendar'} size={12} style={{color:cv(e.type)}}/>
