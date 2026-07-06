@@ -781,30 +781,45 @@ def done_task(task_id):
 
 RECURRING_FREQS = ("daily", "weekly", "monthly")
 
-def _recurring_is_due(item, today=None):
+def _recurring_due_date(item, today=None):
+    """The date this routine (re)became due. Daily = the day after completion,
+    weekly = 7 days after completion, monthly = the 1st of the month after
+    completion (so every monthly routine resets on the 1st automatically).
+    Never-completed monthlies count from the 1st of the current month (or
+    creation, if later); never-completed dailies/weeklies count from today."""
     today = today or date.today()
     last = item.get("last_completed")
-    if not last:
-        return True
     try:
-        last_d = date.fromisoformat(last)
+        last_d = date.fromisoformat(last) if last else None
     except ValueError:
-        return True
+        last_d = None
+    if not last_d:
+        if item.get("frequency") == "monthly":
+            first = today.replace(day=1)
+            try:
+                created = date.fromisoformat(item.get("created") or "")
+            except ValueError:
+                return first
+            return max(first, min(created, today))
+        return today
     freq = item.get("frequency", "weekly")
     if freq == "daily":
-        return last_d < today
+        return last_d + timedelta(days=1)
     if freq == "weekly":
-        return (today - last_d).days >= 7
+        return last_d + timedelta(days=7)
     if freq == "monthly":
-        return (last_d.year, last_d.month) != (today.year, today.month)
-    return True
+        y, m = (last_d.year + 1, 1) if last_d.month == 12 else (last_d.year, last_d.month + 1)
+        return date(y, m, 1)
+    return today
 
 @app.route("/api/recurring", methods=["GET"])
 def get_recurring():
     items = _load(RECURRING_FILE, [])
     today = date.today()
     for it in items:
-        it["due"] = _recurring_is_due(it, today)
+        due_d = _recurring_due_date(it, today)
+        it["due"] = due_d <= today
+        it["overdue_days"] = max(0, (today - due_d).days) if it["due"] else 0
     return jsonify(items)
 
 @app.route("/api/recurring", methods=["POST"])
@@ -847,29 +862,6 @@ def undo_recurring(rid):
             _save(RECURRING_FILE, items)
             return jsonify({"ok": True})
     return jsonify({"error": "not found"}), 404
-
-@app.route("/api/recurring/reset", methods=["POST"])
-def reset_recurring():
-    """Start a new week or month: clear the completed routines in scope so they
-    become due again. Daily routines already reset on their own each day (same as
-    the health habits), so 'week' covers daily+weekly and 'month' covers all three.
-    Body: {"scope": "week"|"month"}."""
-    scope = (request.json or {}).get("scope", "")
-    freqs = {
-        "week":  {"daily", "weekly"},
-        "month": {"daily", "weekly", "monthly"},
-    }.get(scope)
-    if not freqs:
-        return jsonify({"error": "scope must be 'week' or 'month'"}), 400
-    items = _load(RECURRING_FILE, [])
-    cleared = 0
-    for it in items:
-        if it.get("frequency") in freqs and it.get("last_completed"):
-            it["last_completed"] = None
-            cleared += 1
-    _save(RECURRING_FILE, items)
-    _log("recurring", "reset", scope, str(cleared))
-    return jsonify({"ok": True, "cleared": cleared})
 
 @app.route("/api/recurring/<int:rid>", methods=["DELETE"])
 def delete_recurring(rid):

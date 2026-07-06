@@ -3152,7 +3152,9 @@ const TCPGCard = () => {
 // RECURRING TASKS — daily / weekly / monthly chores
 // Separate from the calendar. Cleared by checking a box; the
 // task reappears after its interval elapses (daily = next day,
-// weekly = 7 days, monthly = next calendar month).
+// weekly = 7 days, monthly = resets on the 1st of the month).
+// Resets are automatic; overdue_days from the API says how far
+// past due each item has slipped.
 // =========================================================
 const RECURRING_FREQS = [
   { id: "daily",   label: "Daily",   color: "var(--accent-2)" },
@@ -3190,7 +3192,7 @@ const RecurringTasksCard = ({ cardProps = {} } = {}) => {
       res = await r.json();
     } catch { toastErr("Couldn’t add that routine — try again."); return; }
     if (res && res.id) {
-      setItems(xs => [...xs, { ...res, due: true }]);
+      setItems(xs => [...xs, { ...res, due: true, overdue_days: 0 }]);
       setNewTitle("");
       if (window.__toast) window.__toast(`${RECURRING_FREQS.find(f=>f.id===newFreq)?.label} task added`);
     }
@@ -3198,14 +3200,17 @@ const RecurringTasksCard = ({ cardProps = {} } = {}) => {
 
   const markDone = async (id) => {
     const today = new Date().toISOString().slice(0, 10);
-    setItems(xs => xs.map(x => x.id === id ? { ...x, last_completed: today, due: false } : x));
+    setItems(xs => xs.map(x => x.id === id ? { ...x, last_completed: today, due: false, overdue_days: 0 } : x));
     await fetch(`/api/recurring/${id}/done`, { method: 'POST' })
       .then(r => { if (!r.ok) throw 0; })
       .catch(() => { toastErr("Couldn’t update that routine — reloading."); load(); });
   };
 
   const undo = async (id) => {
-    setItems(xs => xs.map(x => x.id === id ? { ...x, last_completed: null, due: true } : x));
+    const sinceFirst = new Date().getDate() - 1; // matches the API: unchecked monthlies count from the 1st
+    setItems(xs => xs.map(x => x.id === id
+      ? { ...x, last_completed: null, due: true, overdue_days: x.frequency === 'monthly' ? sinceFirst : 0 }
+      : x));
     await fetch(`/api/recurring/${id}/undo`, { method: 'POST' })
       .then(r => { if (!r.ok) throw 0; })
       .catch(() => { toastErr("Couldn’t update that routine — reloading."); load(); });
@@ -3220,18 +3225,8 @@ const RecurringTasksCard = ({ cardProps = {} } = {}) => {
       .catch(() => { toastErr("Couldn’t remove that routine — reverting."); setItems(prev); });
   };
 
-  const resetScope = async (scope) => {
-    const label = scope === 'week' ? 'week' : 'month';
-    if (!confirm(`Start a new ${label}? Completed ${scope === 'week' ? 'weekly' : 'monthly'} routines will reset to do-again.`)) return;
-    const res = await fetch('/api/recurring/reset', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scope }),
-    }).then(r => r.json()).catch(() => null);
-    load();
-    if (res && window.__toast) window.__toast(`New ${label} — ${res.cleared} routine${res.cleared === 1 ? '' : 's'} reset`);
-  };
-
   const dueCount = items.filter(i => i.due).length;
+  const overdueCount = items.filter(i => (i.overdue_days || 0) > 0).length;
 
   // Reactor gauge: one charge-ring per cadence (done/total), due count at the core. (lazy MCViz)
   const RG = (window.MCViz || {}).ReactorGauge;
@@ -3243,7 +3238,8 @@ const RecurringTasksCard = ({ cardProps = {} } = {}) => {
 
   const renderColumn = (freq) => {
     const colItems = items.filter(i => i.frequency === freq.id);
-    const due = colItems.filter(i => i.due);
+    const due = colItems.filter(i => i.due)
+      .sort((a, b) => (b.overdue_days || 0) - (a.overdue_days || 0));
     const done = colItems.filter(i => !i.due);
     return (
       <div key={freq.id} style={{ padding: "10px 14px", borderRight: "1px solid var(--line-soft)" }}>
@@ -3262,11 +3258,16 @@ const RecurringTasksCard = ({ cardProps = {} } = {}) => {
 
         {due.map(it => (
           <div key={it.id} style={{
-            display: 'grid', gridTemplateColumns: '22px 1fr auto', gap: 6,
+            display: 'grid', gridTemplateColumns: '22px 1fr auto auto', gap: 6,
             alignItems: 'center', padding: '5px 4px'
           }}>
             <Checkbox checked={false} onClick={() => markDone(it.id)} />
             <span style={{ fontSize: 12.5, lineHeight: 1.35 }}>{it.title}</span>
+            {(it.overdue_days || 0) > 0
+              ? <span className="mono" style={{ fontSize: 10, color: 'var(--danger)', whiteSpace: 'nowrap' }}>
+                  {it.overdue_days}d overdue
+                </span>
+              : <span className="mono muted-2" style={{ fontSize: 10, whiteSpace: 'nowrap' }}>due</span>}
             <button onClick={() => remove(it.id)} title="Remove"
               style={{ background: 'transparent', border: 'none', cursor: 'pointer',
                 color: 'var(--ink-4)', padding: '2px', display: 'flex', alignItems: 'center' }}>
@@ -3303,9 +3304,12 @@ const RecurringTasksCard = ({ cardProps = {} } = {}) => {
       span={cardProps.span || 12}
       onDashboardMinimize={cardProps.onDashboardMinimize}
       right={
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <button className="btn" style={{ padding: '4px 8px' }} onClick={() => resetScope('week')} title="Reset weekly (+ daily) routines">New week</button>
-          <button className="btn" style={{ padding: '4px 8px' }} onClick={() => resetScope('month')} title="Reset monthly, weekly & daily routines">New month</button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {!loading && overdueCount > 0 && (
+            <span className="mono" style={{ fontSize: 11, color: 'var(--danger)' }}>
+              {overdueCount} overdue
+            </span>
+          )}
           <span className="mono muted-2" style={{ fontSize: 11 }}>
             {loading ? 'loading…' : `${dueCount} due`}
           </span>
