@@ -26,6 +26,7 @@ const Icon = ({ name, size = 16, stroke = 1.6, ...rest }) => {
     case "feather":     return (<svg {...common}><path d="M20.2 3.8a5.4 5.4 0 0 0-7.6 0L4 12.4V20h7.6l8.6-8.6a5.4 5.4 0 0 0 0-7.6zM16 8 2 22M17.5 15H9"/></svg>);
     case "home":        return (<svg {...common}><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2h-4v-7h-6v7H5a2 2 0 0 1-2-2z"/></svg>);
     case "inbox":       return (<svg {...common}><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5h13l3.5 7v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/></svg>);
+    case "bowl":        return (<svg {...common}><path d="M3 11h18a9 9 0 0 1-9 9 9 9 0 0 1-9-9z"/><path d="M9 7c0-1.3.8-2 .8-3.2M13 7c0-1.3.8-2 .8-3.2M2 11h20"/></svg>);
     case "instagram":   return (<svg {...common}><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="0.5" fill="currentColor"/></svg>);
     case "send":        return (<svg {...common}><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>);
     case "image":       return (<svg {...common}><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>);

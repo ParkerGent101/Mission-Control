@@ -11,11 +11,14 @@ import sqlite3
 import sys
 import time
 import mimetypes
+import copy
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request, session, redirect
 from flask_compress import Compress
 import anthropic
+
+from mealprep_seed import MEALPREP_DEFAULT
 
 load_dotenv()
 
@@ -89,6 +92,7 @@ FINANCE_FILE     = DATA_DIR / "finances.json"
 SUBS_FILE        = DATA_DIR / "subscriptions.json"
 TASKS_FILE       = DATA_DIR / "tasks.json"
 RECURRING_FILE   = DATA_DIR / "recurring_tasks.json"
+MEALPREP_FILE    = DATA_DIR / "mealprep.json"
 REMINDERS_FILE   = DATA_DIR / "reminders.json"
 SAVINGS_FILE     = DATA_DIR / "savings.json"
 CONTENT_FILE     = DATA_DIR / "band_content.json"
@@ -4296,6 +4300,383 @@ def get_tcpg_health():
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)})
 
+
+# ── Meal Prep ──────────────────────────────────────────────────────────────────
+# 4-week cycle of user-scheduled prep weeks: 3 dishes x 6 servings = 18 containers
+# (12 to the fridge for days 1-4, 6 to the freezer for days 5-6). No fixed prep
+# day — every week is scheduled with its own prep_date and all timing derives
+# from it. Dish library + templates seed from mealprep_seed.MEALPREP_DEFAULT.
+
+MP_CATS = ("meat", "carbs", "produce", "dairy", "pantry")
+MP_FRIDGE_PER_DISH = 4
+MP_FROZEN_PER_DISH = 2
+
+def _mp_body():
+    # Some actions (prep-complete, undo, pantry toggle) POST with no body;
+    # request.json would 415 on a missing Content-Type, so read silently.
+    return request.get_json(silent=True) or {}
+
+def _mealprep_load():
+    data = _load(MEALPREP_FILE, copy.deepcopy(MEALPREP_DEFAULT))
+    for k, v in MEALPREP_DEFAULT.items():
+        data.setdefault(k, copy.deepcopy(v))
+    for w in data.get("weeks", []):
+        w.setdefault("shopping_checked", {})
+        w.setdefault("steps_done", [])
+        w.setdefault("inventory", {})
+        w.setdefault("events", [])
+        w.setdefault("status", "planned")
+    return data
+
+def _mp_dish(data, did):
+    return next((d for d in data.get("dishes", []) if d.get("id") == did), None)
+
+def _mp_week(data, wid):
+    return next((w for w in data.get("weeks", []) if w.get("id") == wid), None)
+
+def _mp_parse_date(s):
+    try:
+        return date.fromisoformat(s or "")
+    except ValueError:
+        return None
+
+def _mp_day_of_cycle(week, today):
+    """1-based day of the eating cycle. None until the week is prepped and its
+    prep date has arrived."""
+    if week.get("status") not in ("prepped", "done"):
+        return None
+    start = _mp_parse_date(week.get("prep_date"))
+    if not start or today < start:
+        return None
+    return (today - start).days + 1
+
+def _mp_remaining(week):
+    inv = week.get("inventory", {})
+    return {
+        "fridge": sum(v.get("fridge", 0) for v in inv.values()),
+        "frozen": sum(v.get("frozen", 0) for v in inv.values()),
+    }
+
+def _mp_flip_done(data):
+    """Prepped weeks with nothing left become 'done'. Returns True if changed."""
+    changed = False
+    for w in data.get("weeks", []):
+        if w.get("status") == "prepped" and w.get("inventory"):
+            r = _mp_remaining(w)
+            if r["fridge"] + r["frozen"] <= 0:
+                w["status"] = "done"
+                changed = True
+    return changed
+
+def _mp_prep_plan(data, week):
+    """The 5-step prep-day flow with this week's dishes filled in."""
+    dishes = [d for d in (_mp_dish(data, i) for i in week.get("dish_ids", [])) if d]
+    oven = [d["name"] for d in dishes if d.get("prep_slot") == "oven"]
+    stove = sorted((d for d in dishes if d.get("prep_slot") in ("stovetop", "simmer")),
+                   key=lambda d: d.get("spice_rank", 9))
+    stove_names = " → ".join(d["name"] for d in stove)
+    return [
+        "Rice for all dishes in ONE pot or rice cooker first",
+        ("Oven dish in — " + ", ".join(oven) + " (cooks unattended)") if oven
+        else "No oven dish this week — skip ahead",
+        ("Stovetop back-to-back, mildest → spiciest: " + stove_names +
+         " (quick wipe of the pan between)") if stove_names
+        else "No stovetop dishes this week",
+        "Whisk sauces in bowls/jars while proteins cook",
+        "Cool 20 min UNCOVERED → portion → 12 fridge / 6 freezer",
+    ]
+
+def _mp_shopping(data, week):
+    """Grouped checkable shopping list derived from the week's 3 dishes."""
+    groups = []
+    for cat in MP_CATS:
+        items = []
+        for did in week.get("dish_ids", []):
+            d = _mp_dish(data, did)
+            if not d:
+                continue
+            for idx, s in enumerate(d.get("shopping", [])):
+                if s.get("cat") != cat:
+                    continue
+                key = f"{did}:{idx}"
+                items.append({
+                    "key": key, "item": s.get("item", ""), "qty": s.get("qty", ""),
+                    "dish": d.get("name", ""),
+                    "done": bool(week.get("shopping_checked", {}).get(key)),
+                })
+        if items:
+            groups.append({"cat": cat, "items": items})
+    return groups
+
+def _mp_week_computed(data, week, today):
+    w = dict(week)
+    day = _mp_day_of_cycle(week, today)
+    prep_d = _mp_parse_date(week.get("prep_date"))
+    w["day_of_cycle"] = day
+    w["days_until_prep"] = (prep_d - today).days if prep_d else None
+    w["remaining"] = _mp_remaining(week)
+    w["overdue"] = (week.get("status") == "planned" and prep_d is not None and prep_d < today)
+    inv = week.get("inventory", {})
+    w["thaw_suggested"] = ([int(k) for k, v in inv.items() if v.get("frozen", 0) > 0]
+                           if (day or 0) >= 4 else [])
+    w["shopping"] = _mp_shopping(data, week)
+    w["prep_plan"] = _mp_prep_plan(data, week)
+    return w
+
+def _mp_state(data, today=None):
+    """Full client payload with all derived state."""
+    today = today or date.today()
+    weeks = sorted(data.get("weeks", []),
+                   key=lambda w: (w.get("prep_date") or "", w.get("id", 0)))
+    computed = [_mp_week_computed(data, w, today) for w in weeks]
+    current_id = None
+    for cw in computed:  # ascending order → the latest active prepped week wins
+        if (cw.get("status") == "prepped" and cw.get("day_of_cycle")
+                and cw["remaining"]["fridge"] + cw["remaining"]["frozen"] > 0):
+            current_id = cw["id"]
+    next_id = next((cw["id"] for cw in computed if cw.get("status") == "planned"), None)
+    templates = data.get("templates", [])
+    sug = templates[data.get("rotation_idx", 0) % len(templates)] if templates else None
+    return {
+        "today": today.isoformat(),
+        "dishes": data.get("dishes", []),
+        "templates": templates,
+        "pantry": data.get("pantry", []),
+        "weeks": computed,
+        "current_week_id": current_id,
+        "next_week_id": next_id,
+        "suggested": sug,
+    }
+
+def _mp_valid_dish_ids(data, ids):
+    if not isinstance(ids, list) or len(ids) != 3 or len(set(ids)) != 3:
+        return None
+    out = []
+    for i in ids:
+        d = _mp_dish(data, i) if isinstance(i, int) else None
+        if not d or not d.get("active", True):
+            return None
+        out.append(d["id"])
+    return out
+
+def _mp_match_template(data, ids):
+    for t in data.get("templates", []):
+        if set(t.get("dish_ids", [])) == set(ids):
+            return t["id"]
+    return None
+
+@app.route("/api/mealprep", methods=["GET"])
+def get_mealprep():
+    data = _mealprep_load()
+    if _mp_flip_done(data):
+        _save(MEALPREP_FILE, data)
+    return jsonify(_mp_state(data))
+
+@app.route("/api/mealprep/week", methods=["POST"])
+def mealprep_add_week():
+    d = _mp_body()
+    prep_d = _mp_parse_date(d.get("prep_date"))
+    if not prep_d:
+        return jsonify({"error": "prep_date (YYYY-MM-DD) required"}), 400
+    data = _mealprep_load()
+    ids = _mp_valid_dish_ids(data, d.get("dish_ids"))
+    if not ids:
+        return jsonify({"error": "dish_ids must be 3 distinct active dish ids"}), 400
+    tmpl = _mp_match_template(data, ids)
+    templates = data.get("templates", [])
+    if templates and tmpl == templates[data.get("rotation_idx", 0) % len(templates)]["id"]:
+        data["rotation_idx"] = (data.get("rotation_idx", 0) + 1) % len(templates)
+    week = {
+        "id": max((w.get("id", 0) for w in data["weeks"]), default=0) + 1,
+        "prep_date": prep_d.isoformat(),
+        "template": tmpl,
+        "dish_ids": ids,
+        "status": "planned",
+        "created": date.today().isoformat(),
+        "shopping_checked": {}, "steps_done": [], "inventory": {}, "events": [],
+    }
+    data["weeks"].append(week)
+    _mp_flip_done(data)
+    _save(MEALPREP_FILE, data)
+    _log("mealprep", "plan week", week["prep_date"], tmpl or "custom")
+    return jsonify(_mp_state(data))
+
+@app.route("/api/mealprep/week/<int:wid>", methods=["POST"])
+def mealprep_edit_week(wid):
+    d = _mp_body()
+    data = _mealprep_load()
+    w = _mp_week(data, wid)
+    if not w:
+        return jsonify({"error": "not found"}), 404
+    if d.get("dish_ids"):
+        if w.get("status") != "planned":
+            return jsonify({"error": "can't change dishes after prep"}), 400
+        ids = _mp_valid_dish_ids(data, d.get("dish_ids"))
+        if not ids:
+            return jsonify({"error": "dish_ids must be 3 distinct active dish ids"}), 400
+        w["dish_ids"] = ids
+        w["template"] = _mp_match_template(data, ids)
+        keep = {str(i) for i in ids}
+        w["shopping_checked"] = {k: v for k, v in w.get("shopping_checked", {}).items()
+                                 if k.split(":")[0] in keep}
+    if d.get("prep_date"):
+        prep_d = _mp_parse_date(d.get("prep_date"))
+        if not prep_d:
+            return jsonify({"error": "bad prep_date"}), 400
+        w["prep_date"] = prep_d.isoformat()
+    _mp_flip_done(data)
+    _save(MEALPREP_FILE, data)
+    _log("mealprep", "edit week", w["prep_date"], "")
+    return jsonify(_mp_state(data))
+
+@app.route("/api/mealprep/week/<int:wid>", methods=["DELETE"])
+def mealprep_delete_week(wid):
+    data = _mealprep_load()
+    before = len(data["weeks"])
+    data["weeks"] = [w for w in data["weeks"] if w.get("id") != wid]
+    if len(data["weeks"]) == before:
+        return jsonify({"error": "not found"}), 404
+    _save(MEALPREP_FILE, data)
+    _log("mealprep", "delete week", str(wid), "")
+    return jsonify(_mp_state(data))
+
+@app.route("/api/mealprep/week/<int:wid>/shopping", methods=["POST"])
+def mealprep_toggle_shopping(wid):
+    key = str(_mp_body().get("key") or "")
+    data = _mealprep_load()
+    w = _mp_week(data, wid)
+    if not w:
+        return jsonify({"error": "not found"}), 404
+    if not key:
+        return jsonify({"error": "key required"}), 400
+    checked = w.setdefault("shopping_checked", {})
+    if checked.get(key):
+        checked.pop(key, None)
+    else:
+        checked[key] = True
+    _save(MEALPREP_FILE, data)
+    return jsonify(_mp_state(data))
+
+@app.route("/api/mealprep/week/<int:wid>/step", methods=["POST"])
+def mealprep_toggle_step(wid):
+    idx = _mp_body().get("idx")
+    data = _mealprep_load()
+    w = _mp_week(data, wid)
+    if not w:
+        return jsonify({"error": "not found"}), 404
+    if not isinstance(idx, int) or not 0 <= idx <= 4:
+        return jsonify({"error": "idx 0-4 required"}), 400
+    steps = w.setdefault("steps_done", [])
+    if idx in steps:
+        steps.remove(idx)
+    else:
+        steps.append(idx)
+    _save(MEALPREP_FILE, data)
+    return jsonify(_mp_state(data))
+
+@app.route("/api/mealprep/week/<int:wid>/prep-complete", methods=["POST"])
+def mealprep_prep_complete(wid):
+    d = _mp_body()
+    data = _mealprep_load()
+    w = _mp_week(data, wid)
+    if not w:
+        return jsonify({"error": "not found"}), 404
+    if w.get("status") == "prepped":
+        return jsonify({"error": "already prepped"}), 400
+    if d.get("prep_date"):
+        prep_d = _mp_parse_date(d.get("prep_date"))
+        if not prep_d:
+            return jsonify({"error": "bad prep_date"}), 400
+        w["prep_date"] = prep_d.isoformat()
+    w["status"] = "prepped"
+    w["steps_done"] = [0, 1, 2, 3, 4]
+    w["inventory"] = {str(i): {"fridge": MP_FRIDGE_PER_DISH, "frozen": MP_FROZEN_PER_DISH}
+                      for i in w.get("dish_ids", [])}
+    _save(MEALPREP_FILE, data)
+    _log("mealprep", "prep complete", w["prep_date"], "18 containers")
+    return jsonify(_mp_state(data))
+
+@app.route("/api/mealprep/week/<int:wid>/eat", methods=["POST"])
+def mealprep_eat(wid):
+    d = _mp_body()
+    source = d.get("source", "fridge")
+    data = _mealprep_load()
+    w = _mp_week(data, wid)
+    if not w:
+        return jsonify({"error": "not found"}), 404
+    if source not in ("fridge", "frozen"):
+        return jsonify({"error": "source must be fridge or frozen"}), 400
+    inv = w.get("inventory", {}).get(str(d.get("dish_id")))
+    if not inv:
+        return jsonify({"error": "no inventory for that dish"}), 400
+    if inv.get(source, 0) <= 0:
+        return jsonify({"error": f"nothing left in the {source}"}), 400
+    inv[source] -= 1
+    events = w.setdefault("events", [])
+    events.append({"ts": datetime.now().isoformat(timespec="seconds"),
+                   "kind": "eat", "dish_id": d.get("dish_id"), "source": source})
+    del events[:-40]
+    dish = _mp_dish(data, d.get("dish_id"))
+    _mp_flip_done(data)
+    _save(MEALPREP_FILE, data)
+    _log("mealprep", "eat", dish.get("name", "") if dish else "", source)
+    return jsonify(_mp_state(data))
+
+@app.route("/api/mealprep/week/<int:wid>/thaw", methods=["POST"])
+def mealprep_thaw(wid):
+    d = _mp_body()
+    count = d.get("count", 1)
+    data = _mealprep_load()
+    w = _mp_week(data, wid)
+    if not w:
+        return jsonify({"error": "not found"}), 404
+    inv = w.get("inventory", {}).get(str(d.get("dish_id")))
+    if not inv:
+        return jsonify({"error": "no inventory for that dish"}), 400
+    moved = min(int(count) if isinstance(count, int) else 1, inv.get("frozen", 0))
+    if moved <= 0:
+        return jsonify({"error": "nothing frozen to thaw"}), 400
+    inv["frozen"] -= moved
+    inv["fridge"] += moved
+    events = w.setdefault("events", [])
+    events.append({"ts": datetime.now().isoformat(timespec="seconds"),
+                   "kind": "thaw", "dish_id": d.get("dish_id"), "count": moved})
+    del events[:-40]
+    _save(MEALPREP_FILE, data)
+    return jsonify(_mp_state(data))
+
+@app.route("/api/mealprep/week/<int:wid>/undo", methods=["POST"])
+def mealprep_undo(wid):
+    data = _mealprep_load()
+    w = _mp_week(data, wid)
+    if not w:
+        return jsonify({"error": "not found"}), 404
+    events = w.get("events", [])
+    if not events:
+        return jsonify({"error": "nothing to undo"}), 400
+    ev = events.pop()
+    inv = w.get("inventory", {}).get(str(ev.get("dish_id")))
+    if inv:
+        if ev.get("kind") == "eat":
+            inv[ev.get("source", "fridge")] = inv.get(ev.get("source", "fridge"), 0) + 1
+            if w.get("status") == "done":
+                w["status"] = "prepped"
+        elif ev.get("kind") == "thaw":
+            back = min(ev.get("count", 1), inv.get("fridge", 0))
+            inv["fridge"] -= back
+            inv["frozen"] += back
+    _save(MEALPREP_FILE, data)
+    return jsonify(_mp_state(data))
+
+@app.route("/api/mealprep/pantry/<int:pid>/toggle", methods=["POST"])
+def mealprep_toggle_pantry(pid):
+    data = _mealprep_load()
+    item = next((p for p in data.get("pantry", []) if p.get("id") == pid), None)
+    if not item:
+        return jsonify({"error": "not found"}), 404
+    item["done"] = not item.get("done")
+    _save(MEALPREP_FILE, data)
+    return jsonify(_mp_state(data))
 
 # ── Practice ───────────────────────────────────────────────────────────────────
 

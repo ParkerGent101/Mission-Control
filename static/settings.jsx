@@ -23,7 +23,10 @@ const MODULE_LIST = [
   { id: "finance",  label: "Finance",           icon: "wallet" },
   { id: "band",     label: "Band",              icon: "music" },
   { id: "health",   label: "Health & Fitness",  icon: "heart" },
+  { id: "practice", label: "Practice",          icon: "target" },
   { id: "calendar", label: "Calendar",          icon: "calendar" },
+  { id: "recurring",label: "Routines",          icon: "clock" },
+  { id: "mealprep", label: "Meal Prep",         icon: "bowl" },
 ];
 
 const FieldRow = ({ label, desc, children, style }) => (

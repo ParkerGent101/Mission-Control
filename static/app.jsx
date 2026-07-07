@@ -7,7 +7,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "density": "balanced",
   "sidebar": "full",
   "modules": {
-    "finance": true, "band": true, "health": true, "tcpg": true, "practice": true, "recurring": true
+    "finance": true, "band": true, "health": true, "tcpg": true, "practice": true, "recurring": true, "mealprep": true
   }
 }/*EDITMODE-END*/;
 
@@ -21,6 +21,7 @@ const SIDEBAR_NAV = [
   { id: "practice",  icon: "target",     label: "Practice",  key: "P" },
   { id: "calendar",  icon: "calendar",   label: "Calendar",  key: "C" },
   { id: "recurring", icon: "clock",      label: "Routines",  key: "R" },
+  { id: "mealprep",  icon: "bowl",       label: "Meal Prep", key: "M" },
 ];
 
 const MOBILE_NAV = [
@@ -36,6 +37,7 @@ const MODULE_LABELS = [
   ["health","Health","heart"],
   ["practice","Practice","target"],
   ["recurring","Routines","clock"],
+  ["mealprep","Meal Prep","bowl"],
 ];
 
 // Statusbar flavor: rotating machine-cult litanies + the date in Imperial dating format.
@@ -242,6 +244,7 @@ const App = () => {
     { id: "band",     label: "Band",             icon: "music",      el: <M.BandCard cardProps={dashboardCardProps("band", 5)} /> },
     { id: "practice", label: "Piano Practice",   icon: "target",     el: <M.PracticeCard cardProps={dashboardCardProps("practice", 6)} /> },
     { id: "recurring",label: "Routines",         icon: "clock",      el: <M.RecurringTasksCard cardProps={dashboardCardProps("recurring", 12)} /> },
+    { id: "mealprep", label: "Meal Prep",        icon: "bowl",       el: <M.MealPrepCard cardProps={dashboardCardProps("mealprep", 12)} /> },
   ];
 
   const visibleDashboardCards = cards.filter(c => t.modules[c.id] !== false && !dashboardMinimized.includes(c.id));
