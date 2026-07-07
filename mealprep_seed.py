@@ -508,3 +508,43 @@ MEALPREP_DEFAULT = {
         },
     ],
 }
+
+# Per-dish serving count, active cook time, and the meal-prep-critical store/reheat
+# note. Kept out of the dish dicts above to keep those readable; applied on import.
+_DISH_TIME = {
+    1: "~35 min", 2: "~30 min", 3: "~35 min", 4: "~35 min", 5: "~30 min",
+    6: "~30 min (mostly oven)", 7: "~45 min", 8: "~30 min", 9: "~30 min",
+    10: "~30 min", 11: "~30 min", 12: "~35 min (+ marinate)", 13: "~35 min",
+    14: "~30 min (rice chilled ahead)", 15: "~45 min", 16: "~35 min",
+}
+_BOWL_REHEAT = ("Fridge days 1-4, freezer days 5-6 (up to ~2 months). Thaw frozen "
+                "overnight in the fridge; reheat 2-3 min with a splash of water over the rice.")
+_DISH_REHEAT = {
+    1: _BOWL_REHEAT,
+    2: _BOWL_REHEAT + " Keep the pickled cucumber separate for crunch.",
+    3: _BOWL_REHEAT + " Add the halved egg after reheating.",
+    4: ("Store the meat, tortillas, crema, and pico separately. Reheat the meat "
+        "60-90 sec; warm 3 tortillas in a dry pan or 20 sec in the microwave; build "
+        "with crema + lettuce + pico fresh each day."),
+    5: _BOWL_REHEAT + " Add salsa + Greek yogurt when eating, not before (keeps it from going watery).",
+    6: _BOWL_REHEAT,
+    7: ("Reheat the potatoes + chopped burger ~2 min. Spoon the burger sauce on and "
+        "add lettuce + pickles fresh so it eats like a burger, not a casserole."),
+    8: ("Fridge 2 patties, freeze 4 with parchment between (freeze half the buns too). "
+        "Microwave a patty 60-90 sec, toast a fresh bun, build with mayo + pickles + lettuce."),
+    9: _BOWL_REHEAT + " Cheese melts into the meat on reheat.",
+    10: ("Reheat gently with a splash of water - do NOT boil (the yogurt splits). "
+         "Add the diced celery after reheating for crunch."),
+    11: ("Reheat the pasta + chicken with a splash of water. Add the mozzarella pearls, "
+         "torn basil, and balsamic glaze COLD, after reheating."),
+    12: _BOWL_REHEAT + " Yogurt sauce stays in its jar - spoon on daily so the bowl doesn't go watery.",
+    13: _BOWL_REHEAT,
+    14: ("Fridge days 1-4, freezer days 5-6. Reheat 2-3 min in the microwave or a hot "
+         "pan; a splash of water keeps the rice from drying out."),
+    15: _BOWL_REHEAT + " Great on its own or over rice; Greek yogurt on top when eating.",
+    16: _BOWL_REHEAT + " Tzatziki stays in the jar - spoon on daily.",
+}
+for _d in MEALPREP_DEFAULT["dishes"]:
+    _d.setdefault("serves", 6)
+    _d["time"] = _DISH_TIME.get(_d["id"], "~35 min")
+    _d["reheat"] = _DISH_REHEAT.get(_d["id"], _BOWL_REHEAT)

@@ -3468,6 +3468,39 @@ const MealPrepCard = ({ cardProps = {} } = {}) => {
   );
 
   // ── Dish inventory pips: filled fridge dots, snowflake freezer, hollow eaten ──
+  // Full recipe block — shared by the WEEK, PREP, and LIBRARY tabs.
+  const renderRecipe = (d) => (
+    <div style={{ padding: '4px 2px 8px 10px', display: 'grid', gap: 7, borderLeft: '1px solid var(--line)', marginLeft: 2 }}>
+      <div className="mono muted-2" style={{ fontSize: 9.5, letterSpacing: '.05em' }}>
+        SERVES {d.serves || 6}{d.time ? ' · ' + d.time : ''} · ~{d.macros.cal} cal · {d.macros.protein_g}g P
+      </div>
+      <div>
+        <div className="mono muted-2" style={{ fontSize: 9.5, letterSpacing: '.06em' }}>INGREDIENTS</div>
+        {d.ingredients.map((x, i) => <div key={i} style={{ fontSize: 11.5, lineHeight: 1.4 }}>· {x}</div>)}
+      </div>
+      {d.sauce && d.sauce.items && d.sauce.items.length > 0 && (
+        <div>
+          <div className="mono muted-2" style={{ fontSize: 9.5, letterSpacing: '.06em' }}>{(d.sauce.name || 'SAUCE').toUpperCase()}</div>
+          {d.sauce.items.map((x, i) => <div key={i} style={{ fontSize: 11.5, lineHeight: 1.4 }}>· {x}</div>)}
+        </div>
+      )}
+      <div>
+        <div className="mono muted-2" style={{ fontSize: 9.5, letterSpacing: '.06em' }}>METHOD</div>
+        {d.method.map((x, i) => (
+          <div key={i} style={{ display: 'grid', gridTemplateColumns: '18px 1fr', gap: 4, fontSize: 11.5, lineHeight: 1.4, marginBottom: 3 }}>
+            <span className="mono" style={{ color: 'var(--accent)' }}>{i + 1}.</span><span>{x}</span>
+          </div>
+        ))}
+      </div>
+      {d.reheat && (
+        <div>
+          <div className="mono muted-2" style={{ fontSize: 9.5, letterSpacing: '.06em' }}>STORE &amp; REHEAT</div>
+          <div style={{ fontSize: 11.5, lineHeight: 1.4 }}>{d.reheat}</div>
+        </div>
+      )}
+    </div>
+  );
+
   const renderPips = (w, dish) => {
     const inv = (w.inventory || {})[String(dish.id)] || { fridge: 0, frozen: 0 };
     const eaten = Math.max(0, 6 - inv.fridge - inv.frozen);
@@ -3496,13 +3529,19 @@ const MealPrepCard = ({ cardProps = {} } = {}) => {
       {w.dish_ids.map(did => {
         const d = dishById(did);
         if (!d) return null;
+        const open = expandedDish === did;
         return (
-          <div key={did} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 6, alignItems: 'center' }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 12.5, lineHeight: 1.25 }}>{d.name}</div>
-              <div className="mono muted-2" style={{ fontSize: 10 }}>~{d.macros.cal} cal · {d.macros.protein_g}g P</div>
+          <div key={did}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 6, alignItems: 'center' }}>
+              <div style={{ minWidth: 0, cursor: 'pointer' }} onClick={() => setExpandedDish(open ? null : did)} title="Show recipe">
+                <div style={{ fontSize: 12.5, lineHeight: 1.25, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <span className="mono muted-2" style={{ fontSize: 9 }}>{open ? '▾' : '▸'}</span>{d.name}
+                </div>
+                <div className="mono muted-2" style={{ fontSize: 10 }}>~{d.macros.cal} cal · {d.macros.protein_g}g P · recipe</div>
+              </div>
+              {renderPips(w, d)}
             </div>
-            {renderPips(w, d)}
+            {open && renderRecipe(d)}
           </div>
         );
       })}
@@ -3682,6 +3721,21 @@ const MealPrepCard = ({ cardProps = {} } = {}) => {
         {!prepped && (
           <button className="btn primary" onClick={() => prepComplete(w)} style={{ fontSize: 11, justifySelf: 'start' }}>Complete prep — stow 18 containers</button>
         )}
+        <div className="hairline" style={{ margin: '4px 0 2px' }} />
+        <div className="mono muted-2" style={{ fontSize: 10, letterSpacing: '.08em' }}>THIS WEEK'S RECIPES</div>
+        {w.dish_ids.map(did => {
+          const d = dishById(did);
+          if (!d) return null;
+          return (
+            <div key={did} style={{ marginBottom: 2 }}>
+              <div style={{ fontSize: 12.5, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                {d.name}
+                <span className="mono muted-2" style={{ fontSize: 9 }}>{(d.prep_slot || '').toUpperCase()}</span>
+              </div>
+              {renderRecipe(d)}
+            </div>
+          );
+        })}
       </div>
     );
   };
@@ -3706,27 +3760,12 @@ const MealPrepCard = ({ cardProps = {} } = {}) => {
                   <div key={d.id} style={{ marginBottom: 4 }}>
                     <div onClick={() => setExpandedDish(open ? null : d.id)}
                       style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 6, alignItems: 'center', cursor: 'pointer', padding: '4px 2px' }}>
-                      <span style={{ fontSize: 12.5 }}>{d.name}</span>
+                      <span style={{ fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <span className="mono muted-2" style={{ fontSize: 9 }}>{open ? '▾' : '▸'}</span>{d.name}
+                      </span>
                       <span className="mono muted-2" style={{ fontSize: 9.5 }}>~{d.macros.cal} · {d.macros.protein_g}g P</span>
                     </div>
-                    {open && (
-                      <div style={{ padding: '4px 2px 8px 10px', display: 'grid', gap: 6, borderLeft: '1px solid var(--line)', marginLeft: 2 }}>
-                        <div>
-                          <div className="mono muted-2" style={{ fontSize: 9.5, letterSpacing: '.06em' }}>INGREDIENTS</div>
-                          {d.ingredients.map((x, i) => <div key={i} style={{ fontSize: 11.5, lineHeight: 1.4 }}>· {x}</div>)}
-                        </div>
-                        {d.sauce && d.sauce.items && d.sauce.items.length > 0 && (
-                          <div>
-                            <div className="mono muted-2" style={{ fontSize: 9.5, letterSpacing: '.06em' }}>{(d.sauce.name || 'SAUCE').toUpperCase()}</div>
-                            {d.sauce.items.map((x, i) => <div key={i} style={{ fontSize: 11.5, lineHeight: 1.4 }}>· {x}</div>)}
-                          </div>
-                        )}
-                        <div>
-                          <div className="mono muted-2" style={{ fontSize: 9.5, letterSpacing: '.06em' }}>METHOD</div>
-                          {d.method.map((x, i) => <div key={i} style={{ fontSize: 11.5, lineHeight: 1.4 }}>{i + 1}. {x}</div>)}
-                        </div>
-                      </div>
-                    )}
+                    {open && renderRecipe(d)}
                   </div>
                 );
               })}
