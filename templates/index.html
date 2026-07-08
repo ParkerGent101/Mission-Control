@@ -298,52 +298,6 @@
   .grid > .span-8 { grid-column: span 8; }
   .grid > .span-9 { grid-column: span 9; }
   .grid > .span-12 { grid-column: span 12; }
-  .dashboard-minimized {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-    padding: 9px 10px;
-    border: 1px dashed var(--line);
-    border-radius: var(--r-lg);
-    background: color-mix(in oklch, var(--surface) 72%, transparent);
-  }
-  .dashboard-minimized-title {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    flex: 0 0 auto;
-    font-size: 10.5px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-  }
-  .dashboard-minimized-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    min-width: 0;
-    flex: 1;
-  }
-  .dashboard-minimized-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    min-height: 30px;
-    padding: 4px 9px;
-    border-radius: var(--r);
-    border: 1px solid var(--line);
-    background: var(--surface);
-    color: var(--ink-2);
-    cursor: pointer;
-    font: inherit;
-    font-size: 12px;
-  }
-  .dashboard-minimized-btn:hover {
-    background: var(--surface-2);
-    color: var(--ink);
-    border-color: var(--surface-3);
-  }
-  .dashboard-minimized-btn svg:first-child { color: var(--accent); }
   @media (max-width: 1400px) {
     .grid > .span-3, .grid > .span-4 { grid-column: span 6; }
     .grid > .span-5 { grid-column: span 6; }
@@ -497,9 +451,6 @@
     .card-head { flex-wrap: wrap; gap: 4px; padding: 9px 12px; }
     .card-head .right { flex-wrap: wrap; gap: 4px; max-width: 100%; }
     .card-body { padding: 10px 12px; }
-    .dashboard-minimized { align-items: stretch; flex-direction: column; gap: 8px; }
-    .dashboard-minimized-list { width: 100%; }
-    .dashboard-minimized-btn { flex: 1 1 150px; justify-content: space-between; }
     /* Hide non-essential header items on mobile */
     .mobile-hide { display: none !important; }
 

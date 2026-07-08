@@ -14,7 +14,6 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 const ACCENT_OPTIONS = ["#e0a857", "#6ed3b6", "#e07a5f", "#b69cf0", "#8fb3e0"];
 
 const SIDEBAR_NAV = [
-  { id: "dashboard", icon: "home",       label: "Dashboard", key: "D" },
   { id: "finance",   icon: "wallet",     label: "Finance",   key: "F" },
   { id: "band",      icon: "music",      label: "Band",      key: "B" },
   { id: "health",    icon: "heart",      label: "Health",    key: "H" },
@@ -25,19 +24,9 @@ const SIDEBAR_NAV = [
 ];
 
 const MOBILE_NAV = [
-  { id: "dashboard", icon: "home",   label: "Home"    },
+  { id: "health",    icon: "heart",  label: "Health"  },
   { id: "finance",   icon: "wallet", label: "Finance" },
   { id: "band",      icon: "music",  label: "Band"    },
-  { id: "health",    icon: "heart",  label: "Health"  },
-];
-
-const MODULE_LABELS = [
-  ["finance","Finance","wallet"],
-  ["band","Band","music"],
-  ["health","Health","heart"],
-  ["practice","Practice","target"],
-  ["recurring","Routines","clock"],
-  ["mealprep","Meal Prep","bowl"],
 ];
 
 // Statusbar flavor: rotating machine-cult litanies + the date in Imperial dating format.
@@ -60,17 +49,6 @@ const imperialDate = (d) => {
   return "0 " + frac + " " + yy + ".M3";
 };
 
-const DASHBOARD_MINIMIZED_KEY = "mc_dashboard_minimized";
-
-const readDashboardMinimized = () => {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(DASHBOARD_MINIMIZED_KEY) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
 const App = () => {
   const [t, setTweak] = useTweaks(() => {
     try {
@@ -78,7 +56,7 @@ const App = () => {
       return saved ? { ...TWEAK_DEFAULTS, ...saved } : TWEAK_DEFAULTS;
     } catch { return TWEAK_DEFAULTS; }
   });
-  const [active, setActive] = useStateApp("dashboard");
+  const [active, setActive] = useStateApp("health");
   const [now, setNow] = useStateApp(new Date());
   const [toasts, setToasts] = useStateApp([]);
   const [showSheet, setShowSheet] = useStateApp(false);
@@ -126,7 +104,6 @@ const App = () => {
   const [needsOnboarding, setNeedsOnboarding] = useStateApp(null);
   const [showSettings, setShowSettings] = useStateApp(false);
   const [userName, setUserName] = useStateApp(() => localStorage.getItem('mc_name') || 'Parker');
-  const [dashboardMinimized, setDashboardMinimized] = useStateApp(readDashboardMinimized);
 
   useEffectApp(() => {
     fetch('/api/onboarding').then(r => r.json()).then(d => setNeedsOnboarding(d.needed)).catch(() => setNeedsOnboarding(false));
@@ -169,7 +146,7 @@ const App = () => {
         setShowSettings(false);
         return;
       }
-      // Sidebar hotkeys ([D]ashboard, [F]inance, … [T]weaks) — skip while typing or with modifiers.
+      // Sidebar hotkeys ([F]inance, … [T]weaks) — skip while typing or with modifiers.
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const el = e.target;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
@@ -190,10 +167,6 @@ const App = () => {
   useEffectApp(() => {
     localStorage.setItem('mc_tweaks', JSON.stringify(t));
   }, [t]);
-
-  useEffectApp(() => {
-    localStorage.setItem(DASHBOARD_MINIMIZED_KEY, JSON.stringify(dashboardMinimized));
-  }, [dashboardMinimized]);
 
   const handleOnboardingComplete = ({ name, modules: newModules, theme }) => {
     if (name && name.trim()) {
@@ -225,35 +198,18 @@ const App = () => {
   const date = now.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
   const weekNum = Math.ceil((now - new Date(now.getFullYear(), 0, 1)) / 604800000);
 
-  const minimizeDashboardCard = (id) => {
-    setDashboardMinimized(xs => xs.includes(id) ? xs : [...xs, id]);
-  };
-  const restoreDashboardCard = (id) => {
-    setDashboardMinimized(xs => xs.filter(x => x !== id));
-  };
-  const restoreAllDashboardCards = () => setDashboardMinimized([]);
-  const dashboardCardProps = (id, span) => active === "dashboard"
-    ? { span, onDashboardMinimize: () => minimizeDashboardCard(id) }
-    : {};
-
   const M = window.MissionModules;
   const cards = [
-    { id: "health",   label: "Health & Fitness", icon: "heart",      el: <M.HealthCard cardProps={dashboardCardProps("health", 12)} /> },
-    { id: "calendar", label: "Calendar",         icon: "calendar",   el: <M.CalendarCard cardProps={dashboardCardProps("calendar", 12)} /> },
-    { id: "finance",  label: "Finance",          icon: "wallet",     el: <M.FinanceCard cardProps={dashboardCardProps("finance", 7)} /> },
-    { id: "band",     label: "Band",             icon: "music",      el: <M.BandCard cardProps={dashboardCardProps("band", 5)} /> },
-    { id: "practice", label: "Piano Practice",   icon: "target",     el: <M.PracticeCard cardProps={dashboardCardProps("practice", 6)} /> },
-    { id: "recurring",label: "Routines",         icon: "clock",      el: <M.RecurringTasksCard cardProps={dashboardCardProps("recurring", 12)} /> },
-    { id: "mealprep", label: "Meal Prep",        icon: "bowl",       el: <M.MealPrepCard cardProps={dashboardCardProps("mealprep", 12)} /> },
+    { id: "health",   label: "Health & Fitness", icon: "heart",      el: <M.HealthCard cardProps={{}} /> },
+    { id: "calendar", label: "Calendar",         icon: "calendar",   el: <M.CalendarCard cardProps={{}} /> },
+    { id: "finance",  label: "Finance",          icon: "wallet",     el: <M.FinanceCard cardProps={{}} /> },
+    { id: "band",     label: "Band",             icon: "music",      el: <M.BandCard cardProps={{}} /> },
+    { id: "practice", label: "Piano Practice",   icon: "target",     el: <M.PracticeCard cardProps={{}} /> },
+    { id: "recurring",label: "Routines",         icon: "clock",      el: <M.RecurringTasksCard cardProps={{}} /> },
+    { id: "mealprep", label: "Meal Prep",        icon: "bowl",       el: <M.MealPrepCard cardProps={{}} /> },
   ];
 
-  const visibleDashboardCards = cards.filter(c => t.modules[c.id] !== false && !dashboardMinimized.includes(c.id));
-  const minimizedDashboardCards = cards.filter(c => t.modules[c.id] !== false && dashboardMinimized.includes(c.id));
-
-  // Dashboard shows no title — just the date line below. Other pages keep their section label.
-  const pageTitle = active === "dashboard"
-    ? null
-    : SIDEBAR_NAV.find(n => n.id === active)?.label || "Mission Control";
+  const pageTitle = SIDEBAR_NAV.find(n => n.id === active)?.label || "Mission Control";
 
   return (
     <div className="app" data-density={t.density} data-sidebar={t.sidebar}>
@@ -263,7 +219,7 @@ const App = () => {
           <span className="brand-mark"/>
           <span className="brand-name">MISSION CONTROL</span>
           <span className="mobile-section-label">
-            {active === 'dashboard' ? 'Mission Control' : (SIDEBAR_NAV.find(n => n.id === active)?.label || 'Mission Control')}
+            {SIDEBAR_NAV.find(n => n.id === active)?.label || 'Mission Control'}
           </span>
         </div>
         <div className="topbar-center"></div>
@@ -280,15 +236,8 @@ const App = () => {
 
       {/* Sidebar */}
       <nav className="sidebar">
-        <div className="sb-section">Workspace</div>
-        {SIDEBAR_NAV.slice(0, 1).map((n) => (
-          <div key={n.id} className={"sb-item" + (active === n.id ? " active" : "")} onClick={() => setActive(n.id)}>
-            <span className="sb-key">[{n.key}]</span>
-            <span className="sb-label">{n.label}</span>
-          </div>
-        ))}
         <div className="sb-section">Modules</div>
-        {SIDEBAR_NAV.slice(1).map((n) => (
+        {SIDEBAR_NAV.map((n) => (
           <div key={n.id} className={"sb-item" + (active === n.id ? " active" : "")} onClick={() => setActive(n.id)}>
             <span className="sb-key">[{n.key}]</span>
             <span className="sb-label">{n.label}</span>
@@ -309,40 +258,11 @@ const App = () => {
           <span className="date">{date} — week {weekNum} of {now.getFullYear()}</span>
           <div className="spacer"/>
         </div>
-        {active === "dashboard" ? (
-          <div className="grid">
-            {minimizedDashboardCards.length > 0 && (
-              <div className="dashboard-minimized span-12">
-                <div className="dashboard-minimized-title">
-                  <span className="muted-2 mono">Minimized</span>
-                  <span className="tag">{minimizedDashboardCards.length}</span>
-                </div>
-                <div className="dashboard-minimized-list">
-                  {minimizedDashboardCards.map(c => (
-                    <button key={c.id} className="dashboard-minimized-btn" onClick={() => restoreDashboardCard(c.id)}
-                      title={`Restore ${c.label}`}>
-                      <Icon name={c.icon} size={14} />
-                      <span>{c.label}</span>
-                      <Icon name="plus" size={11} />
-                    </button>
-                  ))}
-                </div>
-                <button className="btn ghost" onClick={restoreAllDashboardCards}>Restore all</button>
-              </div>
-            )}
-            {visibleDashboardCards.map((c) => (
-              <React.Fragment key={c.id}>
-                {c.el}
-              </React.Fragment>
-            ))}
-          </div>
-        ) : (
-          <div className="grid">
-            {cards.filter(c => c.id === active).map(c => (
-              <React.Fragment key={c.id}>{c.el}</React.Fragment>
-            ))}
-          </div>
-        )}
+        <div className="grid">
+          {cards.filter(c => c.id === active).map(c => (
+            <React.Fragment key={c.id}>{c.el}</React.Fragment>
+          ))}
+        </div>
       </main>
 
       {/* Status bar */}
@@ -404,16 +324,6 @@ const App = () => {
                   onClick={() => { setActive(n.id); setShowSheet(false); }}>
                   <Icon name={n.icon} size={15} style={{color:"var(--accent)",flexShrink:0}}/>
                   <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:12}}>{n.label}</span>
-                </div>
-              ))}
-            </div>
-            <div className="sheet-section-label">Show on dashboard</div>
-            <div className="module-grid">
-              {MODULE_LABELS.map(([k, label, icon]) => (
-                <div key={k} className={"module-tile" + (t.modules[k] !== false ? " enabled" : "")}
-                  onClick={() => setTweak("modules", { ...t.modules, [k]: t.modules[k] === false })}>
-                  <Icon name={icon} size={16}/>
-                  <span>{label}</span>
                 </div>
               ))}
             </div>

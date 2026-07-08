@@ -13,20 +13,9 @@ const THEMES = [
 const ST_SECTIONS = [
   { id: "account",      icon: "circle",     label: "Account" },
   { id: "appearance",   icon: "settings",   label: "Appearance" },
-  { id: "modules",      icon: "home",       label: "Modules" },
   { id: "integrations", icon: "external",   label: "Integrations" },
   { id: "data",         icon: "file",       label: "Data" },
   { id: "about",        icon: "sparkles",   label: "About" },
-];
-
-const MODULE_LIST = [
-  { id: "finance",  label: "Finance",           icon: "wallet" },
-  { id: "band",     label: "Band",              icon: "music" },
-  { id: "health",   label: "Health & Fitness",  icon: "heart" },
-  { id: "practice", label: "Practice",          icon: "target" },
-  { id: "calendar", label: "Calendar",          icon: "calendar" },
-  { id: "recurring",label: "Routines",          icon: "clock" },
-  { id: "mealprep", label: "Meal Prep",         icon: "bowl" },
 ];
 
 const FieldRow = ({ label, desc, children, style }) => (
@@ -209,7 +198,7 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
   const sAccount = (
     <div>
       <SectionHead>Profile</SectionHead>
-      <FieldRow label="Display Name" desc="Shown in greetings and your dashboard.">
+      <FieldRow label="Display Name" desc="Shown in greetings.">
         <div style={{ display: 'flex', gap: 6 }}>
           <input className="input" value={profileName} onChange={e => setProfileName(e.target.value)}
             style={{ width: 160 }} onKeyDown={e => e.key === 'Enter' && saveName()} />
@@ -296,27 +285,6 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--ink-3)' }}>{tweaks.accent2 || "#6ed3b6"}</span>
         </div>
       </FieldRow>
-    </div>
-  );
-
-  /* ── Section: Modules ──────────────────────────── */
-  const sModules = (
-    <div>
-      <SectionHead>Visible Modules</SectionHead>
-      <p style={{ color: 'var(--ink-3)', fontSize: 12.5, margin: '0 0 14px' }}>
-        Toggle which module cards appear on your dashboard. Hidden modules are still accessible via the sidebar.
-      </p>
-      {MODULE_LIST.map(m => (
-        <div key={m.id} className="st-field">
-          <Icon name={m.icon} size={15}
-            style={{ color: tweaks.modules?.[m.id] !== false ? 'var(--accent)' : 'var(--ink-4)', flexShrink: 0, marginTop: 1 }} />
-          <div className="st-field-info" style={{ marginLeft: 2 }}>
-            <div className="st-field-label">{m.label}</div>
-          </div>
-          <Toggle value={tweaks.modules?.[m.id] !== false}
-            onChange={v => setTweak("modules", { ...tweaks.modules, [m.id]: v })} />
-        </div>
-      ))}
     </div>
   );
 
@@ -585,7 +553,7 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
   );
 
   const contentMap = {
-    account: sAccount, appearance: sAppearance, modules: sModules,
+    account: sAccount, appearance: sAppearance,
     integrations: sIntegrations, data: sData, about: sAbout,
   };
 

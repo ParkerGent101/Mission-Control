@@ -129,16 +129,11 @@ const readCollapsed = () => {
   catch { return {}; }
 };
 
-const Card = ({ id, num, title, right, children, span = 6, hidden, bodyClass = "", onDashboardMinimize }) => {
+const Card = ({ id, num, title, right, children, span = 6, hidden, bodyClass = "" }) => {
   const key = id || num || title;
   const [collapsed, setCollapsed] = useState(() => !!readCollapsed()[key]);
-  const dashboardMinimize = typeof onDashboardMinimize === "function";
 
   const toggle = () => {
-    if (dashboardMinimize) {
-      onDashboardMinimize(key);
-      return;
-    }
     setCollapsed(prev => {
       const next = !prev;
       const map = readCollapsed();
@@ -151,20 +146,20 @@ const Card = ({ id, num, title, right, children, span = 6, hidden, bodyClass = "
   return (
     <div className={`span-${span}`} style={{ display: "flex" }}>
       <div className="card" data-hidden={hidden ? "true" : undefined}
-        data-collapsed={!dashboardMinimize && collapsed ? "true" : undefined} style={{ flex: 1 }}>
+        data-collapsed={collapsed ? "true" : undefined} style={{ flex: 1 }}>
         <span className="card-reticle" aria-hidden="true"/>
         <div className="card-head">
           <div className="title">{title}</div>
           <div className="right">
-            {(!collapsed || dashboardMinimize) && right}
+            {!collapsed && right}
             <button className="icon-btn card-collapse-btn" onClick={toggle}
-              title={dashboardMinimize ? "Minimize from dashboard" : collapsed ? "Expand card" : "Minimize card"}
-              aria-label={dashboardMinimize ? "Minimize from dashboard" : collapsed ? "Expand card" : "Minimize card"}>
-              <Icon name={!dashboardMinimize && collapsed ? "plus" : "x"} size={11} />
+              title={collapsed ? "Expand card" : "Minimize card"}
+              aria-label={collapsed ? "Expand card" : "Minimize card"}>
+              <Icon name={collapsed ? "plus" : "x"} size={11} />
             </button>
           </div>
         </div>
-        {(!collapsed || dashboardMinimize) && <div className={"card-body " + bodyClass}>{children}</div>}
+        {!collapsed && <div className={"card-body " + bodyClass}>{children}</div>}
       </div>
     </div>
   );
@@ -3302,7 +3297,6 @@ const RecurringTasksCard = ({ cardProps = {} } = {}) => {
   return (
     <Card id="recurring" num="12" title="Routines"
       span={cardProps.span || 12}
-      onDashboardMinimize={cardProps.onDashboardMinimize}
       right={
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {!loading && overdueCount > 0 && (
