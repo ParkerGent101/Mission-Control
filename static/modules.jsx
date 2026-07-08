@@ -3416,11 +3416,9 @@ const MealPrepCard = ({ cardProps = {} } = {}) => {
   const thaw = (w, dishId) => post(`/api/mealprep/week/${w.id}/thaw`, { dish_id: dishId, count: 1 });
   const undo = (w) => post(`/api/mealprep/week/${w.id}/undo`);
   const toggleShopping = (w, key) => post(`/api/mealprep/week/${w.id}/shopping`, { key });
-  const toggleStep = (w, idx) => post(`/api/mealprep/week/${w.id}/step`, { idx });
   const togglePantry = (pid) => post(`/api/mealprep/pantry/${pid}/toggle`);
 
   const prepComplete = (w) => {
-    if ((w.steps_done || []).length < 5 && !confirm("Some prep steps aren't checked. Mark this week prepped (18 containers stowed) anyway?")) return;
     post(`/api/mealprep/week/${w.id}/prep-complete`, {}, () => {
       if (window.__toast) window.__toast('18 containers stowed — 12 fridge / 6 freezer');
       setTab('week');
@@ -3709,20 +3707,9 @@ const MealPrepCard = ({ cardProps = {} } = {}) => {
         {w.overdue && (
           <div className="mono" style={{ fontSize: 11, color: 'var(--danger)' }}>PREP OVERDUE — was scheduled {mpFmtDate(w.prep_date)}.</div>
         )}
-        <div style={{ display: 'grid', gap: 4, opacity: prepped ? 0.55 : 1 }}>
-          {(w.prep_plan || []).map((step, i) => (
-            <div key={i} style={{ display: 'grid', gridTemplateColumns: '22px auto 1fr', gap: 6, alignItems: 'start', padding: '4px 2px' }}>
-              <Checkbox checked={(w.steps_done || []).includes(i)} onClick={() => !prepped && toggleStep(w, i)} />
-              <span className="mono muted-2" style={{ fontSize: 11 }}>{i + 1}</span>
-              <span style={{ fontSize: 12, lineHeight: 1.35 }}>{step}</span>
-            </div>
-          ))}
-        </div>
         {!prepped && (
           <button className="btn primary" onClick={() => prepComplete(w)} style={{ fontSize: 11, justifySelf: 'start' }}>Complete prep — stow 18 containers</button>
         )}
-        <div className="hairline" style={{ margin: '4px 0 2px' }} />
-        <div className="mono muted-2" style={{ fontSize: 10, letterSpacing: '.08em' }}>THIS WEEK'S RECIPES</div>
         {w.dish_ids.map(did => {
           const d = dishById(did);
           if (!d) return null;
