@@ -198,6 +198,26 @@ def _save(path, data):
             pass
     p.write_text(content, encoding="utf-8")
 
+# The finance Sheet writers (imports, rollover, budget/detail writes) reference the
+# module-global FINANCE_SHEET_ID, which is only a deploy-time env default. Let the sheet
+# pasted in Settings → Integrations (drive_config.json, persisted on /data / the GCS
+# bucket) override it, so pointing the app at a new budget sheet is a one-time Settings
+# change — never a redeploy. Scoped to finance/drive routes so the extra config read
+# (a GCS round-trip in prod — _load is the hottest call in the app) doesn't tax every
+# request.
+@app.before_request
+def _override_finance_sheet_id():
+    global FINANCE_SHEET_ID
+    p = request.path or ""
+    if not (p.startswith("/api/finance") or p.startswith("/api/drive")):
+        return
+    try:
+        configured = str(_load(GDRIVE_CONFIG_FILE, {}).get("sheet_finance") or "").strip()
+    except Exception:
+        configured = ""
+    if configured:
+        FINANCE_SHEET_ID = configured
+
 @contextmanager
 def _db():
     conn = sqlite3.connect(str(DB_PATH), timeout=10)
