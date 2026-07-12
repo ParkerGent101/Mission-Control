@@ -3773,7 +3773,6 @@ const MealPrepCard = ({ cardProps = {} } = {}) => {
   return (
     <Card id="mealprep" num="13" title="Meal Prep"
       span={cardProps.span || 12}
-      onDashboardMinimize={cardProps.onDashboardMinimize}
       right={
         !loading && current
           ? <span className="mono muted-2" style={{ fontSize: 11 }}>DAY {current.day_of_cycle}/6 · {current.remaining.fridge + current.remaining.frozen} left</span>
