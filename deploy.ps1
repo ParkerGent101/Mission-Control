@@ -85,7 +85,7 @@ gcloud run deploy $SERVICE `
     --source . `
     --region $REGION `
     --allow-unauthenticated `
-    --memory 1Gi `
+    --memory 2Gi `
     --timeout 120 `
     --min-instances 0 `
     --max-instances 3 `

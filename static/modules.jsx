@@ -183,6 +183,10 @@ const FIN_CATS = [
   { name: "Other",         budget: 0,    color: "oklch(0.40 0.05 82)" },
 ];
 const FIN_CAT_NAMES = FIN_CATS.map(c => c.name);
+// Categories a transaction can actually LIVE in inside the Google Sheet (the
+// Fun/Gas/Grocery detail tables + Housing/Utilities budget rows). The Sheet has
+// nowhere to put the rest, so the picker for sheet-sourced txns is limited to these.
+const SHEET_CAT_NAMES = ["Housing", "Utilities", "Food / Grocery", "Fun", "Gas"];
 const FIN_CAT_COLOR = Object.fromEntries(FIN_CATS.map(c => [c.name, c.color]));
 const normFinCat = (raw, fallback = "") => {
   const map = {
@@ -353,7 +357,11 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
       } else if (opts.manual) {
         window.__toast?.('No new transactions to import', 'info');
       }
-      if (opts.manual && d.failed) window.__toast?.(`${d.failed} couldn't be written to the Sheet`, 'error');
+      if (opts.manual && d.failed) {
+        const why = (d.errors && d.errors.length) ? ` — ${d.errors[0]}` : '';
+        window.__toast?.(`${d.failed} couldn't be written to the Sheet${why}`, 'error');
+        if (d.errors?.length) console.warn('Drive sync errors:', d.errors);
+      }
     } catch { if (opts.manual) window.__toast?.('Drive sync failed', 'error'); }
     setSyncing(false);
   };
@@ -695,16 +703,26 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
                                     sheet_col: t.sheet_col, sheet_cols: t.sheet_cols,
                                     sheet_kind: t.sheet_kind
                                   })
-                                }).then(res => {
-                                  if (!res.ok) { delete catOverrides.current[t.id]; loadFinances(month); }
-                                }).catch(()=>{ delete catOverrides.current[t.id]; loadFinances(month); });
+                                }).then(async res => {
+                                  if (!res.ok) {
+                                    const err = await res.json().catch(()=>({}));
+                                    toastErr(err.error || "Couldn’t change the category.");
+                                    delete catOverrides.current[t.id]; loadFinances(month);
+                                  }
+                                }).catch(()=>{
+                                  toastErr("Couldn’t change the category.");
+                                  delete catOverrides.current[t.id]; loadFinances(month);
+                                });
                               }}
                               style={{fontSize:10,padding:'2px 4px',height:22,width:116,
                                 background:'var(--surface-2)',border:'1px solid var(--line)',
                                 borderRadius:'var(--r)',color:FIN_CAT_COLOR[nc]||'var(--ink-3)',
                                 cursor:'pointer',fontFamily:'var(--font-mono)'}}
                             >
-                              {FIN_CAT_NAMES.map(c => <option key={c} value={c}>{c}</option>)}
+                              {(t.source === 'sheet'
+                                  ? (SHEET_CAT_NAMES.includes(nc) ? SHEET_CAT_NAMES : [nc, ...SHEET_CAT_NAMES])
+                                  : FIN_CAT_NAMES
+                                ).map(c => <option key={c} value={c}>{c}</option>)}
                             </select>
                           : <span style={{fontSize:10,color:'var(--ink-4)',fontFamily:'var(--font-mono)'}}>
                               {t.amount > 0 ? 'income' : normFinCat(t.cat)}

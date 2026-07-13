@@ -561,6 +561,28 @@ def tool_financial_summary(category=None):
 
 # ── Agenda tools ──────────────────────────────────────────────────────────────
 
+def tool_finance_reconcile(apply=False):
+    """Reconcile the current month's Finance tab against the newest Rocket Money
+    CSV (CSV = truth). Dry run unless apply=True. Returns a plain string."""
+    try:
+        r = _finance_reconcile(apply=bool(apply))
+    except Exception as e:
+        return f"Reconcile failed: {e}"
+    if r.get("error"):
+        return f"Reconcile failed: {r['error']}"
+    mode = "APPLIED" if r["applied"] else "DRY RUN (nothing written)"
+    lines = [f"{mode} — {r['tab']} tab vs {r['csv']}",
+             f"CSV truth total ${r['truth_total']:.2f} | kept (CSV-backed) ${r['kept_total']:.2f} | "
+             f"to remove: {len(r['removed'])} rows, ${r['removed_total']:.2f}"]
+    for x in r["removed"][:40]:
+        lines.append(f"  REMOVE [{x['category']}] {x['label'][:48]} ${x['amount']:.2f}")
+    if len(r["removed"]) > 40:
+        lines.append(f"  ... and {len(r['removed']) - 40} more")
+    lines += [f"  NOTE: {w}" for w in r["warnings"]]
+    if not r["applied"] and r["removed"]:
+        lines.append("Show this plan to the user and only re-run with apply=true after they confirm.")
+    return "\n".join(lines)
+
 def tool_add_agenda_item(label, time="09:00", tag="Personal", date=""):
     items = _load(AGENDA_FILE)
     aid = max((a["id"] for a in items), default=0) + 1
@@ -623,6 +645,7 @@ TOOL_MAP = {
     "list_tasks":           lambda i: tool_list_tasks(i.get("role"), i.get("show_done", False)),
     "add_transaction":      lambda i: tool_add_transaction(**i),
     "financial_summary":    lambda i: tool_financial_summary(i.get("category")),
+    "finance_reconcile":    lambda i: tool_finance_reconcile(i.get("apply", False)),
     "add_agenda_item":      lambda i: tool_add_agenda_item(**i),
     "add_work_task":        lambda i: tool_add_work_task(**i),
     "log_weight":           lambda i: tool_log_weight(i["weight"], i.get("date","")),
@@ -643,6 +666,7 @@ TOOLS = [
     {"name":"list_tasks","description":"List open tasks","input_schema":{"type":"object","properties":{"role":{"type":"string"},"show_done":{"type":"boolean"}}}},
     {"name":"add_transaction","description":"Log an expense or income","input_schema":{"type":"object","properties":{"description":{"type":"string"},"amount":{"type":"number"},"type_":{"type":"string","enum":["income","expense"]},"category":{"type":"string","enum":["band","IT","coding","personal"]},"date":{"type":"string"}},"required":["description","amount","type_","category"]}},
     {"name":"financial_summary","description":"Get finance summary","input_schema":{"type":"object","properties":{"category":{"type":"string"}}}},
+    {"name":"finance_reconcile","description":"Reconcile the current month's Finance Sheet tab against the newest Rocket Money CSV export in Drive (the CSV is the point of truth): removes detail-table rows and Housing/Utilities actuals not backed by a CSV transaction. Dry run by default — ALWAYS show the user the plan and get their confirmation before calling again with apply=true.","input_schema":{"type":"object","properties":{"apply":{"type":"boolean","description":"true to write the removals to the Sheet; omit/false for a dry-run plan"}}}},
     {"name":"add_agenda_item","description":"Add an item to today's agenda","input_schema":{"type":"object","properties":{"label":{"type":"string"},"time":{"type":"string","description":"HH:MM"},"tag":{"type":"string"},"date":{"type":"string"}},"required":["label"]}},
     {"name":"add_work_task","description":"Add a GLS or coding work task (work_tasks.json)","input_schema":{"type":"object","properties":{"title":{"type":"string"},"project":{"type":"string","description":"e.g. GLS Security, GLS IT, GLS SharePoint, Code"},"priority":{"type":"string","enum":["high","normal","low"]},"notes":{"type":"string"}},"required":["title"]}},
     {"name":"log_weight","description":"Log today's weight in lbs","input_schema":{"type":"object","properties":{"weight":{"type":"number"},"date":{"type":"string"}},"required":["weight"]}},
@@ -905,8 +929,10 @@ def get_finances():
             tab  = _month_tab(month) if month else _first_sheet_name(svc, FINANCE_SHEET_ID)
             rows = _finance_rows(svc, tab)
             return jsonify(_parse_transaction_rows(rows, tab=tab))
-        except Exception:
-            pass
+        except Exception as e:
+            # Falling back to the local file silently is confusing (old freeform
+            # categories render as "Other" and rows lack sheet coords) — log why.
+            app.logger.warning("Finance Sheet read failed; serving local transactions: %s", e)
     data = _load(FINANCE_FILE)
     if month:
         data = [t for t in data if t.get("date", "").startswith(month)]
@@ -1177,7 +1203,11 @@ def delete_finance_sheet():
 @app.route("/api/finances/<int:tid>", methods=["PATCH"])
 def patch_finance(tid):
     d = request.json or {}
-    if FINANCE_SHEET_ID:
+    # Route to the Sheet editor only when the payload carries sheet coordinates.
+    # When the Sheet read failed at GET time, the frontend is showing LOCAL
+    # transactions (no sheet_tab) — those must be edited in the local store,
+    # not rejected with "sheet_tab, sheet_row and sheet_col are required".
+    if FINANCE_SHEET_ID and str(d.get("sheet_tab") or "").strip():
         resp = _patch_finance_sheet(d)
         _invalidate_finance_cache()
         return resp
@@ -1733,15 +1763,23 @@ def complete_onboarding():
 
 # ── Finance import: Rocket Money CSV from Google Drive ───────────────────────────
 
-def _record_expense(date, desc, amt, cat):
+def _record_expense(date, desc, amt, cat, rows_cache=None):
     """Write one expense to the finance Sheet (detail or budget table) or the local
-    JSON fallback. Returns (ok: bool, detail: str|dict). Mirrors POST /api/finances."""
+    JSON fallback. Returns (ok: bool, detail: str|dict). Mirrors POST /api/finances.
+    Pass a dict as `rows_cache` for bulk imports: each month tab is read once and the
+    in-memory copy is updated as rows are written, instead of one quota-burning
+    values().get() per transaction (per-user read quota is 60/min)."""
     cat = _canonical_finance_category(cat)
     if FINANCE_SHEET_ID:
         svc = _sheets_svc()
         tab = _month_tab(date[:7])
-        rows = svc.spreadsheets().values().get(
-            spreadsheetId=FINANCE_SHEET_ID, range=tab).execute().get('values', [])
+        if rows_cache is not None and tab in rows_cache:
+            rows = rows_cache[tab]
+        else:
+            rows = _sheets_execute(svc.spreadsheets().values().get(
+                spreadsheetId=FINANCE_SHEET_ID, range=tab)).get('values', [])
+            if rows_cache is not None:
+                rows_cache[tab] = rows
         if cat in DETAIL_TABLE_KEYWORDS:
             if _write_detail_transaction(svc, FINANCE_SHEET_ID, tab, rows, cat, desc, amt, date):
                 _invalidate_finance_cache()
@@ -1839,6 +1877,165 @@ def _rocket_fingerprint(date, amount, name):
     key = f"{date}|{float(amount):.2f}|{str(name).strip().lower()}"
     return hashlib.sha1(key.encode("utf-8")).hexdigest()
 
+def _finance_reconcile(apply=False):
+    """Reconcile the current month's Finance tab against the newest Rocket Money
+    CSV export in Drive — the CSV is the point of truth. Any detail-table row
+    (Fun / Gas / Food & Grocery) or Housing/Utilities actual NOT backed by a
+    current-month CSV transaction is removed: detail tables are compacted (kept
+    rows shift up, blanks below), budget actuals are cleared in place. Dry run
+    unless apply=True; returns a plan dict ({'error': ...} on failure).
+    Safe wrt the Drive sync: import fingerprints live in finance_import.json,
+    not in the Sheet, so removed rows will NOT be re-imported. Ported from the
+    one-off scripts/finance_july_cleanup.py (July tab was duplicated from June)."""
+    def norm(s):
+        return str(s or "").strip().lower()
+
+    month = datetime.now().strftime("%Y-%m")
+    tab = _month_tab(month)
+    cfg = _load(GDRIVE_CONFIG_FILE, {})
+    folder = cfg.get("finance_import_folder") or FINANCE_IMPORT_FOLDER
+    if not folder:
+        return {"error": "No Drive import folder configured — set it in Settings → Integrations"}
+    raw, meta = _drive_newest_csv(folder)
+    if raw is None:
+        return {"error": f"Could not fetch CSV: {meta}"}
+    try:
+        csv_rows = _parse_rocket_csv(raw)
+    except Exception as e:
+        return {"error": f"Could not parse CSV: {e}"}
+
+    # -- truth: this month's real spend, categorized exactly like the sync --
+    detail_truth = {c: [] for c in DETAIL_TABLE_KEYWORDS}   # cat -> [(col1, amt)]
+    budget_truth, truth_total = [], 0.0                     # [(name, amt)]
+    for r in csv_rows:
+        if (r["date"] or "")[:7] != month or _rocket_is_nonspend(r):
+            continue
+        cat = _rocket_to_finance_category(r.get("category"), r.get("name"))
+        amt = round(abs(r["amount"]), 2)
+        truth_total = round(truth_total + amt, 2)
+        if cat in DETAIL_TABLE_KEYWORDS:
+            col1 = r["name"] if cat == "Fun" else _format_short_date(r["date"])
+            detail_truth[cat].append((norm(col1), amt))
+        else:
+            budget_truth.append((norm(r["name"]), amt))
+
+    svc = _sheets_svc()
+    vals = _sheets_execute(svc.spreadsheets().values().get(
+        spreadsheetId=FINANCE_SHEET_ID, range=tab))
+    rows = vals.get("values", [])
+    max_cols = max((len(r) for r in rows), default=1)
+    rows = [r + [""] * (max_cols - len(r)) for r in rows]
+
+    def take(pool, col1, amt):
+        """Greedy multiset match: same col1 text and amount within a cent."""
+        for i, (tc, ta) in enumerate(pool):
+            if tc == col1 and abs(ta - amt) < 0.011:
+                pool.pop(i)
+                return True
+        return False
+
+    updates = []       # values().update payloads for detail-table rewrites
+    clears = []        # single cells to blank in budget sections
+    removed, kept_total, warnings = [], 0.0, []
+
+    # -- detail tables: Fun / Gas / Food-Grocery --
+    for cat in DETAIL_TABLE_KEYWORDS:
+        pos = _find_detail_table(rows, cat)
+        if not pos:
+            warnings.append(f"[{cat}] detail table not found — skipped")
+            continue
+        hr, hc = pos
+        end = len(rows)
+        for ri in range(hr + 2, len(rows)):
+            c1 = norm(rows[ri][hc])
+            c2 = norm(rows[ri][hc + 1]) if hc + 1 < max_cols else ""
+            if "total" in (c1 + c2):
+                end = ri
+                break
+        pool = list(detail_truth[cat])
+        kept = []
+        for ri in range(hr + 2, end):
+            c1 = str(rows[ri][hc]).strip()
+            c2raw = rows[ri][hc + 1] if hc + 1 < max_cols else ""
+            if not c1 and not str(c2raw).strip():
+                continue
+            amt = _parse_money(c2raw)
+            if take(pool, norm(c1), amt):
+                kept.append([c1, c2raw])
+                kept_total = round(kept_total + amt, 2)
+            else:
+                removed.append({"category": cat, "label": c1, "amount": amt})
+        n_slots = end - (hr + 2)
+        body = kept + [["", ""]] * (n_slots - len(kept))
+        a1 = f"'{tab}'!{_col_letter(hc)}{hr + 3}:{_col_letter(hc + 1)}{end}"
+        updates.append((a1, body))
+        if pool:
+            warnings.append(f"[{cat}] {len(pool)} CSV transactions not in the Sheet yet (sync will import them)")
+
+    # -- budget sections: Housing / Utilities rows with actuals --
+    hdr_idx, desc_col, _, actual_col = _finance_budget_columns(rows)
+    hdr = [norm(c) for c in rows[hdr_idx]]
+    budget_col = next((i for i, h in enumerate(hdr) if "budget" in h), 4)
+    current_cat = ""
+    for ri in range(hdr_idx + 1, len(rows)):
+        rl = " ".join(rows[ri][:8]).lower()
+        if any(kw in rl for kw in ["anticipated", "actual total", "roommate", "savings total"]):
+            break
+        cat_val = str(rows[ri][0]).strip()
+        desc_val = str(rows[ri][desc_col]).strip()
+        if cat_val and not any(ch.isdigit() for ch in cat_val):
+            current_cat = cat_val
+        canon = _canon_cat(cat_val or desc_val or current_cat)
+        if canon not in ("Housing", "Utilities"):
+            continue
+        actual_raw = rows[ri][actual_col] if actual_col < max_cols else ""
+        if not str(actual_raw).strip():
+            continue                      # unpaid/planned row — leave alone
+        amt = _parse_money(actual_raw)
+        if take(budget_truth, norm(desc_val), amt):
+            kept_total = round(kept_total + amt, 2)
+            continue                      # backed by a CSV txn — keep
+        has_budgeted = bool(str(rows[ri][budget_col]).strip()) if budget_col < max_cols else False
+        removed.append({"category": canon, "label": desc_val, "amount": amt})
+        clears.append(f"'{tab}'!{_col_letter(actual_col)}{ri + 1}")
+        if not has_budgeted:              # import-appended row, not a template bill
+            clears.append(f"'{tab}'!{_col_letter(desc_col)}{ri + 1}")
+
+    removed_total = round(sum(x["amount"] for x in removed), 2)
+    result = {"csv": meta, "tab": tab, "applied": False,
+              "truth_total": truth_total, "kept_total": kept_total,
+              "removed_total": removed_total, "removed": removed,
+              "warnings": warnings}
+    if not apply or not removed:
+        return result
+
+    for a1, body in updates:
+        _sheets_execute(svc.spreadsheets().values().update(
+            spreadsheetId=FINANCE_SHEET_ID, range=a1,
+            valueInputOption="USER_ENTERED", body={"values": body}))
+    if clears:
+        _sheets_execute(svc.spreadsheets().values().batchUpdate(
+            spreadsheetId=FINANCE_SHEET_ID,
+            body={"valueInputOption": "USER_ENTERED",
+                  "data": [{"range": a1, "values": [[""]]} for a1 in clears]}))
+    _invalidate_finance_cache()
+    result["applied"] = True
+    return result
+
+@app.route("/api/finance/reconcile", methods=["GET"])
+def finance_reconcile():
+    """Plan (default) or apply (?apply=1) a purge of current-month Sheet rows not
+    backed by the newest Rocket Money CSV export. Same GET+flag style as
+    /api/finance/import/drive."""
+    apply = request.args.get("apply") in ("1", "true", "yes")
+    try:
+        result = _finance_reconcile(apply=apply)
+    except Exception as e:
+        return jsonify({"error": f"Reconcile failed: {e}"}), 500
+    if result.get("error"):
+        return jsonify(result), 400
+    return jsonify(result)
+
 @app.route("/api/finance/import/status", methods=["GET"])
 def finance_import_status():
     """Whether the Finance card can sync: is a Drive import folder configured and is the
@@ -1856,6 +2053,7 @@ def finance_import_drive():
     income/transfers/payments/pending/ignored rows and any already-imported row (by
     fingerprint). Pass ?preview=1 to return the categorized rows WITHOUT writing."""
     preview = request.args.get("preview") in ("1", "true", "yes")
+    include_imported = request.args.get("include_imported") in ("1", "true", "yes")
     cfg = _load(GDRIVE_CONFIG_FILE, {})
     folder = cfg.get("finance_import_folder") or FINANCE_IMPORT_FOLDER
     if not folder:
@@ -1879,6 +2077,7 @@ def finance_import_drive():
     state = _load(FINANCE_IMPORT_FILE, {"imported": []})
     imported = set(state.get("imported", []))
     written, failed, skipped, scanned, errors, preview_rows = 0, 0, 0, 0, [], []
+    sheet_cache = {}   # tab -> rows; one read per month tab for the whole import
     for r in rows:
         scanned += 1
         if (r["date"] or "") < cutoff:          # outside the import window
@@ -1889,6 +2088,11 @@ def finance_import_drive():
             continue
         fp = _rocket_fingerprint(r["date"], r["amount"], r["name"])
         if fp in imported:
+            if preview and include_imported:   # audit mode: show already-written rows too
+                preview_rows.append({"date": r["date"], "name": r["name"],
+                                     "amount": round(abs(r["amount"]), 2),
+                                     "category": _rocket_to_finance_category(r.get("category"), r.get("name")),
+                                     "already_imported": True})
             skipped += 1
             continue
         cat = _rocket_to_finance_category(r.get("category"), r.get("name"))
@@ -1897,7 +2101,8 @@ def finance_import_drive():
                                  "amount": round(abs(r["amount"]), 2), "category": cat})
             continue
         try:
-            ok, detail = _record_expense(r["date"], r["name"] or "Transaction", abs(r["amount"]), cat)
+            ok, detail = _record_expense(r["date"], r["name"] or "Transaction", abs(r["amount"]), cat,
+                                         rows_cache=sheet_cache)
             if ok:
                 imported.add(fp); written += 1
                 if written % 50 == 0:           # persist progress so a timeout can't re-import
@@ -1911,9 +2116,15 @@ def finance_import_drive():
             if str(e) not in errors:
                 errors.append(str(e))
     if preview:
+        preview_rows.sort(key=lambda x: x["date"])
+        by_cat = {}
+        for x in preview_rows:
+            by_cat[x["category"]] = round(by_cat.get(x["category"], 0) + x["amount"], 2)
         return jsonify({"ok": True, "preview": True, "file": meta, "window_days": days,
                         "scanned": scanned, "skipped": skipped,
-                        "count": len(preview_rows), "rows": preview_rows[:200]})
+                        "count": len(preview_rows), "rows": preview_rows[:200],
+                        "total": round(sum(x["amount"] for x in preview_rows), 2),
+                        "by_category": by_cat})
     state["imported"] = list(imported)
     _save(FINANCE_IMPORT_FILE, state)
     return jsonify({"ok": True, "file": meta, "window_days": days, "written": written,
@@ -2850,6 +3061,29 @@ def _format_short_date(iso_date):
     except Exception:
         return iso_date
 
+def _sheets_execute(req, attempts=4):
+    """Execute a Sheets API request, retrying with backoff on 429 rate-limit errors
+    (per-user read/write quotas are 60/min — bulk imports can exceed them)."""
+    import time
+    for i in range(attempts):
+        try:
+            return req.execute()
+        except Exception as e:
+            msg = str(e)
+            if i == attempts - 1 or ('429' not in msg and 'RATE_LIMIT' not in msg.upper()):
+                raise
+            time.sleep(min(60, 15 * (i + 1)))
+
+def _set_cell(rows, r, c, val):
+    """Update an in-memory copy of sheet rows after a successful write so bulk
+    imports can find the next empty row without re-reading the tab."""
+    while len(rows) <= r:
+        rows.append([])
+    row = rows[r]
+    while len(row) <= c:
+        row.append('')
+    row[c] = val
+
 def _write_detail_transaction(svc, spreadsheet_id, tab, rows, cat, desc, amt, date):
     pos = _find_detail_table(rows, cat)
     if not pos:
@@ -2863,11 +3097,13 @@ def _write_detail_transaction(svc, spreadsheet_id, tab, rows, cat, desc, amt, da
         raise ValueError(f"'{cat}' table is full - add more empty rows before the Total row.")
     col1 = desc if cat == 'Fun' else _format_short_date(date)
     a1 = f"'{tab}'!{_col_letter(header_col)}{target_row + 1}:{_col_letter(header_col + 1)}{target_row + 1}"
-    svc.spreadsheets().values().update(
+    _sheets_execute(svc.spreadsheets().values().update(
         spreadsheetId=spreadsheet_id, range=a1,
         valueInputOption='USER_ENTERED',
         body={'values': [[col1, amt]]}
-    ).execute()
+    ))
+    _set_cell(rows, target_row, header_col, col1)
+    _set_cell(rows, target_row, header_col + 1, amt)
     return target_row, header_col
 
 def _write_budget_transaction(svc, spreadsheet_id, tab, rows, cat, desc, amt):
@@ -2879,10 +3115,12 @@ def _write_budget_transaction(svc, spreadsheet_id, tab, rows, cat, desc, amt):
         {'range': f"'{tab}'!{_col_letter(desc_col)}{target_row + 1}", 'values': [[desc or cat]]},
         {'range': f"'{tab}'!{_col_letter(actual_col)}{target_row + 1}", 'values': [[amt]]},
     ]
-    svc.spreadsheets().values().batchUpdate(
+    _sheets_execute(svc.spreadsheets().values().batchUpdate(
         spreadsheetId=spreadsheet_id,
         body={'valueInputOption': 'USER_ENTERED', 'data': data}
-    ).execute()
+    ))
+    _set_cell(rows, target_row, desc_col, desc or cat)
+    _set_cell(rows, target_row, actual_col, amt)
     return target_row, actual_col
 
 def _clear_sheet_values(svc, spreadsheet_id, tab, row, col, cols):
