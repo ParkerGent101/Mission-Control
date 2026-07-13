@@ -3107,9 +3107,25 @@ def _write_detail_transaction(svc, spreadsheet_id, tab, rows, cat, desc, amt, da
     return target_row, header_col
 
 def _write_budget_transaction(svc, spreadsheet_id, tab, rows, cat, desc, amt):
-    target_row = _find_budget_section_next_row(rows, cat)
+    target_row, section_start, section_end = _find_budget_section_slot(rows, cat)
     if target_row is None:
-        return None
+        if section_end is None:
+            return None  # section doesn't exist in this tab at all
+        # Section exists but is full: insert a fresh row *inside* it (before the
+        # last entry) so SUM/total ranges below auto-expand, then write there.
+        sheet_id = _sheet_id_by_name(svc, spreadsheet_id, tab)
+        if sheet_id is None:
+            return None
+        _sheets_execute(svc.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={'requests': [{'insertDimension': {
+                'range': {'sheetId': sheet_id, 'dimension': 'ROWS',
+                          'startIndex': section_end, 'endIndex': section_end + 1},
+                'inheritFromBefore': True
+            }}]}
+        ))
+        rows.insert(section_end, [])
+        target_row = section_end
     _, desc_col, _, actual_col = _finance_budget_columns(rows)
     data = [
         {'range': f"'{tab}'!{_col_letter(desc_col)}{target_row + 1}", 'values': [[desc or cat]]},
@@ -3269,11 +3285,13 @@ def _clear_budget_actuals(svc, spreadsheet_id, tab):
             spreadsheetId=spreadsheet_id, body={'ranges': clears}
         ).execute()
 
-def _find_budget_section_next_row(rows, canon_target):
-    """Find the next insertion row inside a budget-tracker section matching canon_target.
-    Returns 0-based row index to write to, or None if section not found."""
+def _find_budget_section_slot(rows, canon_target):
+    """Locate the budget-tracker section matching canon_target.
+    Returns (blank_row, section_start, section_end), all 0-based row indexes.
+    blank_row is the first empty row inside the section, or None if the section
+    is full. section_start/section_end are None when the section isn't found."""
     if not rows:
-        return None
+        return None, None, None
     max_cols = max((len(r) for r in rows), default=1)
     padded = [r + [''] * (max_cols - len(r)) for r in rows]
 
@@ -3285,6 +3303,7 @@ def _find_budget_section_next_row(rows, canon_target):
             break
 
     section_start = None
+    section_end = None
     current_cat = ''
     for ri in range(hdr_row_idx + 1, len(padded)):
         row = padded[ri]
@@ -3299,11 +3318,16 @@ def _find_budget_section_next_row(rows, canon_target):
         if row_canon == canon_target:
             if section_start is None:
                 section_start = ri
+            section_end = ri
             if not desc_val and not cat_val:
-                return ri
+                return ri, section_start, section_end
         elif section_start is not None:
-            return None
-    return None
+            break
+    return None, section_start, section_end
+
+def _find_budget_section_next_row(rows, canon_target):
+    """First blank row inside the budget section, or None (back-compat wrapper)."""
+    return _find_budget_section_slot(rows, canon_target)[0]
 
 def _find_subscription_sheet_row(rows, name):
     """Find the 0-based row index within the Subscriptions budget section whose
