@@ -1109,7 +1109,7 @@ def patch_finances_budget():
             if cat_val and not any(ch.isdigit() for ch in cat_val):
                 current_cat = cat_val
             desc_val = row[1].strip() if len(row) > 1 else ''
-            if _canon_cat(cat_val or desc_val or current_cat) != category:
+            if _budget_row_canon(cat_val, desc_val, current_cat) != category:
                 continue
             matches.append(ri)
             budg_str = row[budget_col].strip() if len(row) > budget_col else ''
@@ -1985,7 +1985,7 @@ def _finance_reconcile(apply=False):
         desc_val = str(rows[ri][desc_col]).strip()
         if cat_val and not any(ch.isdigit() for ch in cat_val):
             current_cat = cat_val
-        canon = _canon_cat(cat_val or desc_val or current_cat)
+        canon = _budget_row_canon(cat_val, desc_val, current_cat)
         if canon not in ("Housing", "Utilities"):
             continue
         actual_raw = rows[ri][actual_col] if actual_col < max_cols else ""
@@ -2841,12 +2841,12 @@ def _parse_budget_rows(rows):
         cat_val = row[0].strip()
         if cat_val and not any(ch.isdigit() for ch in cat_val):
             current_cat = cat_val
-        # Prefer the row's description (col B) over a stale carried-forward parent
-        # when the parent isn't a known category — handles sheets that put each
-        # utility/subscription sub-item in col A with no merged parent.
+        # Col A label wins; else the description only when it canon-maps to a
+        # known category (Netflix → Subscriptions); else the section's carried
+        # label — so merchant-named rows written into Housing/Utilities still
+        # count toward their section's bar instead of a phantom category.
         desc_val = row[1].strip() if len(row) > 1 else ''
-        row_key = cat_val or desc_val or current_cat
-        canon = _canon_cat(row_key)
+        canon = _budget_row_canon(cat_val, desc_val, current_cat)
         if not canon:
             continue
         budg_str   = row[budget_col].strip() if len(row) > budget_col else ''
@@ -2992,6 +2992,20 @@ def _canon_cat(raw):
         if substr in key:
             return canon
     return str(raw).strip()
+
+def _budget_row_canon(cat_val, desc_val, current_cat):
+    """Attribute a budget-section row to a canonical category.
+    Col A label wins; else the description, but only when it canon-maps to a
+    known category (e.g. 'Netflix' → Subscriptions) — a merchant name like
+    'Greystar' must NOT shadow the section the row sits in; else fall back to
+    the carried-forward section label."""
+    if cat_val:
+        return _canon_cat(cat_val)
+    if desc_val:
+        desc_canon = _canon_cat(desc_val)
+        if desc_canon in FINANCE_CATEGORY_NAMES:
+            return desc_canon
+    return _canon_cat(current_cat)
 
 def _canonical_finance_category(raw):
     key = str(raw or "").strip()
@@ -3314,7 +3328,7 @@ def _find_budget_section_slot(rows, canon_target):
         desc_val = row[1].strip() if len(row) > 1 else ''
         if cat_val and not any(ch.isdigit() for ch in cat_val):
             current_cat = cat_val
-        row_canon = _canon_cat(cat_val or desc_val or current_cat)
+        row_canon = _budget_row_canon(cat_val, desc_val, current_cat)
         if row_canon == canon_target:
             if section_start is None:
                 section_start = ri
@@ -3357,7 +3371,7 @@ def _find_subscription_sheet_row(rows, name):
         desc_val = row[1].strip() if len(row) > 1 else ''
         if cat_val and not any(ch.isdigit() for ch in cat_val):
             current_cat = cat_val
-        row_canon = _canon_cat(cat_val or desc_val or current_cat)
+        row_canon = _budget_row_canon(cat_val, desc_val, current_cat)
         if row_canon == 'Subscriptions':
             if section_start is None:
                 section_start = ri
@@ -3384,7 +3398,7 @@ def _parse_budget_transaction_rows(rows, tab=""):
         desc_val = str(row[desc_col]).strip() if len(row) > desc_col else ''
         if cat_val and not any(ch.isdigit() for ch in cat_val):
             current_cat = cat_val
-        canon = _canon_cat(cat_val or desc_val or current_cat)
+        canon = _budget_row_canon(cat_val, desc_val, current_cat)
         if canon not in BUDGET_TRANSACTION_CATEGORIES:
             continue
         actual = _parse_money(row[actual_col] if len(row) > actual_col else 0)
