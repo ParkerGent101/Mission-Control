@@ -1162,7 +1162,7 @@ def post_finance():
                 target_row, target_col = written
                 _invalidate_finance_cache()
                 return jsonify({"ok": True, "sheet_tab": tab, "sheet_row": target_row, "sheet_col": target_col, "sheet_cols": 1, "sheet_kind": "budget"})
-            allowed = ", ".join(["Housing", "Utilities", "Food / Grocery", "Fun", "Gas"])
+            allowed = ", ".join(["Housing", "Utilities", "Subscriptions", "Food / Grocery", "Fun", "Gas"])
             return jsonify({"error": f"'{cat}' isn't a transaction-tracked category. Use {allowed}."}), 400
         except Exception as e:
             return jsonify({"error": str(e)}), 500
@@ -1795,15 +1795,25 @@ def _record_expense(date, desc, amt, cat, rows_cache=None):
     return True, {"kind": "local"}
 
 # Rocket Money's "Category" -> a Sheet-tracked bucket. The finance Sheet only has
-# detail/budget tables for Gas, Food / Grocery, Housing and Utilities; everything else
-# (dining, shopping, entertainment, …) collapses to 'Fun' so every spend row is importable.
+# detail/budget tables for Gas, Food / Grocery, Housing, Utilities and Subscriptions;
+# everything else (dining, shopping, …) collapses to 'Fun' so every spend row is importable.
+# Subscription merchants are checked BEFORE utilities because Rocket Money files most of
+# them under "Bills & Utilities" — the only real utilities are Cox, water and electric.
+_RM_SUBSCRIPTION_MERCHANTS = (
+    "netflix", "hulu", "spotify", "apple music", "audible", "planet fitness",
+    "google cloud", "rocket money", "minecraft", "realms", "disney", "youtube",
+    "hbo", "paramount", "peacock", "patreon", "chatgpt", "claude", "notion",
+    "adobe", "icloud", "amazon prime",
+)
+
 def _rocket_to_finance_category(rm_cat, name=""):
     blob = (str(rm_cat or "").lower() + " " + str(name or "").lower())
+    if any(k in blob for k in ("subscript",) + _RM_SUBSCRIPTION_MERCHANTS):       return "Subscriptions"
     if any(k in blob for k in ("gas", "fuel", "auto & transport", "transport")):  return "Gas"
     if any(k in blob for k in ("grocer", "groceries")):                           return "Food / Grocery"
     if any(k in blob for k in ("rent", "mortgage")):                              return "Housing"
-    if any(k in blob for k in ("bills & utilities", "utilit", "internet", "cable",
-                               "electric", "water", "phone")):                    return "Utilities"
+    if any(k in blob for k in ("bills & utilities", "utilit", "cox", "internet",
+                               "cable", "electric", "water", "phone")):           return "Utilities"
     return "Fun"
 
 # Rocket Money "Category" values that are NOT new discretionary spend, so they never hit
@@ -2935,7 +2945,7 @@ DETAIL_TABLE_KEYWORDS = {
     'Fun':           ['fun total', 'fun totals'],
     'Food / Grocery': ['grocery trip', 'groceries total', 'grocery'],
 }
-BUDGET_TRANSACTION_CATEGORIES = {'Housing', 'Utilities'}
+BUDGET_TRANSACTION_CATEGORIES = {'Housing', 'Utilities', 'Subscriptions'}
 FINANCE_CATEGORY_NAMES = {
     'Housing', 'Utilities', 'Subscriptions', 'Food / Grocery', 'Fun',
     'Gas', 'Shopping', 'Band', 'Loans', 'Other',
@@ -2961,6 +2971,10 @@ _CANON_CAT_EXACT = {
     'patreon': 'Subscriptions', 'github': 'Subscriptions', 'chatgpt': 'Subscriptions',
     'claude': 'Subscriptions', 'notion': 'Subscriptions', 'adobe': 'Subscriptions',
     'icloud': 'Subscriptions', 'microsoft 365': 'Subscriptions', 'office 365': 'Subscriptions',
+    'google cloud': 'Subscriptions', 'rocket money': 'Subscriptions',
+    'minecraft': 'Subscriptions', 'minecraft realms': 'Subscriptions', 'realms': 'Subscriptions',
+    'planet fitness': 'Subscriptions', 'audible': 'Subscriptions',
+    'cox': 'Utilities',
     'food': 'Food / Grocery', 'food / grocery': 'Food / Grocery', 'food / grocer': 'Food / Grocery',
     'food/grocery': 'Food / Grocery', 'food/grocer': 'Food / Grocery',
     'grocer': 'Food / Grocery', 'groceries': 'Food / Grocery', 'grocery': 'Food / Grocery',
@@ -2975,6 +2989,10 @@ _CANON_SUBSTR = [
     ('netflix', 'Subscriptions'), ('hulu', 'Subscriptions'), ('spotify', 'Subscriptions'),
     ('disney', 'Subscriptions'), ('prime', 'Subscriptions'), ('youtube', 'Subscriptions'),
     ('apple', 'Subscriptions'), ('hbo', 'Subscriptions'),
+    ('google cloud', 'Subscriptions'), ('rocket money', 'Subscriptions'),
+    ('minecraft', 'Subscriptions'), ('realms', 'Subscriptions'),
+    ('planet fitness', 'Subscriptions'), ('audible', 'Subscriptions'),
+    ('cox', 'Utilities'),
     ('internet', 'Utilities'), ('electric', 'Utilities'), ('water', 'Utilities'),
     ('cable', 'Utilities'), ('power', 'Utilities'), ('sewer', 'Utilities'),
     ('trash', 'Utilities'), ('phone', 'Utilities'),
@@ -3173,7 +3191,7 @@ def _patch_finance_sheet(d):
 
     cat = _canonical_finance_category(d.get("category"))
     if cat not in DETAIL_TABLE_KEYWORDS and cat not in BUDGET_TRANSACTION_CATEGORIES:
-        allowed = ", ".join(["Housing", "Utilities", "Food / Grocery", "Fun", "Gas"])
+        allowed = ", ".join(["Housing", "Utilities", "Subscriptions", "Food / Grocery", "Fun", "Gas"])
         return jsonify({"error": f"'{cat}' isn't a transaction-tracked category. Use {allowed}."}), 400
 
     try:
