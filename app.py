@@ -1244,13 +1244,16 @@ def rollover_month():
         y, m = int(src_month[:4]), int(src_month[5:7])
     except Exception:
         return jsonify({"error": "month must be YYYY-MM"}), 400
-    src_tab = MONTH_NAMES_FULL[m - 1]
     nm, ny = (1, y + 1) if m == 12 else (m + 1, y)
-    dst_tab = MONTH_NAMES_FULL[nm - 1]
+    dst_tab = MONTH_NAMES_FULL[nm - 1]   # new tabs get plain month names going forward
     try:
         svc = _sheets_svc()
-        if _sheet_id_by_name(svc, FINANCE_SHEET_ID, dst_tab) is not None:
-            return jsonify({"error": f"A '{dst_tab}' tab already exists in your sheet."}), 409
+        src_tab = _resolve_month_tab(svc, src_month)
+        # Existing-tab check must also tolerate drifted titles ('August 2026'),
+        # or a second rollover would create a duplicate month.
+        existing_dst = _resolve_month_tab(svc, f"{ny}-{str(nm).zfill(2)}")
+        if _sheet_id_by_name(svc, FINANCE_SHEET_ID, existing_dst) is not None:
+            return jsonify({"error": f"A '{existing_dst}' tab already exists in your sheet."}), 409
         src_id = _sheet_id_by_name(svc, FINANCE_SHEET_ID, src_tab)
         if src_id is None:
             return jsonify({"error": f"No '{src_tab}' tab found to roll over from."}), 404
@@ -1284,9 +1287,9 @@ def rollover_year():
     except Exception:
         return jsonify({"error": "month must be YYYY-MM"}), 400
     new_year = y + 1
-    tmpl_tab = MONTH_NAMES_FULL[m - 1]
     try:
         svc = _sheets_svc()
+        tmpl_tab = _resolve_month_tab(svc, src_month)
         tmpl_id = _sheet_id_by_name(svc, FINANCE_SHEET_ID, tmpl_tab)
         if tmpl_id is None:
             return jsonify({"error": f"No '{tmpl_tab}' tab to use as the year template."}), 404
@@ -2809,6 +2812,7 @@ def _finance_rows(svc, tab):
 def _invalidate_finance_cache():
     """Drop cached finance Sheet reads. Call after ANY write to the finance Sheet."""
     _FIN_ROWS_CACHE.clear()
+    _TAB_TITLE_CACHE.clear()   # rollover adds tabs; keep title resolution fresh
 
 def _month_tab(yyyy_mm):
     """Convert YYYY-MM to full month name for sheet tab lookup."""
