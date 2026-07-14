@@ -171,10 +171,10 @@ const Card = ({ id, num, title, right, children, span = 6, hidden, bodyClass = "
 // Amber palette (warm hues, stepped lightness) so the donut/swatches stay
 // distinguishable while keeping the white + amber-accent theme — no off-hue colors.
 const FIN_CATS = [
-  { name: "Housing",       budget: 987,  color: "oklch(0.88 0.11 90)" },
-  { name: "Utilities",     budget: 450,  color: "oklch(0.58 0.12 66)" },
+  { name: "Utilities",     budget: 1437, color: "oklch(0.58 0.12 66)" },
   { name: "Subscriptions", budget: 125,  color: "oklch(0.92 0.09 98)" },
-  { name: "Food / Grocery", budget: 400,  color: "oklch(0.64 0.14 56)" },
+  { name: "Groceries",     budget: 400,  color: "oklch(0.64 0.14 56)" },
+  { name: "Dining and Drinks", budget: 250, color: "oklch(0.88 0.11 90)" },
   { name: "Fun",           budget: 500,  color: "oklch(0.83 0.12 80)" },
   { name: "Gas",           budget: 300,  color: "oklch(0.54 0.11 46)" },
   { name: "Shopping",      budget: 0,    color: "oklch(0.76 0.11 92)" },
@@ -184,37 +184,43 @@ const FIN_CATS = [
 ];
 const FIN_CAT_NAMES = FIN_CATS.map(c => c.name);
 // Categories a transaction can actually LIVE in inside the Google Sheet (the
-// Fun/Gas/Grocery detail tables + Housing/Utilities budget rows). The Sheet has
-// nowhere to put the rest, so the picker for sheet-sourced txns is limited to these.
-const SHEET_CAT_NAMES = ["Housing", "Utilities", "Food / Grocery", "Fun", "Gas"];
+// Fun/Gas/Groceries/Dining-and-Drinks detail tables + Utilities budget rows).
+// The Sheet has nowhere to put the rest, so the picker for sheet-sourced txns is limited to these.
+const SHEET_CAT_NAMES = ["Utilities", "Groceries", "Dining and Drinks", "Fun", "Gas"];
 const FIN_CAT_COLOR = Object.fromEntries(FIN_CATS.map(c => [c.name, c.color]));
 const normFinCat = (raw, fallback = "") => {
   const map = {
-    Housing: "Housing", Utilities: "Utilities", Subscriptions: "Subscriptions",
-    "Food / Grocery": "Food / Grocery", "Food / Grocer": "Food / Grocery", Fun: "Fun", Gas: "Gas",
+    Utilities: "Utilities", Subscriptions: "Subscriptions",
+    Groceries: "Groceries", "Dining and Drinks": "Dining and Drinks", Fun: "Fun", Gas: "Gas",
     Shopping: "Shopping", Band: "Band", Loans: "Loans", Other: "Other",
     // Sheet typos / variants → canonical
     Utilites: "Utilities", Utilties: "Utilities",
     "Water, Sewer, Trash": "Utilities", Electricity: "Utilities", Internet: "Utilities",
     Water: "Utilities", Sewer: "Utilities", Trash: "Utilities", Phone: "Utilities",
-    Food: "Food / Grocery", Groceries: "Food / Grocery", Grocery: "Food / Grocery", Grocer: "Food / Grocery",
-    Restaurants: "Fun", Dining: "Fun",
+    Housing: "Utilities", Rent: "Utilities", Mortgage: "Utilities", "Renters Insurance": "Utilities",
+    Food: "Groceries", "Food / Grocery": "Groceries", "Food / Grocer": "Groceries",
+    Grocery: "Groceries", Grocer: "Groceries",
+    Restaurants: "Dining and Drinks", Dining: "Dining and Drinks",
+    "Dining & Drinks": "Dining and Drinks", Drinks: "Dining and Drinks",
     Streaming: "Subscriptions", Subscription: "Subscriptions",
     Transportation: "Gas", Auto: "Gas", Fuel: "Gas",
-    Rent: "Housing", Mortgage: "Housing", "Renters Insurance": "Housing",
     Loan: "Loans",
     // lowercase fallbacks
-    housing: "Housing", utilities: "Utilities", subscriptions: "Subscriptions",
-    food: "Food / Grocery", grocery: "Food / Grocery", grocer: "Food / Grocery", dining: "Fun", transport: "Gas",
+    housing: "Utilities", utilities: "Utilities", subscriptions: "Subscriptions",
+    food: "Groceries", groceries: "Groceries", grocery: "Groceries", grocer: "Groceries",
+    dining: "Dining and Drinks", "dining & drinks": "Dining and Drinks",
+    "dining and drinks": "Dining and Drinks", drinks: "Dining and Drinks",
+    transport: "Gas",
     shopping: "Shopping", band: "Band", loans: "Loans",
     entertainment: "Fun", health: "Other", personal: "Other",
     IT: "Other", coding: "Other", gift: "Other", tax_refund: "Other", freelance: "Other",
   };
   const substr = [
-    ["renters insurance", "Housing"], ["rent", "Housing"], ["mortgage", "Housing"],
+    ["renters insurance", "Utilities"], ["rent", "Utilities"], ["mortgage", "Utilities"],
     ["internet", "Utilities"], ["electric", "Utilities"], ["water", "Utilities"],
     ["sewer", "Utilities"], ["trash", "Utilities"], ["phone", "Utilities"],
-    ["grocery", "Food / Grocery"], ["grocer", "Food / Grocery"],
+    ["grocery", "Groceries"], ["grocer", "Groceries"],
+    ["dining", "Dining and Drinks"],
   ];
   const resolve = (value) => {
     const key = String(value || "").trim();
@@ -243,7 +249,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
   const [roomRows, setRoomRows] = useState([]);              // [{label, amount}] being edited (full bills)
   const [showAdd, setShowAdd] = useState(false);
   const [showAddSub, setShowAddSub] = useState(false);
-  const [desc, setDesc] = useState(""); const [amt, setAmt] = useState(""); const [type, setType] = useState("expense"); const [cat, setCat] = useState("Housing");
+  const [desc, setDesc] = useState(""); const [amt, setAmt] = useState(""); const [type, setType] = useState("expense"); const [cat, setCat] = useState("Utilities");
   const [subName, setSubName] = useState(""); const [subAcct, setSubAcct] = useState(""); const [subAmt, setSubAmt] = useState(""); const [subDue, setSubDue] = useState("");
   const [subEditId, setSubEditId] = useState(null);   // id of subscription being edited (reuses the add form)
   const catOverrides = React.useRef({});

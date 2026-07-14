@@ -666,7 +666,7 @@ TOOLS = [
     {"name":"list_tasks","description":"List open tasks","input_schema":{"type":"object","properties":{"role":{"type":"string"},"show_done":{"type":"boolean"}}}},
     {"name":"add_transaction","description":"Log an expense or income","input_schema":{"type":"object","properties":{"description":{"type":"string"},"amount":{"type":"number"},"type_":{"type":"string","enum":["income","expense"]},"category":{"type":"string","enum":["band","IT","coding","personal"]},"date":{"type":"string"}},"required":["description","amount","type_","category"]}},
     {"name":"financial_summary","description":"Get finance summary","input_schema":{"type":"object","properties":{"category":{"type":"string"}}}},
-    {"name":"finance_reconcile","description":"Reconcile the current month's Finance Sheet tab against the newest Rocket Money CSV export in Drive (the CSV is the point of truth): removes detail-table rows and Housing/Utilities actuals not backed by a CSV transaction. Dry run by default — ALWAYS show the user the plan and get their confirmation before calling again with apply=true.","input_schema":{"type":"object","properties":{"apply":{"type":"boolean","description":"true to write the removals to the Sheet; omit/false for a dry-run plan"}}}},
+    {"name":"finance_reconcile","description":"Reconcile the current month's Finance Sheet tab against the newest Rocket Money CSV export in Drive (the CSV is the point of truth): removes detail-table rows and Utilities actuals not backed by a CSV transaction. Dry run by default — ALWAYS show the user the plan and get their confirmation before calling again with apply=true.","input_schema":{"type":"object","properties":{"apply":{"type":"boolean","description":"true to write the removals to the Sheet; omit/false for a dry-run plan"}}}},
     {"name":"add_agenda_item","description":"Add an item to today's agenda","input_schema":{"type":"object","properties":{"label":{"type":"string"},"time":{"type":"string","description":"HH:MM"},"tag":{"type":"string"},"date":{"type":"string"}},"required":["label"]}},
     {"name":"add_work_task","description":"Add a GLS or coding work task (work_tasks.json)","input_schema":{"type":"object","properties":{"title":{"type":"string"},"project":{"type":"string","description":"e.g. GLS Security, GLS IT, GLS SharePoint, Code"},"priority":{"type":"string","enum":["high","normal","low"]},"notes":{"type":"string"}},"required":["title"]}},
     {"name":"log_weight","description":"Log today's weight in lbs","input_schema":{"type":"object","properties":{"weight":{"type":"number"},"date":{"type":"string"}},"required":["weight"]}},
@@ -1072,7 +1072,7 @@ def post_finances_roommate():
 @app.route("/api/finances/budget", methods=["PATCH"])
 def patch_finances_budget():
     """Edit a category's budgeted amount (column E) in the month's budget tracker.
-    Body: {month: 'YYYY-MM', category: 'Housing', budgeted: 1050}. Writes the new
+    Body: {month: 'YYYY-MM', category: 'Utilities', budgeted: 1050}. Writes the new
     value to the category's single budget row; refuses if the category is split
     across multiple budget rows (edit those directly in the Sheet)."""
     if not FINANCE_SHEET_ID:
@@ -1162,7 +1162,7 @@ def post_finance():
                 target_row, target_col = written
                 _invalidate_finance_cache()
                 return jsonify({"ok": True, "sheet_tab": tab, "sheet_row": target_row, "sheet_col": target_col, "sheet_cols": 1, "sheet_kind": "budget"})
-            allowed = ", ".join(["Housing", "Utilities", "Subscriptions", "Food / Grocery", "Fun", "Gas"])
+            allowed = ", ".join(["Utilities", "Subscriptions", "Groceries", "Dining and Drinks", "Fun", "Gas"])
             return jsonify({"error": f"'{cat}' isn't a transaction-tracked category. Use {allowed}."}), 400
         except Exception as e:
             return jsonify({"error": str(e)}), 500
@@ -1795,8 +1795,9 @@ def _record_expense(date, desc, amt, cat, rows_cache=None):
     return True, {"kind": "local"}
 
 # Rocket Money's "Category" -> a Sheet-tracked bucket. The finance Sheet only has
-# detail/budget tables for Gas, Food / Grocery, Housing, Utilities and Subscriptions;
-# everything else (dining, shopping, …) collapses to 'Fun' so every spend row is importable.
+# detail/budget tables for Gas, Groceries, Dining and Drinks, Utilities and Subscriptions;
+# everything else (shopping, entertainment, …) collapses to 'Fun' so every spend row is importable.
+# Housing (rent/mortgage) is folded into Utilities — one bills bucket per the Rocket Money export.
 # Subscription merchants are checked BEFORE utilities because Rocket Money files most of
 # them under "Bills & Utilities" — the only real utilities are Cox, water and electric.
 _RM_SUBSCRIPTION_MERCHANTS = (
@@ -1810,10 +1811,11 @@ def _rocket_to_finance_category(rm_cat, name=""):
     blob = (str(rm_cat or "").lower() + " " + str(name or "").lower())
     if any(k in blob for k in ("subscript",) + _RM_SUBSCRIPTION_MERCHANTS):       return "Subscriptions"
     if any(k in blob for k in ("gas", "fuel", "auto & transport", "transport")):  return "Gas"
-    if any(k in blob for k in ("grocer", "groceries")):                           return "Food / Grocery"
-    if any(k in blob for k in ("rent", "mortgage")):                              return "Housing"
-    if any(k in blob for k in ("bills & utilities", "utilit", "cox", "internet",
-                               "cable", "electric", "water", "phone")):           return "Utilities"
+    if any(k in blob for k in ("grocer", "groceries")):                           return "Groceries"
+    if any(k in blob for k in ("dining", "drinks", "restaurant")):                return "Dining and Drinks"
+    if any(k in blob for k in ("rent", "mortgage", "bills & utilities", "utilit",
+                               "cox", "internet", "cable", "electric", "water",
+                               "phone")):                                         return "Utilities"
     return "Fun"
 
 # Rocket Money "Category" values that are NOT new discretionary spend, so they never hit
@@ -1890,7 +1892,7 @@ def _rocket_fingerprint(date, amount, name):
 def _finance_reconcile(apply=False):
     """Reconcile the current month's Finance tab against the newest Rocket Money
     CSV export in Drive — the CSV is the point of truth. Any detail-table row
-    (Fun / Gas / Food & Grocery) or Housing/Utilities actual NOT backed by a
+    (Fun / Gas / Groceries / Dining and Drinks) or Utilities actual NOT backed by a
     current-month CSV transaction is removed: detail tables are compacted (kept
     rows shift up, blanks below), budget actuals are cleared in place. Dry run
     unless apply=True; returns a plan dict ({'error': ...} on failure).
@@ -1924,7 +1926,7 @@ def _finance_reconcile(apply=False):
         amt = round(abs(r["amount"]), 2)
         truth_total = round(truth_total + amt, 2)
         if cat in DETAIL_TABLE_KEYWORDS:
-            col1 = r["name"] if cat == "Fun" else _format_short_date(r["date"])
+            col1 = r["name"] if cat in ("Fun", "Dining and Drinks") else _format_short_date(r["date"])
             detail_truth[cat].append((norm(col1), amt))
         else:
             budget_truth.append((norm(r["name"]), amt))
@@ -1948,7 +1950,7 @@ def _finance_reconcile(apply=False):
     clears = []        # single cells to blank in budget sections
     removed, kept_total, warnings = [], 0.0, []
 
-    # -- detail tables: Fun / Gas / Food-Grocery --
+    # -- detail tables: Fun / Gas / Groceries / Dining and Drinks --
     for cat in DETAIL_TABLE_KEYWORDS:
         pos = _find_detail_table(rows, cat)
         if not pos:
@@ -1982,7 +1984,7 @@ def _finance_reconcile(apply=False):
         if pool:
             warnings.append(f"[{cat}] {len(pool)} CSV transactions not in the Sheet yet (sync will import them)")
 
-    # -- budget sections: Housing / Utilities rows with actuals --
+    # -- budget sections: Utilities rows (incl. legacy Housing) with actuals --
     hdr_idx, desc_col, _, actual_col = _finance_budget_columns(rows)
     hdr = [norm(c) for c in rows[hdr_idx]]
     budget_col = next((i for i, h in enumerate(hdr) if "budget" in h), 4)
@@ -1996,7 +1998,7 @@ def _finance_reconcile(apply=False):
         if cat_val and not any(ch.isdigit() for ch in cat_val):
             current_cat = cat_val
         canon = _budget_row_canon(cat_val, desc_val, current_cat)
-        if canon not in ("Housing", "Utilities"):
+        if canon != "Utilities":
             continue
         actual_raw = rows[ri][actual_col] if actual_col < max_cols else ""
         if not str(actual_raw).strip():
@@ -2853,7 +2855,7 @@ def _parse_budget_rows(rows):
             current_cat = cat_val
         # Col A label wins; else the description only when it canon-maps to a
         # known category (Netflix → Subscriptions); else the section's carried
-        # label — so merchant-named rows written into Housing/Utilities still
+        # label — so merchant-named rows written into Utilities/Subscriptions still
         # count toward their section's bar instead of a phantom category.
         desc_val = row[1].strip() if len(row) > 1 else ''
         canon = _budget_row_canon(cat_val, desc_val, current_cat)
@@ -2941,13 +2943,14 @@ def _finance_budget_columns(rows):
     return hdr_row_idx, desc_col, due_col, actual_col
 
 DETAIL_TABLE_KEYWORDS = {
-    'Gas':           ['gas total', 'gas totals'],
-    'Fun':           ['fun total', 'fun totals'],
-    'Food / Grocery': ['grocery trip', 'groceries total', 'grocery'],
+    'Gas':               ['gas total', 'gas totals'],
+    'Fun':               ['fun total', 'fun totals'],
+    'Groceries':         ['groceries total', 'grocery trip', 'grocery'],
+    'Dining and Drinks': ['dining and drinks total', 'dining & drinks total', 'dining total'],
 }
-BUDGET_TRANSACTION_CATEGORIES = {'Housing', 'Utilities', 'Subscriptions'}
+BUDGET_TRANSACTION_CATEGORIES = {'Utilities', 'Subscriptions'}
 FINANCE_CATEGORY_NAMES = {
-    'Housing', 'Utilities', 'Subscriptions', 'Food / Grocery', 'Fun',
+    'Utilities', 'Subscriptions', 'Groceries', 'Dining and Drinks', 'Fun',
     'Gas', 'Shopping', 'Band', 'Loans', 'Other',
 }
 
@@ -2955,7 +2958,7 @@ FINANCE_CATEGORY_NAMES = {
 # Mirrors normFinCat in modules.jsx but adds common utility/subscription sub-names so
 # every line item collapses to one parent bar.
 _CANON_CAT_EXACT = {
-    'housing': 'Housing', 'rent': 'Housing', 'mortgage': 'Housing',
+    'housing': 'Utilities', 'rent': 'Utilities', 'mortgage': 'Utilities',
     'utilities': 'Utilities', 'utilites': 'Utilities', 'utilties': 'Utilities',
     'water': 'Utilities', 'sewer': 'Utilities', 'trash': 'Utilities',
     'electric': 'Utilities', 'electricity': 'Utilities', 'power': 'Utilities',
@@ -2975,11 +2978,13 @@ _CANON_CAT_EXACT = {
     'minecraft': 'Subscriptions', 'minecraft realms': 'Subscriptions', 'realms': 'Subscriptions',
     'planet fitness': 'Subscriptions', 'audible': 'Subscriptions',
     'cox': 'Utilities',
-    'food': 'Food / Grocery', 'food / grocery': 'Food / Grocery', 'food / grocer': 'Food / Grocery',
-    'food/grocery': 'Food / Grocery', 'food/grocer': 'Food / Grocery',
-    'grocer': 'Food / Grocery', 'groceries': 'Food / Grocery', 'grocery': 'Food / Grocery',
-    'fun': 'Fun', 'dining': 'Fun', 'restaurants': 'Fun',
-    'entertainment': 'Fun',
+    'food': 'Groceries', 'food / grocery': 'Groceries', 'food / grocer': 'Groceries',
+    'food/grocery': 'Groceries', 'food/grocer': 'Groceries',
+    'grocer': 'Groceries', 'groceries': 'Groceries', 'grocery': 'Groceries',
+    'fun': 'Fun', 'entertainment': 'Fun',
+    'dining': 'Dining and Drinks', 'restaurants': 'Dining and Drinks',
+    'dining & drinks': 'Dining and Drinks', 'dining and drinks': 'Dining and Drinks',
+    'drinks': 'Dining and Drinks',
     'gas': 'Gas', 'fuel': 'Gas', 'transportation': 'Gas', 'transport': 'Gas', 'auto': 'Gas',
     'shopping': 'Shopping',
     'band': 'Band',
@@ -2996,8 +3001,9 @@ _CANON_SUBSTR = [
     ('internet', 'Utilities'), ('electric', 'Utilities'), ('water', 'Utilities'),
     ('cable', 'Utilities'), ('power', 'Utilities'), ('sewer', 'Utilities'),
     ('trash', 'Utilities'), ('phone', 'Utilities'),
-    ('renters insurance', 'Housing'), ('rent', 'Housing'), ('mortgage', 'Housing'),
-    ('grocery', 'Food / Grocery'), ('grocer', 'Food / Grocery'),
+    ('renters insurance', 'Utilities'), ('rent', 'Utilities'), ('mortgage', 'Utilities'),
+    ('grocery', 'Groceries'), ('grocer', 'Groceries'),
+    ('dining', 'Dining and Drinks'),
 ]
 
 def _canon_cat(raw):
@@ -3029,27 +3035,30 @@ def _canonical_finance_category(raw):
     key = str(raw or "").strip()
     aliases = {
         'auto': 'Gas',
-        'dining': 'Fun',
+        'dining': 'Dining and Drinks',
+        'dining & drinks': 'Dining and Drinks',
+        'dining and drinks': 'Dining and Drinks',
+        'drinks': 'Dining and Drinks',
         'electric': 'Utilities',
         'electricity': 'Utilities',
         'entertainment': 'Fun',
-        'food': 'Food / Grocery',
-        'food / grocery': 'Food / Grocery',
-        'food / grocer': 'Food / Grocery',
-        'food/grocery': 'Food / Grocery',
-        'food/grocer': 'Food / Grocery',
+        'food': 'Groceries',
+        'food / grocery': 'Groceries',
+        'food / grocer': 'Groceries',
+        'food/grocery': 'Groceries',
+        'food/grocer': 'Groceries',
         'fuel': 'Gas',
         'fun': 'Fun',
         'gas': 'Gas',
-        'groceries': 'Food / Grocery',
-        'grocery': 'Food / Grocery',
-        'grocer': 'Food / Grocery',
-        'housing': 'Housing',
+        'groceries': 'Groceries',
+        'grocery': 'Groceries',
+        'grocer': 'Groceries',
+        'housing': 'Utilities',
         'internet': 'Utilities',
-        'mortgage': 'Housing',
+        'mortgage': 'Utilities',
         'phone': 'Utilities',
-        'rent': 'Housing',
-        'restaurants': 'Fun',
+        'rent': 'Utilities',
+        'restaurants': 'Dining and Drinks',
         'transport': 'Gas',
         'transportation': 'Gas',
         'utilities': 'Utilities',
@@ -3127,7 +3136,7 @@ def _write_detail_transaction(svc, spreadsheet_id, tab, rows, cat, desc, amt, da
     c2 = check[header_col + 1].strip() if len(check) > header_col + 1 else ''
     if 'total' in (c1 + c2).lower():
         raise ValueError(f"'{cat}' table is full - add more empty rows before the Total row.")
-    col1 = desc if cat == 'Fun' else _format_short_date(date)
+    col1 = desc if cat in ('Fun', 'Dining and Drinks') else _format_short_date(date)
     a1 = f"'{tab}'!{_col_letter(header_col)}{target_row + 1}:{_col_letter(header_col + 1)}{target_row + 1}"
     _sheets_execute(svc.spreadsheets().values().update(
         spreadsheetId=spreadsheet_id, range=a1,
@@ -3191,7 +3200,7 @@ def _patch_finance_sheet(d):
 
     cat = _canonical_finance_category(d.get("category"))
     if cat not in DETAIL_TABLE_KEYWORDS and cat not in BUDGET_TRANSACTION_CATEGORIES:
-        allowed = ", ".join(["Housing", "Utilities", "Subscriptions", "Food / Grocery", "Fun", "Gas"])
+        allowed = ", ".join(["Utilities", "Subscriptions", "Groceries", "Dining and Drinks", "Fun", "Gas"])
         return jsonify({"error": f"'{cat}' isn't a transaction-tracked category. Use {allowed}."}), 400
 
     try:
@@ -3258,7 +3267,7 @@ def _sheet_id_by_name(svc, spreadsheet_id, title):
     return None
 
 def _clear_detail_tables(svc, spreadsheet_id, tab):
-    """Clear the variable transaction rows (Gas/Fun/Grocery) in a month tab while
+    """Clear the variable transaction rows (Gas/Fun/Groceries/Dining and Drinks) in a month tab while
     leaving the budget tracker, income and GLS payments intact. Used after a
     rollover so the new month starts with the same recurring finances but no
     carried-over one-off transactions."""
@@ -3429,7 +3438,7 @@ def _parse_budget_transaction_rows(rows, tab=""):
     return transactions
 
 def _parse_transaction_rows(rows, tab=""):
-    """Parse individual transactions from detail tables and Housing/Utilities budget rows.
+    """Parse individual transactions from detail tables and Utilities/Subscriptions budget rows.
     Each returned txn carries sheet_tab/sheet_row/sheet_col so the frontend can delete
     by clearing the source cells in the Google Sheet."""
     if not rows:
