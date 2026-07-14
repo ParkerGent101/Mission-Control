@@ -926,7 +926,7 @@ def get_finances():
     if FINANCE_SHEET_ID:
         try:
             svc  = _sheets_svc()
-            tab  = _month_tab(month) if month else _first_sheet_name(svc, FINANCE_SHEET_ID)
+            tab  = _resolve_month_tab(svc, month) if month else _first_sheet_name(svc, FINANCE_SHEET_ID)
             rows = _finance_rows(svc, tab)
             return jsonify(_parse_transaction_rows(rows, tab=tab))
         except Exception as e:
@@ -944,7 +944,7 @@ def get_finances_budget():
     if FINANCE_SHEET_ID:
         try:
             svc  = _sheets_svc()
-            tab  = _month_tab(month) if month else _first_sheet_name(svc, FINANCE_SHEET_ID)
+            tab  = _resolve_month_tab(svc, month) if month else _first_sheet_name(svc, FINANCE_SHEET_ID)
             rows = _finance_rows(svc, tab)
             return jsonify(_parse_budget_rows(rows))
         except Exception:
@@ -1088,7 +1088,7 @@ def patch_finances_budget():
     month = d.get("month") or datetime.now().strftime("%Y-%m")
     try:
         svc = _sheets_svc()
-        tab = _month_tab(month)
+        tab = _resolve_month_tab(svc, month)
         rows = svc.spreadsheets().values().get(
             spreadsheetId=FINANCE_SHEET_ID, range=tab
         ).execute().get('values', [])
@@ -1144,7 +1144,7 @@ def post_finance():
     if FINANCE_SHEET_ID and txn_type == "expense":
         try:
             svc = _sheets_svc()
-            tab = _month_tab(date[:7])
+            tab = _resolve_month_tab(svc, date[:7])
             rows = svc.spreadsheets().values().get(
                 spreadsheetId=FINANCE_SHEET_ID, range=tab
             ).execute().get('values', [])
@@ -1391,7 +1391,7 @@ def post_subscription():
         sheet_status = "error"
         try:
             svc = _sheets_svc()
-            tab = _month_tab(datetime.now().strftime("%Y-%m"))
+            tab = _resolve_month_tab(svc, datetime.now().strftime("%Y-%m"))
             rows = svc.spreadsheets().values().get(
                 spreadsheetId=FINANCE_SHEET_ID, range=tab
             ).execute().get('values', [])
@@ -1434,7 +1434,7 @@ def patch_subscription(sid):
         sheet_status = "error"
         try:
             svc = _sheets_svc()
-            tab = _month_tab(datetime.now().strftime("%Y-%m"))
+            tab = _resolve_month_tab(svc, datetime.now().strftime("%Y-%m"))
             rows = svc.spreadsheets().values().get(
                 spreadsheetId=FINANCE_SHEET_ID, range=tab
             ).execute().get('values', [])
@@ -1472,7 +1472,7 @@ def delete_subscription(sid):
         sheet_status = "error"
         try:
             svc = _sheets_svc()
-            tab = _month_tab(datetime.now().strftime("%Y-%m"))
+            tab = _resolve_month_tab(svc, datetime.now().strftime("%Y-%m"))
             rows = svc.spreadsheets().values().get(
                 spreadsheetId=FINANCE_SHEET_ID, range=tab
             ).execute().get('values', [])
@@ -1772,7 +1772,7 @@ def _record_expense(date, desc, amt, cat, rows_cache=None):
     cat = _canonical_finance_category(cat)
     if FINANCE_SHEET_ID:
         svc = _sheets_svc()
-        tab = _month_tab(date[:7])
+        tab = _resolve_month_tab(svc, date[:7])
         if rows_cache is not None and tab in rows_cache:
             rows = rows_cache[tab]
         else:
@@ -1901,7 +1901,6 @@ def _finance_reconcile(apply=False):
         return str(s or "").strip().lower()
 
     month = datetime.now().strftime("%Y-%m")
-    tab = _month_tab(month)
     cfg = _load(GDRIVE_CONFIG_FILE, {})
     folder = cfg.get("finance_import_folder") or FINANCE_IMPORT_FOLDER
     if not folder:
@@ -1930,6 +1929,7 @@ def _finance_reconcile(apply=False):
             budget_truth.append((norm(r["name"]), amt))
 
     svc = _sheets_svc()
+    tab = _resolve_month_tab(svc, month)
     vals = _sheets_execute(svc.spreadsheets().values().get(
         spreadsheetId=FINANCE_SHEET_ID, range=tab))
     rows = vals.get("values", [])
@@ -2818,6 +2818,55 @@ def _month_tab(yyyy_mm):
         return months[int(str(yyyy_mm).split('-')[1]) - 1]
     except Exception:
         return months[0]
+
+# Month tabs are created by hand in the Sheet (duplicate last month, rename), so
+# titles drift from the plain 'July' the code expects — 'July 2026', 'JULY ',
+# 'Copy of June'. Sheets is the source of truth, so the app adapts to whatever
+# the tab is actually called instead of 400ing with "Unable to parse range".
+_TAB_TITLE_CACHE = {}    # spreadsheet_id -> (monotonic_ts, [titles])
+_TAB_TITLE_TTL   = 300   # seconds; tabs are renamed rarely, reads happen constantly
+
+def _sheet_tab_titles(svc, spreadsheet_id):
+    hit = _TAB_TITLE_CACHE.get(spreadsheet_id)
+    if hit and (time.monotonic() - hit[0]) < _TAB_TITLE_TTL:
+        return hit[1]
+    meta = svc.spreadsheets().get(
+        spreadsheetId=spreadsheet_id, fields='sheets.properties.title'
+    ).execute()
+    titles = [s['properties']['title'] for s in meta.get('sheets', [])]
+    _TAB_TITLE_CACHE[spreadsheet_id] = (time.monotonic(), titles)
+    return titles
+
+def _resolve_month_tab(svc, yyyy_mm, spreadsheet_id=None):
+    """Map YYYY-MM to the tab title that actually exists in the finance Sheet.
+    Falls back to the plain month name (old behavior) if metadata can't be read,
+    and logs the real tab list when nothing matches so the failure is diagnosable
+    from Cloud Run logs."""
+    sid = spreadsheet_id or FINANCE_SHEET_ID
+    want = _month_tab(yyyy_mm)
+    try:
+        titles = _sheet_tab_titles(svc, sid)
+    except Exception as e:
+        app.logger.warning("Could not list tabs for sheet %s: %s", sid, e)
+        return want
+    def _norm(s):
+        return ''.join(str(s).lower().split())
+    for t in titles:                                  # 'JULY ', 'july'
+        if _norm(t) == _norm(want):
+            return t
+    contains = [t for t in titles if want.lower() in t.lower()]
+    if not contains:                                  # 'Jul 26', 'Jul-2026'
+        import re
+        abbrev = want[:3].lower()
+        contains = [t for t in titles
+                    if re.search(r'(^|[^a-z])' + abbrev + r'([^a-z]|$)', t.lower())]
+    if contains:                                      # prefer 'July 2026' for 2026-07
+        year = str(yyyy_mm)[:4]
+        with_year = [t for t in contains if year in t or year[2:] in t]
+        return min(with_year or contains, key=len)
+    app.logger.warning("No tab matching '%s' in sheet %s; tabs are: %s",
+                       want, sid, titles)
+    return want
 
 def _parse_budget_rows(rows):
     """Parse a budget-tracker sheet and return {income, expense, categories}.
