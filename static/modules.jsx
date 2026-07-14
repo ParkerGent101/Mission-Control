@@ -236,6 +236,114 @@ const normFinCat = (raw, fallback = "") => {
   return resolve(fallback) || primary || "Other";
 };
 
+// Spending breakdown donut — what proportion of the month's income each expense
+// category consumed. Colored segments = spent income; the recessive track ring =
+// income not yet spent. Identity is never color-alone (the theme palette is
+// monochromatic warm gold): every segment gets a legend row with name + amount
+// + share, segments are separated by 2px surface gaps, and hovering a segment
+// highlights its legend row.
+const SpendingDonut = ({ categories, totalIn, totalEx }) => {
+  const [hover, setHover] = React.useState(null);
+  const spent = categories.filter(c => c.actual > 0).sort((a, b) => b.actual - a.actual);
+  if (spent.length === 0) {
+    return <div className="muted-2 mono" style={{fontSize:11,padding:'8px 4px'}}>NO SPENDING LOGGED — the chart appears with the first transaction.</div>;
+  }
+  // ≤ 6 slices read at a glance; fold the tail into Other.
+  let slices = spent;
+  if (spent.length > 6) {
+    const head = spent.slice(0, 5);
+    const tail = spent.slice(5);
+    slices = [...head, { name: `Other (${tail.length})`, actual: tail.reduce((s, c) => s + c.actual, 0), color: FIN_CAT_COLOR.Other || 'var(--ink-4)' }];
+  }
+  // Whole circle = income; if overspent, the circle becomes total spend so
+  // proportions stay truthful and the center % goes past 100 in danger ink.
+  const whole = Math.max(totalIn, totalEx);
+  const over = totalIn > 0 && totalEx > totalIn;
+  const pctIncome = totalIn > 0 ? Math.round((totalEx / totalIn) * 100) : null;
+
+  const size = 200, c = size / 2, rO = 92, rI = 60;
+  const arc = (a1, a2, big) => {
+    const p = (r, a) => `${(c + r * Math.cos(a)).toFixed(2)} ${(c + r * Math.sin(a)).toFixed(2)}`;
+    return `M${p(rO, a1)}A${rO} ${rO} 0 ${big} 1 ${p(rO, a2)}L${p(rI, a2)}A${rI} ${rI} 0 ${big} 0 ${p(rI, a1)}Z`;
+  };
+  let a = -Math.PI / 2;
+  const segs = slices.map((s, i) => {
+    const frac = whole > 0 ? s.actual / whole : 0;
+    const a2 = a + frac * Math.PI * 2;
+    const d = arc(a, Math.max(a2 - 0.0001, a), frac > 0.5 ? 1 : 0);
+    const seg = { ...s, d, frac, i };
+    a = a2;
+    return seg;
+  });
+
+  const legendRows = [...segs.map(s => ({ key: s.i, swatch: s.color, name: s.name, amt: s.actual, frac: s.frac }))];
+  const leftover = totalIn - totalEx;
+  return (
+    <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:10,paddingTop:4}}>
+      <div style={{position:'relative',width:size,height:size}}>
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img"
+             aria-label={pctIncome != null ? `${pctIncome}% of income spent` : 'spending breakdown'}>
+          {/* recessive track = income not yet spent */}
+          <circle cx={c} cy={c} r={(rO + rI) / 2} fill="none" stroke="var(--surface-2)" strokeWidth={rO - rI} />
+          {segs.map(s => (
+            <path key={s.i} d={s.d} fill={s.color} stroke="var(--surface)" strokeWidth="2"
+                  opacity={hover == null || hover === s.i ? 1 : 0.35}
+                  style={{transition:'opacity .15s ease',cursor:'default'}}
+                  onMouseEnter={() => setHover(s.i)} onMouseLeave={() => setHover(null)}>
+              <title>{`${s.name}: ${fmtMoney(s.actual)} · ${Math.round(s.frac * 100)}%${totalIn > 0 && !over ? ' of income' : ' of spending'}`}</title>
+            </path>
+          ))}
+        </svg>
+        <div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',pointerEvents:'none'}}>
+          {hover != null ? (
+            <>
+              <span className="serif" style={{fontSize:22,color:'var(--ink)'}}>{Math.round(segs[hover].frac * 100)}%</span>
+              <span className="muted-2 mono" style={{fontSize:9,letterSpacing:'.06em',textTransform:'uppercase',maxWidth:rI*1.7,textAlign:'center'}}>{segs[hover].name}</span>
+            </>
+          ) : pctIncome != null ? (
+            <>
+              <span className="serif" style={{fontSize:26,color: over ? 'var(--danger)' : 'var(--ink)'}}>{pctIncome}%</span>
+              <span className="muted-2 mono" style={{fontSize:9,letterSpacing:'.06em',textTransform:'uppercase'}}>of income spent</span>
+            </>
+          ) : (
+            <>
+              <span className="serif" style={{fontSize:20,color:'var(--ink)'}}>{fmtMoney(totalEx,{cents:false})}</span>
+              <span className="muted-2 mono" style={{fontSize:9,letterSpacing:'.06em',textTransform:'uppercase'}}>spent</span>
+            </>
+          )}
+        </div>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:3,width:'100%'}}>
+        {legendRows.map(r => (
+          <div key={r.key} onMouseEnter={() => setHover(r.key)} onMouseLeave={() => setHover(null)}
+               style={{display:'grid',gridTemplateColumns:'12px 1fr auto auto',gap:8,alignItems:'center',
+                       padding:'3px 4px',borderRadius:'var(--r)',
+                       background: hover === r.key ? 'var(--surface-2)' : 'transparent',
+                       transition:'background .15s ease'}}>
+            <span style={{width:8,height:8,borderRadius:2,background:r.swatch}}/>
+            <span style={{fontSize:11.5,color:'var(--ink)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.name}</span>
+            <span className="num" style={{fontSize:11,color:'var(--ink-3)'}}>{fmtMoney(r.amt)}</span>
+            <span className="muted-2 mono" style={{fontSize:10,width:34,textAlign:'right'}}>{Math.round(r.frac * 100)}%</span>
+          </div>
+        ))}
+        {totalIn > 0 && leftover > 0 && (
+          <div style={{display:'grid',gridTemplateColumns:'12px 1fr auto auto',gap:8,alignItems:'center',padding:'4px 4px',marginTop:2,borderTop:'1px solid var(--line-soft)'}}>
+            <span style={{width:8,height:8,borderRadius:2,background:'var(--surface-2)',border:'1px solid var(--line)'}}/>
+            <span style={{fontSize:11.5,color:'var(--ink-3)'}}>Left over</span>
+            <span className="num" style={{fontSize:11,color:'var(--accent-2)'}}>{fmtMoney(leftover)}</span>
+            <span className="muted-2 mono" style={{fontSize:10,width:34,textAlign:'right'}}>{Math.round((leftover / totalIn) * 100)}%</span>
+          </div>
+        )}
+        {over && (
+          <div className="muted-2 mono" style={{fontSize:10,padding:'2px 4px',color:'var(--danger)'}}>
+            OVERSPENT — {fmtMoney(totalEx - totalIn)} beyond income
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const FinanceCard = ({ cardProps = {} } = {}) => {
   const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   const defaultCategories = FIN_CATS.filter(c => c.budget > 0).map(c => ({ ...c, actual: 0 }));
@@ -248,10 +356,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
   const [showRoomEdit, setShowRoomEdit] = useState(false);   // roommate-payment editor open
   const [roomRows, setRoomRows] = useState([]);              // [{label, amount}] being edited (full bills)
   const [showAdd, setShowAdd] = useState(false);
-  const [showAddSub, setShowAddSub] = useState(false);
   const [desc, setDesc] = useState(""); const [amt, setAmt] = useState(""); const [type, setType] = useState("expense"); const [cat, setCat] = useState("Utilities");
-  const [subName, setSubName] = useState(""); const [subAcct, setSubAcct] = useState(""); const [subAmt, setSubAmt] = useState(""); const [subDue, setSubDue] = useState("");
-  const [subEditId, setSubEditId] = useState(null);   // id of subscription being edited (reuses the add form)
   const catOverrides = React.useRef({});
   const [budget, setBudget] = React.useState(null);
   const [syncing, setSyncing] = useState(false);
@@ -372,43 +477,11 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
     setSyncing(false);
   };
 
-  const addSub = async () => {
-    if (!subName || !subAmt) return;
-    const editing = subEditId != null;
-    const payload = { name: subName, acct: subAcct, amt: parseFloat(subAmt), due: subDue };
-    try {
-      const r = await fetch(editing ? `/api/finances/subscriptions/${subEditId}` : '/api/finances/subscriptions',
-        { method: editing ? 'PATCH' : 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-      if (!r.ok) throw 0;
-      const res = await r.json();
-      const okStatuses = ['written','updated','not_configured','cleared'];
-      if (res.sheet_status && !okStatuses.includes(res.sheet_status)) {
-        const msg = res.sheet_status === 'section_full'
-          ? "Saved locally — the Subscriptions section in your Sheet has no empty rows. Add a blank row and re-sync."
-          : `Saved locally — Sheet write failed (${res.sheet_status}).`;
-        window.__toast?.(msg, 'error');
-      }
-      if (editing) setSubs(s => s.map(x => x.id===subEditId ? { ...x, ...payload } : x));
-      else setSubs(s => [...s, { id: res.id, ...payload }]);
-    } catch { toastErr("Couldn’t save subscription — try again."); return; }
-    setSubName(''); setSubAcct(''); setSubAmt(''); setSubDue('');
-    setSubEditId(null); setShowAddSub(false);
-    loadFinances(month);
-  };
-
-  const startEditSub = (s) => {
-    setSubEditId(s.id);
-    setSubName(s.name||''); setSubAcct(s.acct||''); setSubAmt(String(s.amt||'')); setSubDue(s.due||'');
-    setShowAddSub(true);
-  };
-
-  const deleteSub = async (sid) => {
-    setSubs(s => s.filter(x => x.id !== sid));
-    const res = await fetch(`/api/finances/subscriptions/${sid}`, { method:'DELETE' }).then(r=>r.json()).catch(()=>({}));
-    if (res.sheet_status && !['cleared','not_configured','not_found'].includes(res.sheet_status)) {
-      toastErr(`Removed from the app, but the Sheet update failed (${res.sheet_status}). It may reappear on next sync.`);
-    }
-  };
+  // Subscription add/edit/delete UI was removed from this card — subscriptions
+  // arrive via the Rocket Money import and show (with a total) in the
+  // Transactions list. The /api/finances/subscriptions endpoints remain for the
+  // agent and the import; `subs` is still fetched for the local-fallback
+  // Subscriptions bar total.
 
   // Roommate payment editor — the utilities the roommate splits 50/50 (full bills in,
   // halved for the income line). Stored in the app so it doesn't depend on the Sheet.
@@ -775,41 +848,16 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
         </div>
         <div className="fin-pane fin-pane-subs">
         <div>
+          {/* Subscriptions themselves live in the Transactions list (grouped with a
+              total) — this pane shows where the month's income is going instead. */}
           <div className="section-h">
-            <span>Subscriptions</span><span className="line"/>
-            <span className="muted-2 num" style={{fontSize:10.5}}>{fmtMoney(subTotal)}/mo</span>
-            <button className="btn" style={{padding:'4px 10px',fontSize:11}} onClick={()=>{ if(showAddSub){ setShowAddSub(false); setSubEditId(null); } else { setSubEditId(null); setSubName(''); setSubAcct(''); setSubAmt(''); setSubDue(''); setShowAddSub(true); } }}><Icon name="plus" size={12}/>Add</button>
+            <span>Spending</span><span className="line"/>
+            <span className="muted-2 num" style={{fontSize:10.5}}>{fmtMoney(totalEx,{cents:false})} spent</span>
           </div>
-          {showAddSub && (
-            <div onKeyDown={submitOnEnter(addSub)} style={{display:'flex',flexDirection:'column',gap:6,marginBottom:8,padding:'8px',background:'var(--surface-2)',borderRadius:'var(--r)',border:'1px solid var(--line)'}}>
-              {subEditId!=null && <div className="muted-2 mono" style={{fontSize:10,letterSpacing:'.06em'}}>EDIT SUBSCRIPTION</div>}
-              <input className="input" placeholder="Name (e.g. Netflix) *" value={subName} onChange={e=>setSubName(e.target.value)} style={{fontSize:12}}/>
-              <div style={{display:'flex',gap:6}}>
-                <input className="input" placeholder="Account" value={subAcct} onChange={e=>setSubAcct(e.target.value)} style={{flex:1,fontSize:12}}/>
-                <input className="input" placeholder="$0.00 *" type="number" value={subAmt} onChange={e=>setSubAmt(e.target.value)} style={{width:72,fontSize:12}}/>
-              </div>
-              <div style={{display:'flex',gap:6}}>
-                <input className="input" placeholder="Due (e.g. 15th)" value={subDue} onChange={e=>setSubDue(e.target.value)} style={{flex:1,fontSize:12}}/>
-                <button className="btn primary" onClick={addSub} disabled={!subName || !subAmt} style={{fontSize:11}}>{subEditId!=null?'Save':'Add'}</button>
-                <button className="btn ghost" onClick={()=>{ setShowAddSub(false); setSubEditId(null); setSubName(''); setSubAcct(''); setSubAmt(''); setSubDue(''); }} style={{fontSize:11}}>✕</button>
-              </div>
-            </div>
-          )}
-          {subs.length === 0 && <div className="muted-2 mono" style={{fontSize:11,padding:'8px 4px'}}>NO TITHES REGISTERED — tap “Add”.</div>}
-          {subs.map((s,i) => (
-            <div key={s.id||i} className="txn" style={{gridTemplateColumns:"1fr auto auto auto",alignItems:"center",padding:"5px 4px"}}>
-              <div><div className="merchant">{s.name}</div><div className="meta">{s.acct} · due {s.due}</div></div>
-              <span className="amount muted">{fmtMoney(s.amt)}</span>
-              <button className="btn ghost" aria-label={`Edit ${s.name}`} title={`Edit ${s.name}`} onClick={()=>startEditSub(s)}
-                style={{minWidth:34,minHeight:34,padding:0,fontSize:13,lineHeight:1,color:"var(--ink-3)"}}>✎</button>
-              <button className="btn ghost" aria-label={`Remove ${s.name}`} title={`Remove ${s.name}`}
-                onClick={()=>{ if (confirm(`Remove subscription “${s.name}”?`)) deleteSub(s.id); }}
-                style={{minWidth:34,minHeight:34,padding:0,fontSize:16,lineHeight:1,color:"var(--ink-3)"}}>×</button>
-            </div>
-          ))}
+          <SpendingDonut categories={categories} totalIn={totalIn} totalEx={totalEx}/>
           {/* Roommate payment — utilities the roommate splits 50/50, entered in-app. A single
               income credit line (also folded into the Income total above) with an editor. */}
-          <div style={{marginTop:subs.length?6:0,paddingTop:8,borderTop:'1px solid var(--line)'}}>
+          <div style={{marginTop:10,paddingTop:8,borderTop:'1px solid var(--line)'}}>
             {roommate && roommate.total > 0 ? (
               <div className="txn" style={{gridTemplateColumns:"1fr auto auto",alignItems:"center",padding:"5px 4px"}}>
                 <div><div className="merchant" style={{color:"var(--accent-2)"}}>Roommate payment</div><div className="meta">income · {(roommate.items||[]).map(it=>it.label).join(' + ')} ÷2</div></div>
@@ -843,7 +891,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
         </div>
       </div>
       <div className="fin-tabs">
-        {['Overview','Transactions','Subscriptions'].map((l,i)=>(
+        {['Overview','Transactions','Spending'].map((l,i)=>(
           <span key={i} onClick={()=>goPane(i)} style={{cursor:'pointer',paddingBottom:3,
             color: pane===i?'var(--accent)':'var(--ink-4)',
             borderBottom: pane===i?'2px solid var(--accent)':'2px solid transparent'}}>{l}</span>
