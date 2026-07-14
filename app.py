@@ -2928,6 +2928,19 @@ def _parse_budget_rows(rows):
             cat_data[canon]['budgeted'] += budg
             cat_data[canon]['actual']   += actual
 
+    # The bars' 'actual' for the detail-table categories (Gas/Fun/Groceries/
+    # Dining and Drinks) historically came from formula cells in the budget
+    # section that sum each detail table. Hand-restructured tabs drop those
+    # formulas, leaving the bars empty even though the transactions are right
+    # there in the tables — so compute each table's actual directly and take
+    # the larger of the two (they're equal when the formula is intact).
+    for det_cat in DETAIL_TABLE_KEYWORDS:
+        table_actual = _detail_table_actual(rows, det_cat)
+        if table_actual <= 0:
+            continue
+        entry = cat_data.setdefault(det_cat, {'budgeted': 0.0, 'actual': 0.0})
+        entry['actual'] = max(entry['actual'], table_actual)
+
     # Parse income section (right side — scan for "Income" header column)
     income_total = 0.0
     if income_col is None:
@@ -3131,6 +3144,32 @@ def _find_detail_table(rows, category):
             if any(kw in str(cell).lower() for kw in keywords):
                 return (ri, ci)
     return None
+
+def _detail_table_actual(rows, category):
+    """Sum the amount column of a category's detail table, walking rows exactly
+    like _parse_transaction_rows (data starts two rows below the header, stop at
+    the Total row or after 5 consecutive blank rows)."""
+    pos = _find_detail_table(rows, category)
+    if not pos:
+        return 0.0
+    header_row, header_col = pos
+    total, blanks = 0.0, 0
+    for ri in range(header_row + 2, len(rows)):
+        row = rows[ri]
+        cell1 = str(row[header_col]).strip()     if len(row) > header_col     else ''
+        cell2 = str(row[header_col + 1]).strip() if len(row) > header_col + 1 else ''
+        if 'total' in (cell1 + cell2).lower():
+            break
+        if not cell1 and not cell2:
+            blanks += 1
+            if blanks >= 5:
+                break
+            continue
+        blanks = 0
+        amt = _parse_money(cell2)
+        if amt > 0:
+            total += amt
+    return round(total, 2)
 
 def _find_next_empty_table_row(rows, header_row, header_col):
     """Find first row index after header where both data columns are empty,
