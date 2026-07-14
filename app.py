@@ -1375,19 +1375,60 @@ def post_savings():
 
 # ── Subscriptions ─────────────────────────────────────────────────────────────
 
+def _load_subs():
+    """Subscriptions list, reset to empty at the start of each month — the list
+    tracks what's been charged THIS month, and the Drive import repopulates it
+    as charges appear in the Rocket Money export. Legacy shape (a bare list) is
+    stamped with the current month on first load."""
+    cur = datetime.now().strftime("%Y-%m")
+    data = _load(SUBS_FILE)
+    if isinstance(data, list):
+        data = {"month": cur, "items": data}
+        _save(SUBS_FILE, data)
+    if data.get("month") != cur:
+        data = {"month": cur, "items": []}
+        _save(SUBS_FILE, data)
+    return data
+
+def _save_subs(data):
+    _save(SUBS_FILE, data)
+
+def _ordinal_day(iso_date):
+    """'2026-07-05' -> '5th' (the due-day format the subscriptions list uses)."""
+    try:
+        day = int(str(iso_date)[8:10])
+    except (ValueError, IndexError):
+        return ""
+    suf = 'th' if 11 <= day % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(day % 10, 'th')
+    return f"{day}{suf}"
+
+def _upsert_subscription(data, name, amt, date):
+    """Add an import-discovered subscription to the month's list. Add-only:
+    an entry with the same name keeps its (possibly hand-edited) values.
+    Returns True if an item was added."""
+    key = str(name or "").strip().lower()
+    if not key:
+        return False
+    if any(str(s.get("name", "")).strip().lower() == key for s in data["items"]):
+        return False
+    sid = max((s.get("id", 0) for s in data["items"]), default=0) + 1
+    data["items"].append({"id": sid, "name": str(name).strip(), "acct": "",
+                          "amt": round(float(amt), 2), "due": _ordinal_day(date)})
+    return True
+
 @app.route("/api/finances/subscriptions", methods=["GET"])
 def get_subscriptions():
-    return jsonify(_load(SUBS_FILE))
+    return jsonify(_load_subs()["items"])
 
 @app.route("/api/finances/subscriptions", methods=["POST"])
 def post_subscription():
     d = request.json
     name, acct = d.get("name", ""), d.get("acct", "")
     amt, due = float(d.get("amt", 0)), d.get("due", "")
-    subs = _load(SUBS_FILE)
-    sid = max((s["id"] for s in subs), default=0) + 1
-    subs.append({"id": sid, "name": name, "acct": acct, "amt": amt, "due": due})
-    _save(SUBS_FILE, subs)
+    data = _load_subs()
+    sid = max((s.get("id", 0) for s in data["items"]), default=0) + 1
+    data["items"].append({"id": sid, "name": name, "acct": acct, "amt": amt, "due": due})
+    _save_subs(data)
     sheet_status = "not_configured"
     sheet_error = None
     if FINANCE_SHEET_ID:
@@ -1409,6 +1450,7 @@ def post_subscription():
                     valueInputOption='USER_ENTERED',
                     body={'values': [[name, acct, due, amt]]}
                 ).execute()
+                _invalidate_finance_cache()
                 sheet_status = "written"
         except Exception as e:
             sheet_error = str(e)
@@ -1420,8 +1462,8 @@ def post_subscription():
 @app.route("/api/finances/subscriptions/<int:sid>", methods=["PATCH"])
 def patch_subscription(sid):
     d = request.json or {}
-    subs = _load(SUBS_FILE)
-    sub = next((s for s in subs if s.get("id") == sid), None)
+    data = _load_subs()
+    sub = next((s for s in data["items"] if s.get("id") == sid), None)
     if not sub:
         return jsonify({"error": "Not found"}), 404
     old_name = sub.get("name", "")
@@ -1429,7 +1471,7 @@ def patch_subscription(sid):
     sub["acct"] = d.get("acct", sub.get("acct", ""))
     sub["amt"]  = float(d.get("amt", sub.get("amt", 0)) or 0)
     sub["due"]  = d.get("due", sub.get("due", ""))
-    _save(SUBS_FILE, subs)
+    _save_subs(data)
 
     sheet_status = "not_configured"
     sheet_error = None
@@ -1446,7 +1488,15 @@ def patch_subscription(sid):
             if row_idx is None:
                 row_idx = _find_subscription_sheet_row(rows, sub["name"])
             if row_idx is None:
-                sheet_status = "not_found"
+                # No matching row (the import may have written a variant merchant
+                # name, or the Sheet was hand-edited) — write into the next empty
+                # Subscriptions slot instead of failing the edit.
+                row_idx = _find_budget_section_next_row(rows, 'Subscriptions')
+                pending_status = "written"
+            else:
+                pending_status = "updated"
+            if row_idx is None:
+                sheet_status = "section_full"
             else:
                 a1 = f"'{tab}'!B{row_idx + 1}:E{row_idx + 1}"
                 svc.spreadsheets().values().update(
@@ -1454,7 +1504,8 @@ def patch_subscription(sid):
                     valueInputOption='USER_ENTERED',
                     body={'values': [[sub["name"], sub["acct"], sub["due"], sub["amt"]]]}
                 ).execute()
-                sheet_status = "updated"
+                _invalidate_finance_cache()
+                sheet_status = pending_status
         except Exception as e:
             sheet_error = str(e)
     resp = {"ok": True, "sheet_status": sheet_status}
@@ -1464,10 +1515,10 @@ def patch_subscription(sid):
 
 @app.route("/api/finances/subscriptions/<int:sid>", methods=["DELETE"])
 def delete_subscription(sid):
-    subs = _load(SUBS_FILE)
-    target = next((s for s in subs if s.get("id") == sid), None)
-    subs = [s for s in subs if s.get("id") != sid]
-    _save(SUBS_FILE, subs)
+    data = _load_subs()
+    target = next((s for s in data["items"] if s.get("id") == sid), None)
+    data["items"] = [s for s in data["items"] if s.get("id") != sid]
+    _save_subs(data)
 
     sheet_status = "not_configured"
     sheet_error = None
@@ -1491,6 +1542,7 @@ def delete_subscription(sid):
                     valueInputOption='USER_ENTERED',
                     body={'values': [['', '', '', '', '']]}
                 ).execute()
+                _invalidate_finance_cache()
                 sheet_status = "cleared"
         except Exception as e:
             sheet_error = str(e)
@@ -2093,6 +2145,8 @@ def finance_import_drive():
     imported = set(state.get("imported", []))
     written, failed, skipped, scanned, errors, preview_rows = 0, 0, 0, 0, [], []
     sheet_cache = {}   # tab -> rows; one read per month tab for the whole import
+    subs_data, subs_changed = _load_subs(), False
+    cur_month = datetime.now().strftime("%Y-%m")
     for r in rows:
         scanned += 1
         if (r["date"] or "") < cutoff:          # outside the import window
@@ -2120,6 +2174,11 @@ def finance_import_drive():
                                          rows_cache=sheet_cache)
             if ok:
                 imported.add(fp); written += 1
+                # Subscriptions charged this month show up in the card's list too
+                # (the list resets on the 1st and refills from these imports).
+                if cat == 'Subscriptions' and (r["date"] or "")[:7] == cur_month:
+                    if _upsert_subscription(subs_data, r["name"], abs(r["amount"]), r["date"]):
+                        subs_changed = True
                 if written % 50 == 0:           # persist progress so a timeout can't re-import
                     state["imported"] = list(imported); _save(FINANCE_IMPORT_FILE, state)
             else:
@@ -2142,6 +2201,8 @@ def finance_import_drive():
                         "by_category": by_cat})
     state["imported"] = list(imported)
     _save(FINANCE_IMPORT_FILE, state)
+    if subs_changed:
+        _save_subs(subs_data)
     return jsonify({"ok": True, "file": meta, "window_days": days, "written": written,
                     "failed": failed, "skipped": skipped, "scanned": scanned, "errors": errors[:5]})
 
@@ -3494,7 +3555,11 @@ def _find_subscription_sheet_row(rows, name):
         if row_canon == 'Subscriptions':
             if section_start is None:
                 section_start = ri
-            if desc_val.strip().lower() == target:
+            dv = desc_val.strip().lower()
+            # Exact first, then containment either way — the Drive import writes
+            # Rocket Money merchant names ('Hulu Disney Bundle') that rarely equal
+            # the list's name ('Hulu') exactly.
+            if dv and (dv == target or target in dv or dv in target):
                 return ri
         elif section_start is not None:
             break
