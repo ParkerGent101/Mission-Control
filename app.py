@@ -55,6 +55,12 @@ def cache_headers(response):
             # instead of re-downloading the body in full.
             response.headers["Cache-Control"] = "no-cache"
             response.headers.pop("Pragma", None)
+    elif response.mimetype == "text/html":
+        # The HTML shell embeds the ?v=<hash> asset URLs; a cached shell (browser
+        # heuristic or intermediate proxy) keeps clients on the previous deploy's
+        # bundles indefinitely. no-cache = revalidate on every load, so a plain
+        # refresh always picks up new asset hashes.
+        response.headers["Cache-Control"] = "no-cache"
     return response
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=int(os.environ.get("SESSION_LIFETIME_DAYS", "7")))
 
