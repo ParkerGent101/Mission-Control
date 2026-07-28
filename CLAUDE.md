@@ -6,7 +6,7 @@ Parker's personal AI command center — a unified dashboard for his IT Manager, 
 ## Parker's roles
 - **IT Manager** at Ground Level Services (GLS) — Azure, SharePoint, MDM, security, vendor mgmt
 - **Lead Guitarist / Band Manager** — Coming Up Aces (NWA classic rock). Site: comingupaces.net
-- **Freelance Developer** — building "aGent Security Consultancy" brand
+- **Freelance Developer** — side/contract programming work
 - **Student** — CISM exam target 2026-08-16; also CRISC + MBA
 
 ## Tech stack
