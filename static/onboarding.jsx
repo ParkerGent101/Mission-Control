@@ -47,8 +47,6 @@ const OnboardingWizard = ({ onComplete }) => {
   const [fitnessProgram, setFitnessProgram] = useOB(null);
   const [workoutDays, setWorkoutDays] = useOB([]);
   const [workoutSplit, setWorkoutSplit] = useOB(null);
-  // Connect
-  const [calStatus, setCalStatus] = useOB('idle');
   const [saving, setSaving] = useOB(false);
 
   // Hover previews live theme; click locks selection
@@ -79,24 +77,6 @@ const OnboardingWizard = ({ onComplete }) => {
   const toggleDay = (d) => setWorkoutDays(prev =>
     prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]
   );
-
-  const connectCalendar = async () => {
-    setCalStatus('connecting');
-    try {
-      const r = await fetch('/api/calendar/auth');
-      const d = await r.json();
-      if (d.auth_url) {
-        window.open(d.auth_url, '_blank', 'width=600,height=700');
-        setCalStatus('connected');
-        window.__toast?.('Calendar auth opened — approve in the new tab', 'success');
-      } else {
-        setCalStatus('idle');
-        window.__toast?.(d.error || 'Calendar not configured — add credentials.json', 'error');
-      }
-    } catch {
-      setCalStatus('idle');
-    }
-  };
 
   const finish = async () => {
     setSaving(true);
@@ -330,32 +310,6 @@ const OnboardingWizard = ({ onComplete }) => {
           <div style={{ color: 'var(--ink-3)', fontSize: 11.5, marginTop: 2 }}>Export your transactions from Rocket Money to a Google Drive folder, then connect Drive and set that folder in Settings → Integrations. The Finance card’s “Sync from Drive” pulls them in.</div>
         </div>
       </div>
-
-      <div className="ob-connect-card" style={{ marginTop: 10 }}>
-        <div className="ob-connect-icon">
-          <Icon name="calendar" size={18} style={{ color: calStatus === 'connected' ? 'var(--accent-2)' : 'var(--info)' }} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 500, fontSize: 13 }}>Google Calendar</div>
-          <div style={{ color: 'var(--ink-3)', fontSize: 11.5, marginTop: 2 }}>Pull events into Agenda</div>
-        </div>
-        {calStatus === 'connected' ? (
-          <span className="tag mint">Auth opened</span>
-        ) : (
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button className="btn primary" onClick={connectCalendar}
-              disabled={calStatus === 'connecting'}
-              style={{ fontSize: 11.5, padding: '5px 10px' }}>
-              <Icon name={calStatus === 'connecting' ? "loader" : "calendar"} size={12} />
-              {calStatus === 'connecting' ? 'Opening…' : 'Connect'}
-            </button>
-            <button className="btn ghost" onClick={() => setCalStatus('skipped')}
-              style={{ fontSize: 11.5, padding: '5px 10px', color: 'var(--ink-3)' }}>
-              Skip
-            </button>
-          </div>
-        )}
-      </div>
     </div>
   );
 
@@ -395,14 +349,6 @@ const OnboardingWizard = ({ onComplete }) => {
             {workoutSplit && (
               <span className="tag" style={{ gap: 4 }}>{SPLITS.find(s => s.id === workoutSplit)?.label}</span>
             )}
-          </div>
-        )}
-        {calStatus === 'connected' && (
-          <div style={{ display: 'flex', gap: 6, marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--line-soft)' }}>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-4)', letterSpacing: '0.08em', textTransform: 'uppercase', marginRight: 2, alignSelf: 'center' }}>
-              Connected
-            </div>
-            <span className="tag mint" style={{ gap: 4 }}><Icon name="calendar" size={10} />Calendar</span>
           </div>
         )}
       </div>

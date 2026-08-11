@@ -58,7 +58,6 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
   const [pwMsg, setPwMsg] = useST(null);
   const [nameMsg, setNameMsg] = useST(null);
   const [integStatus, setIntegStatus] = useST(null);
-  const [calConnecting, setCalConnecting] = useST(false);
   const [resetConfirm, setResetConfirm] = useST(false);
   const [driveStatus, setDriveStatus] = useST(null);
   const [sheetFinance, setSheetFinance] = useST('');
@@ -78,13 +77,8 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
 
   useEffectST(() => {
     if (section !== "integrations") return;
-    Promise.all([
-      fetch('/api/calendar/events').then(r => r.json()).catch(() => ({ error: "setup_required" })),
-      fetch('/api/drive/status').then(r => r.json()).catch(() => ({ connected: false })),
-    ]).then(([cal, drive]) => {
+    fetch('/api/drive/status').then(r => r.json()).catch(() => ({ connected: false })).then(drive => {
       setIntegStatus({
-        calendar: !cal.error,
-        calSetup: cal.error !== "setup_required",
         drive: !!drive.connected,
         driveSetup: !drive.setup_required,
       });
@@ -120,14 +114,6 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
     if (d.ok) { setPwMsg({ ok: true, text: "Password updated" }); setCurPw(""); setNewPw(""); }
     else setPwMsg({ ok: false, text: d.error || "Incorrect password" });
     setTimeout(() => setPwMsg(null), 3000);
-  };
-
-  const connectCalendar = async () => {
-    setCalConnecting(true);
-    const r = await fetch('/api/calendar/auth');
-    const d = await r.json();
-    if (d.auth_url) window.location.href = d.auth_url;
-    else { window.__toast?.(d.error || 'Calendar credentials not found', 'error'); setCalConnecting(false); }
   };
 
   const connectDrive = async () => {
@@ -293,7 +279,7 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
     <div>
       <SectionHead>Connected Services</SectionHead>
 
-      {integStatus !== null && !integStatus.calSetup && (
+      {integStatus !== null && !integStatus.driveSetup && (
         <div style={{ padding: '12px 14px', marginBottom: 12, background: 'color-mix(in oklch, var(--warning, #e0a857) 10%, var(--surface-2))', border: '1px solid color-mix(in oklch, var(--warning, #e0a857) 30%, var(--line))', borderRadius: 'var(--r)', fontSize: 12 }}>
           <div style={{ fontWeight: 600, color: 'var(--accent)', marginBottom: 6 }}>Google credentials not set up</div>
           <div style={{ color: 'var(--ink-2)', marginBottom: 10 }}>
@@ -316,32 +302,6 @@ const SettingsPanel = ({ open, onClose, tweaks, setTweak, userName, setUserName,
       )}
 
       <div className="st-integ-card">
-        <div className="st-integ-icon" style={{ background: 'color-mix(in oklch, var(--info) 10%, var(--surface-2))' }}>
-          <Icon name="calendar" size={18} style={{ color: 'var(--info)' }} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 500, fontSize: 13 }}>Google Calendar</div>
-          <div style={{ color: 'var(--ink-3)', fontSize: 11.5, marginTop: 2 }}>
-            {integStatus === null ? 'Checking status…' :
-              !integStatus.calSetup ? 'Waiting for credentials.json' :
-              integStatus.calendar ? 'Connected — events synced from your calendar' :
-              'Ready — click Connect to authorize'}
-          </div>
-        </div>
-        {integStatus?.calendar
-          ? <span className="tag mint">Connected</span>
-          : integStatus?.calSetup === false
-            ? <span className="tag" style={{ color: 'var(--ink-4)', fontSize: 10 }}>Needs setup</span>
-            : <button className="btn primary" onClick={connectCalendar}
-                disabled={calConnecting}
-                style={{ fontSize: 11.5, padding: '5px 10px' }}>
-                <Icon name={calConnecting ? "loader" : "calendar"} size={12} />
-                {calConnecting ? 'Opening…' : 'Connect'}
-              </button>
-        }
-      </div>
-
-      <div className="st-integ-card" style={{ marginTop: 10 }}>
         <div className="st-integ-icon" style={{ background: 'color-mix(in oklch, #e0a857 10%, var(--surface-2))' }}>
           <Icon name="file" size={18} style={{ color: '#e0a857' }} />
         </div>

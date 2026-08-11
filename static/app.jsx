@@ -7,7 +7,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "density": "balanced",
   "sidebar": "full",
   "modules": {
-    "finance": true, "band": true, "health": true, "tcpg": true, "practice": true, "recurring": true
+    "finance": true, "band": true, "health": true, "tcpg": true
   }
 }/*EDITMODE-END*/;
 
@@ -17,9 +17,6 @@ const SIDEBAR_NAV = [
   { id: "finance",   icon: "wallet",     label: "Finance",   key: "F" },
   { id: "band",      icon: "music",      label: "Band",      key: "B" },
   { id: "health",    icon: "heart",      label: "Health",    key: "H" },
-  { id: "practice",  icon: "target",     label: "Practice",  key: "P" },
-  { id: "calendar",  icon: "calendar",   label: "Calendar",  key: "C" },
-  { id: "recurring", icon: "clock",      label: "Routines",  key: "R" },
 ];
 
 const MOBILE_NAV = [
@@ -200,11 +197,8 @@ const App = () => {
   const M = window.MissionModules;
   const cards = [
     { id: "health",   label: "Health & Fitness", icon: "heart",      el: <M.HealthCard cardProps={{}} /> },
-    { id: "calendar", label: "Calendar",         icon: "calendar",   el: <M.CalendarCard cardProps={{}} /> },
     { id: "finance",  label: "Finance",          icon: "wallet",     el: <M.FinanceCard cardProps={{}} /> },
     { id: "band",     label: "Band",             icon: "music",      el: <M.BandCard cardProps={{}} /> },
-    { id: "practice", label: "Piano Practice",   icon: "target",     el: <M.PracticeCard cardProps={{}} /> },
-    { id: "recurring",label: "Routines",         icon: "clock",      el: <M.RecurringTasksCard cardProps={{}} /> },
   ];
 
   const pageTitle = SIDEBAR_NAV.find(n => n.id === active)?.label || "Mission Control";

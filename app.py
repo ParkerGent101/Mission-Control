@@ -95,7 +95,6 @@ VIDEOS_FILE      = BAND_DIR / "videos.json" if BAND_DIR.exists() else DATA_DIR /
 FINANCE_FILE     = DATA_DIR / "finances.json"
 SUBS_FILE        = DATA_DIR / "subscriptions.json"
 TASKS_FILE       = DATA_DIR / "tasks.json"
-RECURRING_FILE   = DATA_DIR / "recurring_tasks.json"
 REMINDERS_FILE   = DATA_DIR / "reminders.json"
 SAVINGS_FILE     = DATA_DIR / "savings.json"
 CONTENT_FILE     = DATA_DIR / "band_content.json"
@@ -104,7 +103,6 @@ BAND_CONTACTS_FILE = DATA_DIR / "band_contacts.json"
 AGENDA_FILE      = DATA_DIR / "agenda.json"
 HEALTH_FILE      = DATA_DIR / "health.json"
 WORK_FILE        = DATA_DIR / "work_tasks.json"
-CALENDAR_EVENTS_FILE = DATA_DIR / "calendar_events.json"
 BRIEF_FILE       = DATA_DIR / "brief.json"
 DB_PATH          = DATA_DIR / "mission_control.db"
 FINANCE_SHEET_ID = os.environ.get("FINANCE_SHEET_ID", "")
@@ -113,9 +111,7 @@ HEALTH_SHEET_ID  = os.environ.get("HEALTH_SHEET_ID", "")
 # Cloud Run service account, can open them). Optional.
 FINANCE_OWNER_EMAIL = os.environ.get("FINANCE_OWNER_EMAIL", "")
 
-GCAL_SCOPES    = ['https://www.googleapis.com/auth/calendar.events']
-GCAL_CREDS_FILE = DATA_DIR / "credentials.json"
-GCAL_TOKEN_FILE = DATA_DIR / "token.json"
+GOOGLE_CREDS_FILE = DATA_DIR / "credentials.json"  # shared OAuth client secret (Drive/Sheets + Google sign-in)
 GOOGLE_OAUTH_CLIENT_ID = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
 GOOGLE_OAUTH_CLIENT_SECRET = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
 GOOGLE_OAUTH_PROJECT_ID = os.environ.get("GOOGLE_OAUTH_PROJECT_ID", "")
@@ -130,31 +126,6 @@ FINANCE_IMPORT_FILE = DATA_DIR / "finance_import.json"   # dedup fingerprints fo
 ROOMMATE_FILE      = DATA_DIR / "roommate_payment.json"  # local fallback for the Sheet "roommate payment" section
 USER_CONFIG_FILE   = DATA_DIR / "user_config.json"
 TCPG_FILE          = DATA_DIR / "tcpg.json"
-PRACTICE_FILE      = DATA_DIR / "practice.json"
-
-NATIONAL_HOLIDAYS = [
-    {"date": "2026-01-01", "title": "New Year's Day"},
-    {"date": "2026-01-19", "title": "Martin Luther King Jr. Day"},
-    {"date": "2026-02-16", "title": "Presidents' Day"},
-    {"date": "2026-05-25", "title": "Memorial Day"},
-    {"date": "2026-06-19", "title": "Juneteenth"},
-    {"date": "2026-07-04", "title": "Independence Day"},
-    {"date": "2026-09-07", "title": "Labor Day"},
-    {"date": "2026-11-11", "title": "Veterans Day"},
-    {"date": "2026-11-26", "title": "Thanksgiving"},
-    {"date": "2026-12-25", "title": "Christmas Day"},
-    {"date": "2026-12-31", "title": "New Year's Eve"},
-]
-
-POP_CULTURE_EVENTS = [
-    {"date": "2026-02-08", "title": "Super Bowl LX"},
-    {"date": "2026-02-15", "title": "NBA All-Star Game"},
-    {"date": "2026-02-22", "title": "Grammy Awards 2026"},
-    {"date": "2026-03-02", "title": "Academy Awards (Oscars)"},
-    {"date": "2026-06-11", "title": "FIFA World Cup 2026 begins"},
-    {"date": "2026-07-19", "title": "FIFA World Cup 2026 Final"},
-    {"date": "2026-09-13", "title": "NFL Season Kickoff 2026"},
-]
 
 # Google Drive folder (ID) where Rocket Money transaction CSV exports are uploaded.
 # Configured at runtime via Settings → Integrations and stored in drive_config.json;
@@ -375,13 +346,6 @@ def tool_add_show(date, event, venue, city, tickets="", notes="", doors="", time
                   "doors": doors, "time": time, "tickets": tickets, "notes": notes})
     _save(SHOWS_FILE, shows)
     push_result = tool_push_site(f"Add show: {event} at {venue}")
-    doors_line = f"Doors: {doors}\n" if doors else ""
-    _gcal_create_event(
-        title=f"🎸 {event}",
-        date_str=date, time_str=time,
-        description=f"Coming Up Aces show\nVenue: {venue}\n{doors_line}{notes}".strip(),
-        location=f"{venue}, {city}",
-    )
     return f"Show added: {event} — {venue}, {city} on {date}. {push_result}"
 
 def tool_edit_show(index: int, fields: dict):
@@ -485,11 +449,6 @@ def tool_add_reminder(title, due_date, category="personal", reminder_type="one-t
         r["interval_days"] = int(interval_days)
     reminders.append(r)
     _save(REMINDERS_FILE, reminders)
-    _gcal_create_event(
-        title=f"⏰ {title}",
-        date_str=due_date, time_str="",
-        description=f"Reminder — {category}\n{notes}".strip(),
-    )
     return f"Reminder set: {title} — due {due_date}"
 
 def tool_snooze_reminder(reminder_id: int):
@@ -592,12 +551,6 @@ def tool_add_agenda_item(label, time="09:00", tag="Personal", date=""):
     date_str = date or datetime.now().strftime("%Y-%m-%d")
     items.append({"id": aid, "time": time, "label": label, "tag": tag, "done": False, "date": date_str})
     _save(AGENDA_FILE, items)
-    _gcal_create_event(
-        title=label,
-        date_str=date_str, time_str=time,
-        duration_min=30,
-        description=f"Agenda — {tag}",
-    )
     return f"Agenda item added: {label} at {time}"
 
 # ── Work tasks (GLS/Code) ──────────────────────────────────────────────────────
@@ -827,101 +780,6 @@ def post_task():
 @app.route("/api/tasks/<int:task_id>/done", methods=["POST"])
 def done_task(task_id):
     return jsonify({"message": tool_complete_task(task_id)})
-
-# ── Recurring tasks (daily / weekly / monthly chores) ─────────────────────────
-
-RECURRING_FREQS = ("daily", "weekly", "monthly")
-
-def _recurring_due_date(item, today=None):
-    """The date this routine (re)became due. Daily = the day after completion,
-    weekly = 7 days after completion, monthly = the 1st of the month after
-    completion (so every monthly routine resets on the 1st automatically).
-    Never-completed monthlies count from the 1st of the current month (or
-    creation, if later); never-completed dailies/weeklies count from today."""
-    today = today or date.today()
-    last = item.get("last_completed")
-    try:
-        last_d = date.fromisoformat(last) if last else None
-    except ValueError:
-        last_d = None
-    if not last_d:
-        if item.get("frequency") == "monthly":
-            first = today.replace(day=1)
-            try:
-                created = date.fromisoformat(item.get("created") or "")
-            except ValueError:
-                return first
-            return max(first, min(created, today))
-        return today
-    freq = item.get("frequency", "weekly")
-    if freq == "daily":
-        return last_d + timedelta(days=1)
-    if freq == "weekly":
-        return last_d + timedelta(days=7)
-    if freq == "monthly":
-        y, m = (last_d.year + 1, 1) if last_d.month == 12 else (last_d.year, last_d.month + 1)
-        return date(y, m, 1)
-    return today
-
-@app.route("/api/recurring", methods=["GET"])
-def get_recurring():
-    items = _load(RECURRING_FILE, [])
-    today = date.today()
-    for it in items:
-        due_d = _recurring_due_date(it, today)
-        it["due"] = due_d <= today
-        it["overdue_days"] = max(0, (today - due_d).days) if it["due"] else 0
-    return jsonify(items)
-
-@app.route("/api/recurring", methods=["POST"])
-def post_recurring():
-    d = request.json or {}
-    title = (d.get("title") or "").strip()
-    freq = d.get("frequency", "weekly")
-    if not title or freq not in RECURRING_FREQS:
-        return jsonify({"error": "title and valid frequency required"}), 400
-    items = _load(RECURRING_FILE, [])
-    new = {
-        "id": (max((i.get("id", 0) for i in items), default=0) + 1),
-        "title": title,
-        "frequency": freq,
-        "last_completed": None,
-        "created": date.today().isoformat(),
-    }
-    items.append(new)
-    _save(RECURRING_FILE, items)
-    _log("recurring", "add", title, freq)
-    return jsonify(new)
-
-@app.route("/api/recurring/<int:rid>/done", methods=["POST"])
-def done_recurring(rid):
-    items = _load(RECURRING_FILE, [])
-    for it in items:
-        if it.get("id") == rid:
-            it["last_completed"] = date.today().isoformat()
-            _save(RECURRING_FILE, items)
-            _log("recurring", "complete", it.get("title", ""), it.get("frequency", ""))
-            return jsonify({"ok": True, "last_completed": it["last_completed"]})
-    return jsonify({"error": "not found"}), 404
-
-@app.route("/api/recurring/<int:rid>/undo", methods=["POST"])
-def undo_recurring(rid):
-    items = _load(RECURRING_FILE, [])
-    for it in items:
-        if it.get("id") == rid:
-            it["last_completed"] = None
-            _save(RECURRING_FILE, items)
-            return jsonify({"ok": True})
-    return jsonify({"error": "not found"}), 404
-
-@app.route("/api/recurring/<int:rid>", methods=["DELETE"])
-def delete_recurring(rid):
-    items = _load(RECURRING_FILE, [])
-    new_items = [i for i in items if i.get("id") != rid]
-    if len(new_items) == len(items):
-        return jsonify({"error": "not found"}), 404
-    _save(RECURRING_FILE, new_items)
-    return jsonify({"ok": True})
 
 @app.route("/api/finances", methods=["GET"])
 def get_finances():
@@ -1767,7 +1625,7 @@ def data_reset():
     to_clear = [
         FINANCE_FILE, SUBS_FILE, SAVINGS_FILE, TASKS_FILE, WORK_FILE,
         REMINDERS_FILE, CONTENT_FILE, BAND_CONTACTS_FILE, AGENDA_FILE,
-        HEALTH_FILE, BRIEF_FILE, RECURRING_FILE,
+        HEALTH_FILE, BRIEF_FILE,
     ]
     for f in to_clear:
         p = Path(f)
@@ -2209,282 +2067,6 @@ def finance_import_drive():
     return jsonify({"ok": True, "file": meta, "window_days": days, "written": written,
                     "failed": failed, "skipped": skipped, "scanned": scanned, "errors": errors[:5]})
 
-
-# ── Calendar overview ─────────────────────────────────────────────────────────
-
-@app.route("/api/calendar/overview")
-def calendar_overview():
-    today = datetime.now().date()
-    cutoff = today + timedelta(days=90)
-    events = []
-
-    # Band shows
-    for s in _load(SHOWS_FILE):
-        try:
-            d = datetime.strptime(s["date"], "%Y-%m-%d").date()
-            if today <= d <= cutoff:
-                events.append({"date": s["date"], "type": "show",
-                    "title": f"{s['event']} — {s['venue']}, {s['city']}", "meta": s.get("notes","")})
-        except Exception:
-            pass
-
-    # National holidays
-    for h in NATIONAL_HOLIDAYS:
-        try:
-            d = datetime.strptime(h["date"], "%Y-%m-%d").date()
-            if today <= d <= cutoff:
-                events.append({"date": h["date"], "type": "holiday", "title": h["title"], "meta": ""})
-        except Exception:
-            pass
-
-    # Pop culture events
-    for c in POP_CULTURE_EVENTS:
-        try:
-            d = datetime.strptime(c["date"], "%Y-%m-%d").date()
-            if today <= d <= cutoff:
-                events.append({"date": c["date"], "type": "culture", "title": c["title"], "meta": ""})
-        except Exception:
-            pass
-
-    # Work items with due_date
-    for w in _load(WORK_FILE):
-        if not w.get("done") and w.get("due_date"):
-            try:
-                d = datetime.strptime(w["due_date"], "%Y-%m-%d").date()
-                if today <= d <= cutoff:
-                    events.append({"date": w["due_date"], "type": "work",
-                        "title": w["title"], "meta": w.get("project", "")})
-            except Exception:
-                pass
-
-    # Manually-added calendar events (band / work / birthday / anniversary / other)
-    # Annual events (birthdays, anniversaries) are projected onto each year in the window.
-    manual_keys = set()  # (title, date) of emitted manual events, used to dedupe Google copies
-    for m in _load(CALENDAR_EVENTS_FILE, []):
-        try:
-            base = datetime.strptime(m["date"], "%Y-%m-%d").date()
-        except Exception:
-            continue
-        cat = m.get("category", "other")
-        item_common = {"type": cat, "title": m.get("title", ""), "meta": _event_meta(m),
-                       "highlight": m.get("highlight", False), "id": m.get("id", "")}
-        rec = m.get("recurring")
-        if rec == "annual":
-            for yr in range(today.year, cutoff.year + 1):
-                try:
-                    occ = base.replace(year=yr)
-                except ValueError:
-                    occ = base.replace(year=yr, day=28)  # Feb 29 -> Feb 28
-                if today <= occ <= cutoff:
-                    iso = occ.isoformat()
-                    events.append({"date": iso, **item_common})
-                    manual_keys.add((item_common["title"], iso))
-        elif rec == "weekly":
-            wds = m.get("weekdays") or []
-            day = max(base, today)  # don't show occurrences before the anchor date
-            while wds and day <= cutoff:
-                if ((day.weekday() + 1) % 7) in wds:  # python Mon=0 -> JS Sun=0 convention
-                    iso = day.isoformat()
-                    events.append({"date": iso, **item_common})
-                    manual_keys.add((item_common["title"], iso))
-                day += timedelta(days=1)
-        elif today <= base <= cutoff:
-            events.append({"date": m["date"], **item_common})
-            manual_keys.add((item_common["title"], m["date"]))
-
-    # Google Calendar (if connected)
-    try:
-        svc, err = _gcal_service()
-        if not err and svc:
-            now_iso = datetime.utcnow().isoformat() + 'Z'
-            end_iso = (datetime.utcnow() + timedelta(days=90)).isoformat() + 'Z'
-            items = svc.events().list(
-                calendarId='primary', timeMin=now_iso, timeMax=end_iso,
-                maxResults=60, singleEvents=True, orderBy='startTime'
-            ).execute().get('items', [])
-            for item in items:
-                start = item.get('start', {}).get('dateTime', item.get('start', {}).get('date', ''))
-                if start:
-                    summary = item.get('summary', '(no title)')
-                    # Skip events we pushed ourselves (any manual event) to avoid double-listing
-                    if (summary, start[:10]) in manual_keys:
-                        continue
-                    events.append({"date": start[:10], "type": "gcal",
-                        "title": summary,
-                        "meta": item.get('location', '')})
-    except Exception:
-        pass
-
-    events.sort(key=lambda e: e["date"])
-    return jsonify({"events": events})
-
-VALID_EVENT_CATEGORIES = {"band", "work", "piano", "birthday", "anniversary", "other"}
-
-def _clean_weekdays(val):
-    """Normalize a weekdays payload to a sorted list of unique JS getDay indices (0=Sun..6=Sat)."""
-    if not isinstance(val, list):
-        return []
-    out = set()
-    for w in val:
-        try:
-            iw = int(w)
-        except (TypeError, ValueError):
-            continue
-        if 0 <= iw <= 6:
-            out.add(iw)
-    return sorted(out)
-
-def _fmt_time(hhmm):
-    """'17:00' -> '5:00pm'. Returns '' on bad input."""
-    try:
-        h, mm = str(hhmm).split(":")
-        h, mm = int(h), int(mm)
-    except Exception:
-        return ""
-    ap = "am" if h < 12 else "pm"
-    return f"{(h % 12) or 12}:{mm:02d}{ap}"
-
-def _event_meta(m):
-    """Combine a manual event's time range with its note for display (e.g. '6:00pm–8:00pm · Studio')."""
-    rng = ""
-    if m.get("time"):
-        rng = _fmt_time(m["time"]) + (f"–{_fmt_time(m['end_time'])}" if m.get("end_time") else "")
-    note = m.get("meta", "")
-    return f"{rng} · {note}" if (rng and note) else (rng or note)
-
-def _push_event_to_gcal(m):
-    """Push one manual event to Google Calendar. Returns htmlLink or None (silent on errors)."""
-    return _gcal_create_event(
-        title=m.get("title", ""),
-        date_str=m.get("date", ""),
-        time_str=m.get("time", ""),
-        end_time=m.get("end_time", ""),
-        description=m.get("meta", ""),
-        recurrence=m.get("recurring", ""),
-        weekdays=m.get("weekdays") or None,
-    )
-
-@app.route("/api/calendar/events/manual", methods=["GET"])
-def get_manual_events():
-    return jsonify(_load(CALENDAR_EVENTS_FILE, []))
-
-@app.route("/api/calendar/events/manual", methods=["POST"])
-def post_manual_event():
-    d = request.json or {}
-    category = (d.get("category") or "other").strip()
-    title = (d.get("title") or "").strip()
-    date = (d.get("date") or "").strip()
-    if category not in VALID_EVENT_CATEGORIES:
-        return jsonify({"error": "invalid_category"}), 400
-    if not title or not date:
-        return jsonify({"error": "title_and_date_required"}), 400
-    try:
-        datetime.strptime(date, "%Y-%m-%d")
-    except ValueError:
-        return jsonify({"error": "invalid_date"}), 400
-
-    annual = category in ("birthday", "anniversary")
-    weekdays = _clean_weekdays(d.get("weekdays"))
-    if annual:
-        recurring = "annual"
-    elif (d.get("recurring") == "weekly") and weekdays:
-        recurring = "weekly"
-    else:
-        recurring = ""
-    record = {
-        "id": f"evt_{int(datetime.now().timestamp()*1000)}",
-        "category": category,
-        "title": title,
-        "date": date,
-        "time": (d.get("time") or "").strip(),
-        "end_time": (d.get("end_time") or "").strip(),
-        "meta": (d.get("meta") or "").strip(),
-        "highlight": True if annual else bool(d.get("highlight")),
-        "recurring": recurring,
-        "weekdays": weekdays,
-        "gcal_link": "",
-        "created": datetime.now().strftime("%Y-%m-%d"),
-    }
-    # Push every category to Google at create time (no-op/silent if Google isn't connected).
-    link = _push_event_to_gcal(record)
-    record["gcal_link"] = link or ""
-
-    items = _load(CALENDAR_EVENTS_FILE, [])
-    items.append(record)
-    _save(CALENDAR_EVENTS_FILE, items)
-    return jsonify({"ok": True, "event": record})
-
-@app.route("/api/calendar/events/manual/<eid>", methods=["PATCH"])
-def patch_manual_event(eid):
-    d = request.json or {}
-    items = _load(CALENDAR_EVENTS_FILE, [])
-    found = next((m for m in items if m.get("id") == eid), None)
-    if not found:
-        return jsonify({"error": "not_found"}), 404
-    if "category" in d:
-        cat = (d.get("category") or "").strip()
-        if cat not in VALID_EVENT_CATEGORIES:
-            return jsonify({"error": "invalid_category"}), 400
-        found["category"] = cat
-        if cat in ("birthday", "anniversary"):
-            found["recurring"] = "annual"
-        elif found.get("recurring") == "annual":
-            found["recurring"] = ""  # leaving annual category clears annual recurrence
-    if "title" in d:
-        title = (d.get("title") or "").strip()
-        if title:
-            found["title"] = title
-    if "date" in d:
-        date = (d.get("date") or "").strip()
-        try:
-            datetime.strptime(date, "%Y-%m-%d")
-        except ValueError:
-            return jsonify({"error": "invalid_date"}), 400
-        found["date"] = date
-    if "time" in d:
-        found["time"] = (d.get("time") or "").strip()
-    if "end_time" in d:
-        found["end_time"] = (d.get("end_time") or "").strip()
-    if "weekdays" in d:
-        found["weekdays"] = _clean_weekdays(d.get("weekdays"))
-    if "recurring" in d and found.get("category") not in ("birthday", "anniversary"):
-        rec = d.get("recurring")
-        found["recurring"] = "weekly" if (rec == "weekly" and found.get("weekdays")) else ""
-    if "meta" in d:
-        found["meta"] = (d.get("meta") or "").strip()
-    if "highlight" in d:
-        found["highlight"] = bool(d.get("highlight"))
-    # Birthdays/anniversaries are always highlighted.
-    if found.get("category") in ("birthday", "anniversary"):
-        found["highlight"] = True
-    _save(CALENDAR_EVENTS_FILE, items)
-    return jsonify({"ok": True, "event": found})
-
-@app.route("/api/calendar/events/manual/<eid>", methods=["DELETE"])
-def delete_manual_event(eid):
-    items = _load(CALENDAR_EVENTS_FILE, [])
-    kept = [e for e in items if e.get("id") != eid]
-    _save(CALENDAR_EVENTS_FILE, kept)
-    return jsonify({"ok": True, "removed": len(items) - len(kept)})
-
-@app.route("/api/calendar/sync-google", methods=["POST"])
-def sync_calendar_google():
-    """Back-fill: push every not-yet-synced manual event up to Google Calendar."""
-    svc, err = _gcal_service()
-    if err or not svc:
-        return jsonify({"ok": False, "error": err or "not_connected"})
-    items = _load(CALENDAR_EVENTS_FILE, [])
-    synced = 0
-    for m in items:
-        if m.get("gcal_link"):
-            continue
-        link = _push_event_to_gcal(m)
-        if link:
-            m["gcal_link"] = link
-            synced += 1
-    _save(CALENDAR_EVENTS_FILE, items)
-    pending = sum(1 for m in items if not m.get("gcal_link"))
-    return jsonify({"ok": True, "synced": synced, "pending": pending, "total": len(items)})
 
 # ── Google Sheets auto-sync helpers ──────────────────────────────────────────
 
@@ -3673,10 +3255,8 @@ def _google_oauth_client_config():
         "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
         "redirect_uris": [
             "http://localhost:5000/api/drive/callback",
-            "http://localhost:5000/api/calendar/callback",
             "http://localhost:5000/api/auth/google/callback",
             "https://mission-control-568559213462.us-central1.run.app/api/drive/callback",
-            "https://mission-control-568559213462.us-central1.run.app/api/calendar/callback",
             "https://mission-control-568559213462.us-central1.run.app/api/auth/google/callback",
         ],
     }
@@ -3685,12 +3265,12 @@ def _google_oauth_client_config():
     return {"web": web}
 
 def _has_google_oauth_client():
-    return GCAL_CREDS_FILE.exists() or _google_oauth_client_config() is not None
+    return GOOGLE_CREDS_FILE.exists() or _google_oauth_client_config() is not None
 
 def _oauth_flow(scopes, redirect_uri):
     from google_auth_oauthlib.flow import Flow
-    if GCAL_CREDS_FILE.exists():
-        return Flow.from_client_secrets_file(str(GCAL_CREDS_FILE), scopes=scopes, redirect_uri=redirect_uri)
+    if GOOGLE_CREDS_FILE.exists():
+        return Flow.from_client_secrets_file(str(GOOGLE_CREDS_FILE), scopes=scopes, redirect_uri=redirect_uri)
     config = _google_oauth_client_config()
     if not config:
         return None
@@ -3805,9 +3385,8 @@ def upload_credentials():
         return jsonify({"error": "Invalid JSON"}), 400
     if "installed" not in parsed and "web" not in parsed:
         return jsonify({"error": "Not a valid Google OAuth credentials file"}), 400
-    GCAL_CREDS_FILE.write_text(content)
+    GOOGLE_CREDS_FILE.write_text(content)
     GDRIVE_TOKEN_FILE.unlink(missing_ok=True)
-    GCAL_TOKEN_FILE.unlink(missing_ok=True)
     return jsonify({"ok": True})
 
 @app.route("/api/drive/status")
@@ -4015,147 +3594,6 @@ def drive_push_contacts():
         return jsonify({"ok": True, "count": len(contacts)})
     except Exception as e:
         return jsonify({"error": _office_file_error(e) or str(e)}), 500
-
-# ── Google Calendar ────────────────────────────────────────────────────────────
-
-def _gcal_service():
-    try:
-        from google.oauth2.credentials import Credentials
-        from google.auth.transport.requests import Request
-        from googleapiclient.discovery import build
-    except ImportError:
-        return None, "not_installed"
-    creds = None
-    if GCAL_TOKEN_FILE.exists():
-        try:
-            creds = Credentials.from_authorized_user_file(str(GCAL_TOKEN_FILE), GCAL_SCOPES)
-        except Exception:
-            return None, "auth_required"
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            try:
-                from google.auth.transport.requests import Request as Req
-                creds.refresh(Req())
-                GCAL_TOKEN_FILE.write_text(creds.to_json())
-            except Exception:
-                return None, "auth_required"
-        else:
-            return None, "auth_required"
-    return build('calendar', 'v3', credentials=creds), None
-
-# JS getDay() index (0=Sun..6=Sat) -> RFC5545 BYDAY code
-_BYDAY = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]
-
-def _gcal_create_event(title, date_str, time_str="", duration_min=60, description="", location="",
-                       recurrence="", end_time="", weekdays=None):
-    """Create a Google Calendar event. Silent on errors. Returns event link or None.
-
-    recurrence="annual"  -> RRULE:FREQ=YEARLY (birthdays/anniversaries)
-    recurrence="weekly"  -> RRULE:FREQ=WEEKLY;BYDAY=... using `weekdays` (JS getDay indices)
-    end_time ("HH:MM")   -> sets the event end for timed events (overrides duration_min)
-    """
-    try:
-        svc, err = _gcal_service()
-        if err:
-            return None
-        from datetime import datetime as dt, timedelta
-        if time_str:
-            try:
-                start = dt.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
-            except ValueError:
-                start = dt.strptime(date_str, "%Y-%m-%d")
-                time_str = ""
-        else:
-            start = dt.strptime(date_str, "%Y-%m-%d")
-        if time_str:
-            end = None
-            if end_time:
-                try:
-                    end = dt.strptime(f"{date_str} {end_time}", "%Y-%m-%d %H:%M")
-                except ValueError:
-                    end = None
-            if end is None or end <= start:
-                end = start + timedelta(minutes=int(duration_min))
-            body = {
-                "summary": title,
-                "description": description,
-                "location": location,
-                "start": {"dateTime": start.isoformat(), "timeZone": "America/Chicago"},
-                "end":   {"dateTime": end.isoformat(),   "timeZone": "America/Chicago"},
-            }
-        else:
-            # All-day event
-            end_day = start + timedelta(days=1)
-            body = {
-                "summary": title,
-                "description": description,
-                "location": location,
-                "start": {"date": start.strftime("%Y-%m-%d")},
-                "end":   {"date": end_day.strftime("%Y-%m-%d")},
-            }
-        if recurrence == "annual":
-            body["recurrence"] = ["RRULE:FREQ=YEARLY"]
-        elif recurrence == "weekly" and weekdays:
-            days = ",".join(_BYDAY[w] for w in weekdays if 0 <= w <= 6)
-            if days:
-                body["recurrence"] = [f"RRULE:FREQ=WEEKLY;BYDAY={days}"]
-        created = svc.events().insert(calendarId="primary", body=body).execute()
-        return created.get("htmlLink")
-    except Exception:
-        return None
-
-@app.route("/api/calendar/events")
-def get_calendar_events():
-    if not _has_google_oauth_client():
-        return jsonify({"error": "setup_required"})
-    svc, err = _gcal_service()
-    if err:
-        return jsonify({"error": err})
-    try:
-        now = datetime.utcnow().isoformat() + 'Z'
-        end = (datetime.utcnow() + timedelta(days=30)).isoformat() + 'Z'
-        items = svc.events().list(
-            calendarId='primary', timeMin=now, timeMax=end,
-            maxResults=20, singleEvents=True, orderBy='startTime'
-        ).execute().get('items', [])
-        return jsonify({"events": items})
-    except Exception as e:
-        return jsonify({"error": str(e)})
-
-@app.route("/api/calendar/auth")
-def calendar_auth_route():
-    try:
-        from google_auth_oauthlib.flow import Flow
-    except ImportError:
-        return jsonify({"error": "Run: pip install google-auth-oauthlib google-api-python-client"})
-    if not _has_google_oauth_client():
-        return jsonify({"error": "setup_required"})
-    redirect_uri = _request_base_url() + '/api/calendar/callback'
-    flow = _oauth_flow(GCAL_SCOPES, redirect_uri)
-    auth_url, state = flow.authorization_url(access_type='offline', prompt='consent')
-    session['gcal_state'] = state
-    session['gcal_code_verifier'] = getattr(flow, 'code_verifier', None)
-    return jsonify({"auth_url": auth_url})
-
-@app.route("/api/calendar/callback")
-def calendar_callback():
-    try:
-        from google_auth_oauthlib.flow import Flow
-    except ImportError:
-        return "google-auth-oauthlib not installed", 500
-    redirect_uri = _request_base_url() + '/api/calendar/callback'
-    try:
-        flow = _oauth_flow(GCAL_SCOPES, redirect_uri)
-        if flow is None:
-            return "Google OAuth client not configured", 400
-        verifier = session.pop('gcal_code_verifier', None)
-        if verifier:
-            flow.code_verifier = verifier
-        flow.fetch_token(authorization_response=request.url)
-        GCAL_TOKEN_FILE.write_text(flow.credentials.to_json())
-        return redirect('/?connected=calendar')
-    except Exception as e:
-        return f"<h2>Calendar auth error</h2><pre>{e}</pre><br><a href='/'>Back to app</a>", 400
 
 # ── Talk (new UI card) ─────────────────────────────────────────────────────────
 
@@ -4782,114 +4220,6 @@ def get_tcpg_health():
         })
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)})
-
-
-# ── Practice ───────────────────────────────────────────────────────────────────
-
-PRACTICE_DEFAULT = {
-    "piano": {"this_week_focus": "", "last_lesson_notes": "", "scales": [], "reminders": [], "sessions": []},
-}
-
-@app.route("/api/practice", methods=["GET"])
-def get_practice():
-    data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
-    if "piano" not in data:
-        data["piano"] = PRACTICE_DEFAULT["piano"]
-    # piano-only now — drop any legacy guitar data so it can't resurface
-    data.pop("guitar", None)
-    return jsonify(data)
-
-@app.route("/api/practice/<instrument>", methods=["POST"])
-def update_practice(instrument):
-    if instrument != "piano":
-        return jsonify({"error": "invalid instrument"}), 400
-    data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
-    body = request.json or {}
-    for field in ("this_week_focus", "last_lesson_notes"):
-        if field in body:
-            data[instrument][field] = body[field]
-    _save(PRACTICE_FILE, data)
-    return jsonify(data[instrument])
-
-@app.route("/api/practice/<instrument>/scale", methods=["POST"])
-def add_practice_scale(instrument):
-    if instrument != "piano":
-        return jsonify({"error": "invalid instrument"}), 400
-    data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
-    scales = data[instrument].get("scales", [])
-    new_id = max((s["id"] for s in scales), default=0) + 1
-    scales.append({"id": new_id, "name": (request.json or {}).get("name", ""), "done": False})
-    data[instrument]["scales"] = scales
-    _save(PRACTICE_FILE, data)
-    return jsonify(scales)
-
-@app.route("/api/practice/<instrument>/scale/<int:scale_id>/toggle", methods=["POST"])
-def toggle_practice_scale(instrument, scale_id):
-    if instrument != "piano":
-        return jsonify({"error": "invalid instrument"}), 400
-    data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
-    for s in data[instrument].get("scales", []):
-        if s["id"] == scale_id:
-            s["done"] = not s["done"]
-    _save(PRACTICE_FILE, data)
-    return jsonify({"ok": True})
-
-@app.route("/api/practice/<instrument>/scale/<int:scale_id>", methods=["DELETE"])
-def delete_practice_scale(instrument, scale_id):
-    if instrument != "piano":
-        return jsonify({"error": "invalid instrument"}), 400
-    data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
-    data[instrument]["scales"] = [s for s in data[instrument].get("scales", []) if s["id"] != scale_id]
-    _save(PRACTICE_FILE, data)
-    return jsonify({"ok": True})
-
-@app.route("/api/practice/<instrument>/reminder", methods=["POST"])
-def add_practice_reminder(instrument):
-    if instrument != "piano":
-        return jsonify({"error": "invalid instrument"}), 400
-    data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
-    reminders = data[instrument].get("reminders", [])
-    new_id = max((r["id"] for r in reminders), default=0) + 1
-    reminders.append({"id": new_id, "text": (request.json or {}).get("text", ""), "done": False})
-    data[instrument]["reminders"] = reminders
-    _save(PRACTICE_FILE, data)
-    return jsonify(reminders)
-
-@app.route("/api/practice/<instrument>/reminder/<int:rid>/toggle", methods=["POST"])
-def toggle_practice_reminder(instrument, rid):
-    if instrument != "piano":
-        return jsonify({"error": "invalid instrument"}), 400
-    data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
-    for r in data[instrument].get("reminders", []):
-        if r["id"] == rid:
-            r["done"] = not r["done"]
-    _save(PRACTICE_FILE, data)
-    return jsonify({"ok": True})
-
-@app.route("/api/practice/<instrument>/reminder/<int:rid>", methods=["DELETE"])
-def delete_practice_reminder(instrument, rid):
-    if instrument != "piano":
-        return jsonify({"error": "invalid instrument"}), 400
-    data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
-    data[instrument]["reminders"] = [r for r in data[instrument].get("reminders", []) if r["id"] != rid]
-    _save(PRACTICE_FILE, data)
-    return jsonify({"ok": True})
-
-@app.route("/api/practice/<instrument>/session", methods=["POST"])
-def log_practice_session(instrument):
-    if instrument != "piano":
-        return jsonify({"error": "invalid instrument"}), 400
-    data = _load(PRACTICE_FILE, PRACTICE_DEFAULT)
-    body = request.json or {}
-    sessions = data[instrument].get("sessions", [])
-    sessions.insert(0, {
-        "date": datetime.now().strftime("%Y-%m-%d"),
-        "minutes": body.get("minutes", 0),
-        "note": body.get("note", "")
-    })
-    data[instrument]["sessions"] = sessions[:60]
-    _save(PRACTICE_FILE, data)
-    return jsonify({"ok": True})
 
 
 # startup_sync removed — the contacts Google Sheet had corrupted data (songs as contacts)
