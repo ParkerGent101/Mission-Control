@@ -134,7 +134,7 @@ const OnboardingWizard = ({ onComplete }) => {
   const step1 = (
     <div className="ob-step">
       <h2 className="ob-title">Choose your look</h2>
-      <p className="ob-sub">Hover to preview. Click to lock it in. You can always change this in Settings.</p>
+      <p className="ob-sub">Hover to preview. Click to lock it in.</p>
       <div className="ob-theme-grid">
         {(window.THEMES || []).map(th => {
           const isSelected = selectedTheme === th.id;
@@ -299,7 +299,7 @@ const OnboardingWizard = ({ onComplete }) => {
   const step4 = (
     <div className="ob-step">
       <h2 className="ob-title">Connect your data</h2>
-      <p className="ob-sub">Optional — skip either and connect later from Settings.</p>
+      <p className="ob-sub">Optional — connect Drive later if you skip it now.</p>
 
       <div className="ob-connect-card" style={{ marginTop: 20 }}>
         <div className="ob-connect-icon">
@@ -307,7 +307,7 @@ const OnboardingWizard = ({ onComplete }) => {
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 500, fontSize: 13 }}>Finance</div>
-          <div style={{ color: 'var(--ink-3)', fontSize: 11.5, marginTop: 2 }}>Export your transactions from Rocket Money to a Google Drive folder, then connect Drive and set that folder in Settings → Integrations. The Finance card’s “Sync from Drive” pulls them in.</div>
+          <div style={{ color: 'var(--ink-3)', fontSize: 11.5, marginTop: 2 }}>Export your transactions from Rocket Money to a Google Drive folder, then connect Drive by running <code style={{ fontFamily: 'var(--font-mono)' }}>scripts\sheets-reauth.ps1</code> and set that folder in <code style={{ fontFamily: 'var(--font-mono)' }}>drive_config.json</code>. The Finance card’s “Sync from Drive” pulls them in.</div>
         </div>
       </div>
     </div>

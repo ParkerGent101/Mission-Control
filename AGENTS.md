@@ -35,7 +35,7 @@ The persistent Drive connection is OAuth-based, not a mounted folder or always-o
 - `app.py`: Flask app, API routes, persistence helpers, AI tool loop, and server-side integration logic.
 - `static/app.jsx`: app shell, sidebar, navigation, and top-level client state.
 - `static/modules.jsx`: dashboard modules and most user-facing module UI.
-- `static/settings.jsx`: settings/onboarding-related UI.
+- `static/onboarding.jsx`: first-run onboarding wizard.
 - `templates/index.html`: page shell and CSS variables/styles.
 - `data/*.json`: local cache/fallback data. Google Sheets/Drive is the real source of truth unless a file is clearly a template or seed.
 - `requirements.txt`: Python dependencies.

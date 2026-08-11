@@ -52,7 +52,6 @@ const App = () => {
       return saved ? { ...TWEAK_DEFAULTS, ...saved } : TWEAK_DEFAULTS;
     } catch { return TWEAK_DEFAULTS; }
   });
-  const [active, setActive] = useStateApp("health");
   const [now, setNow] = useStateApp(new Date());
   const [toasts, setToasts] = useStateApp([]);
   const [showSheet, setShowSheet] = useStateApp(false);
@@ -98,7 +97,6 @@ const App = () => {
     if (!showSheet) setSheetDragY(0);
   }, [showSheet]);
   const [needsOnboarding, setNeedsOnboarding] = useStateApp(null);
-  const [showSettings, setShowSettings] = useStateApp(false);
   const [userName, setUserName] = useStateApp(() => localStorage.getItem('mc_name') || 'Parker');
 
   useEffectApp(() => {
@@ -137,25 +135,6 @@ const App = () => {
   }, []);
 
   useEffectApp(() => {
-    const onKey = (e) => {
-      if (e.key === "Escape") {
-        setShowSettings(false);
-        return;
-      }
-      // Sidebar hotkeys ([F]inance, … [T]weaks) — skip while typing or with modifiers.
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      const el = e.target;
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
-      const k = e.key.length === 1 ? e.key.toUpperCase() : "";
-      if (k === "T") { setShowSettings(true); return; }
-      const nav = SIDEBAR_NAV.find(n => n.key === k);
-      if (nav) setActive(nav.id);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  useEffectApp(() => {
     document.documentElement.style.setProperty("--accent", t.accent);
     document.documentElement.style.setProperty("--accent-2", t.accent2 || "#6ed3b6");
   }, [t.accent, t.accent2]);
@@ -180,11 +159,6 @@ const App = () => {
     setNeedsOnboarding(false);
   };
 
-  const handleReEnroll = async () => {
-    await fetch('/api/user/reset-onboarding', { method: 'POST' });
-    setNeedsOnboarding(true);
-  };
-
   const logout = async () => {
     await fetch('/api/logout', { method: 'POST' });
     window.location.href = '/login';
@@ -201,7 +175,7 @@ const App = () => {
     { id: "band",     label: "Band",             icon: "music",      el: <M.BandCard cardProps={{}} /> },
   ];
 
-  const pageTitle = SIDEBAR_NAV.find(n => n.id === active)?.label || "Mission Control";
+  const pageTitle = "Dashboard";
 
   return (
     <div className="app" data-density={t.density} data-sidebar={t.sidebar}>
@@ -210,16 +184,11 @@ const App = () => {
         <div className="brand">
           <span className="brand-mark"/>
           <span className="brand-name">MISSION CONTROL</span>
-          <span className="mobile-section-label">
-            {SIDEBAR_NAV.find(n => n.id === active)?.label || 'Mission Control'}
-          </span>
+          <span className="mobile-section-label">{pageTitle}</span>
         </div>
         <div className="topbar-center"></div>
         <div className="topbar-right">
           <span className="mono topbar-date" style={{ padding: "0 10px", color: "var(--ink-2)" }}>{date}</span>
-          <button className="icon-btn" title="Settings" onClick={() => setShowSettings(true)}>
-            <Icon name="settings" size={15}/>
-          </button>
           <button className="icon-btn" title="Sign out" onClick={logout}>
             <Icon name="logout" size={15}/>
           </button>
@@ -230,17 +199,11 @@ const App = () => {
       <nav className="sidebar">
         <div className="sb-section">Modules</div>
         {SIDEBAR_NAV.map((n) => (
-          <div key={n.id} className={"sb-item" + (active === n.id ? " active" : "")} onClick={() => setActive(n.id)}>
+          <div key={n.id} className="sb-item">
             <span className="sb-key">[{n.key}]</span>
             <span className="sb-label">{n.label}</span>
           </div>
         ))}
-        <div style={{ flex: 1 }}/>
-        <div className="sb-section">Shortcuts</div>
-        <div className="sb-item" onClick={() => setShowSettings(true)}>
-          <span className="sb-key">[T]</span>
-          <span className="sb-label">Tweaks</span>
-        </div>
       </nav>
 
       {/* Main */}
@@ -251,7 +214,7 @@ const App = () => {
           <div className="spacer"/>
         </div>
         <div className="grid">
-          {cards.filter(c => c.id === active).map(c => (
+          {cards.map(c => (
             <React.Fragment key={c.id}>{c.el}</React.Fragment>
           ))}
         </div>
@@ -275,7 +238,7 @@ const App = () => {
       {/* Mobile bottom nav */}
       <nav className="mobile-nav">
         {MOBILE_NAV.map(n => (
-          <div key={n.id} className={"mobile-nav-item" + (active === n.id ? " active" : "")} onClick={() => setActive(n.id)}>
+          <div key={n.id} className="mobile-nav-item">
             <Icon name={n.icon} size={20}/>
             <span>{n.label}</span>
           </div>
@@ -309,20 +272,7 @@ const App = () => {
                 ✕
               </button>
             </div>
-            <div className="sheet-section-label">Go to</div>
-            <div className="sheet-nav-grid">
-              {SIDEBAR_NAV.map(n => (
-                <div key={n.id} className={"sheet-nav-item" + (active === n.id ? " active" : "")}
-                  onClick={() => { setActive(n.id); setShowSheet(false); }}>
-                  <Icon name={n.icon} size={15} style={{color:"var(--accent)",flexShrink:0}}/>
-                  <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:12}}>{n.label}</span>
-                </div>
-              ))}
-            </div>
             <div style={{display:'flex',gap:8,marginTop:4}}>
-              <button className="btn" style={{flex:1}} onClick={() => { setShowSettings(true); setShowSheet(false); }}>
-                <Icon name="settings" size={13}/>Settings
-              </button>
               <button className="btn" style={{flex:1}} onClick={logout}>
                 <Icon name="logout" size={13}/>Sign out
               </button>
@@ -341,19 +291,6 @@ const App = () => {
 
       {needsOnboarding === true && window.OnboardingWizard && (
         <window.OnboardingWizard onComplete={handleOnboardingComplete} />
-      )}
-
-      {window.SettingsPanel && (
-        <window.SettingsPanel
-          open={showSettings}
-          onClose={() => setShowSettings(false)}
-          tweaks={t}
-          setTweak={setTweak}
-          userName={userName}
-          setUserName={setUserName}
-          onReEnroll={handleReEnroll}
-          onLogout={logout}
-        />
       )}
     </div>
   );

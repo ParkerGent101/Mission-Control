@@ -454,7 +454,7 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
   // manually via the Sync button.
   const syncDrive = async (opts = {}) => {
     if (importReady === false) {
-      if (opts.manual) window.__toast?.('Set your Rocket Money Drive folder in Settings → Integrations first', 'info');
+      if (opts.manual) window.__toast?.('Set your Rocket Money Drive folder in drive_config.json first', 'info');
       return;
     }
     setSyncing(true);
