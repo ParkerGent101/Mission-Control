@@ -448,10 +448,11 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
     loadFinances(month);
   };
 
-  // Sync from Drive: read the newest Rocket Money CSV export from the configured Google
-  // Drive folder and write its spending transactions straight to the Sheet (categorized +
-  // de-duped server-side, recent window only). Runs silently on load (throttled) and
-  // manually via the Sync button.
+  // Sync from Drive: reconcile the Sheet against the newest Rocket Money CSV export in
+  // the configured Google Drive folder. The CSV is the point of truth, so the server
+  // adds new charges, updates changed amounts in place, and drops rows a previous sync
+  // wrote that the export no longer has — the month's total ends up equal to Rocket
+  // Money's. Runs silently on load (throttled) and manually via the Sync button.
   const syncDrive = async (opts = {}) => {
     if (importReady === false) {
       if (opts.manual) window.__toast?.('Set your Rocket Money Drive folder in drive_config.json first', 'info');
@@ -462,15 +463,27 @@ const FinanceCard = ({ cardProps = {} } = {}) => {
       const r = await fetch('/api/finance/import/drive');
       const d = await r.json();
       if (!r.ok || d.error) { if (opts.manual) window.__toast?.(d.error || 'Drive sync failed', 'error'); setSyncing(false); return; }
-      if (d.written > 0) {
+      const changed = (d.added || 0) + (d.updated || 0) + (d.removed || 0);
+      if (changed > 0) {
         loadFinances(month);
-        window.__toast?.(`Imported ${d.written} transaction${d.written === 1 ? '' : 's'} from Drive`, 'success');
+        const bits = [];
+        if (d.added)   bits.push(`${d.added} added`);
+        if (d.updated) bits.push(`${d.updated} updated`);
+        if (d.removed) bits.push(`${d.removed} removed`);
+        const total = typeof d.csv_total === 'number' ? ` — ${fmtMoney(d.csv_total)} this month` : '';
+        window.__toast?.(`Synced with Rocket Money: ${bits.join(', ')}${total}`, 'success');
       } else if (opts.manual) {
-        window.__toast?.('No new transactions to import', 'info');
+        window.__toast?.(typeof d.csv_total === 'number'
+          ? `Already matches Rocket Money — ${fmtMoney(d.csv_total)} this month`
+          : 'Already up to date', 'info');
+      }
+      if (opts.manual && d.warnings?.length) {
+        window.__toast?.(d.warnings[0], 'info');
+        console.warn('Drive sync warnings:', d.warnings);
       }
       if (opts.manual && d.failed) {
         const why = (d.errors && d.errors.length) ? ` — ${d.errors[0]}` : '';
-        window.__toast?.(`${d.failed} couldn't be written to the Sheet${why}`, 'error');
+        window.__toast?.(`${d.failed} month${d.failed === 1 ? '' : 's'} couldn't be synced${why}`, 'error');
         if (d.errors?.length) console.warn('Drive sync errors:', d.errors);
       }
     } catch { if (opts.manual) window.__toast?.('Drive sync failed', 'error'); }

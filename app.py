@@ -1716,9 +1716,14 @@ def _record_expense(date, desc, amt, cat, rows_cache=None):
 # Housing (rent/mortgage) is folded into Utilities — one bills bucket per the Rocket Money export.
 # Subscription merchants are checked BEFORE utilities because Rocket Money files most of
 # them under "Bills & Utilities" — the only real utilities are Cox, water and electric.
+# "cloud" (unqualified) is here on purpose: Google Cloud bills Parker's projects
+# under names Rocket Money files as Shopping — 'CLOUD 6wHSWS', 'GOOGLE *CLOUD_xxx' —
+# so a plain "google cloud" substring never matched. Anything cloud-ish is a
+# subscription. Same for 'apple.com/bill', which Rocket Money files under
+# Bills & Utilities.
 _RM_SUBSCRIPTION_MERCHANTS = (
-    "netflix", "hulu", "spotify", "apple music", "audible", "planet fitness",
-    "google cloud", "rocket money", "minecraft", "realms", "disney", "youtube",
+    "netflix", "hulu", "spotify", "apple music", "apple.com", "audible", "planet fitness",
+    "cloud", "google cloud", "rocket money", "minecraft", "realms", "disney", "youtube",
     "hbo", "paramount", "peacock", "patreon", "chatgpt", "claude", "notion",
     "adobe", "icloud", "amazon prime",
 )
@@ -1731,7 +1736,7 @@ def _rocket_to_finance_category(rm_cat, name=""):
     if any(k in blob for k in ("dining", "drinks", "restaurant")):                return "Dining and Drinks"
     if any(k in blob for k in ("rent", "mortgage", "bills & utilities", "utilit",
                                "cox", "internet", "cable", "electric", "water",
-                               "phone")):                                         return "Utilities"
+                               "phone", "the grove")):                             return "Utilities"
     return "Fun"
 
 # Rocket Money "Category" values that are NOT new discretionary spend, so they never hit
@@ -1804,6 +1809,349 @@ def _rocket_fingerprint(date, amount, name):
     import hashlib
     key = f"{date}|{float(amount):.2f}|{str(name).strip().lower()}"
     return hashlib.sha1(key.encode("utf-8")).hexdigest()
+
+# ── Reconciling sync: make a month tab match the Rocket Money export ─────────
+# The old import appended every unseen CSV row to the next empty slot and deduped
+# only on a date|amount|name fingerprint. That fingerprint changes whenever Rocket
+# Money re-posts a charge (a pending charge posts a day later, a merchant name gets
+# cleaned up, a tip settles) — so the same charge was written twice and the month's
+# total drifted above what Rocket Money reports. It also ignored the recurring
+# template rows in the budget sections (Water, Electricity, Netflix, …) and appended
+# a second merchant-named row beside each one.
+#
+# The sync below reconciles instead of appending: the CSV is the truth for the month,
+# so each run makes the tab MATCH it. New charges are added, changed amounts are
+# updated in place, rows the sync wrote that the CSV no longer has are removed, and
+# recurring charges land on the template row they belong to. Rows the sync never
+# wrote (hand-entered cash spend on a template row) are left alone and reported.
+
+_MERCHANT_STOP_TOKENS = {
+    'the', 'and', 'of', 'inc', 'llc', 'co', 'corp', 'ltd', 'com', 'www',
+    'pymt', 'pmt', 'payment', 'autopay', 'recurring', 'monthly', 'mon', 'mo',
+    'purchase', 'debit', 'card', 'online', 'store', 'usa',
+}
+
+def _merchant_tokens(s):
+    """Comparable words in a merchant name or Sheet description: lowercased, split
+    on anything non-alphanumeric, with noise words and bare numbers dropped."""
+    import re
+    return [t for t in re.split(r'[^a-z0-9]+', str(s or '').lower())
+            if len(t) > 1 and not t.isdigit() and t not in _MERCHANT_STOP_TOKENS]
+
+def _merchant_match_score(merchant, row_desc):
+    """How strongly a Rocket Money merchant matches an existing Sheet row.
+    Shared whole word = 3, shared 4+ char prefix = 2, nothing in common = 0.
+    This is what lets 'COX COMM KAN' find the 'Internet (COX COMM)' row,
+    'AMER ELECT PWR' find 'Electricity' and 'Microsoft*Realms 1 Mon' find
+    'Realms Minecraft' — instead of each one appending a new row every month."""
+    mt, rt = _merchant_tokens(merchant), _merchant_tokens(row_desc)
+    if not mt or not rt:
+        return 0
+    score = 0
+    for a in mt:
+        best = 0
+        for b in rt:
+            if a == b:
+                best = max(best, 3)
+            elif len(a) >= 4 and len(b) >= 4 and (a.startswith(b) or b.startswith(a)):
+                best = max(best, 2)
+        score += best
+    return score
+
+_MERCHANT_MATCH_MIN = 2      # a 4+ char prefix hit is the weakest match we accept
+
+def _budget_section_scan(rows, canon_target):
+    """Rows of one budget-tracker section (Utilities / Subscriptions) as
+    [{'row','desc','actual','actual_raw','template'}], plus the section's column map.
+
+    `template` marks a row Parker maintains by hand — it carries a category label,
+    an account, a due date or a budgeted amount. A row with nothing but a
+    description and an actual is an artifact the old importer appended, which is
+    what makes it safe for the sync to clean those up."""
+    if not rows:
+        return [], {}
+    max_cols = max((len(r) for r in rows), default=1)
+    padded = [list(r) + [''] * (max_cols - len(r)) for r in rows]
+    hdr_idx, desc_col, due_col, actual_col = _finance_budget_columns(padded)
+    hdr = [str(c).lower().strip() for c in padded[hdr_idx]]
+    budget_col = next((i for i, h in enumerate(hdr) if 'budget' in h), 4)
+    acct_col   = next((i for i, h in enumerate(hdr) if 'account' in h), 2)
+    out, start, end, current_cat = [], None, None, ''
+    for ri in range(hdr_idx + 1, len(padded)):
+        row = padded[ri]
+        rl = ' '.join(str(c) for c in row[:8]).lower()
+        if any(kw in rl for kw in ['anticipated', 'actual total', 'roommate', 'savings total']):
+            break
+        cell = lambda c: str(row[c]).strip() if c < max_cols else ''
+        cat_val, desc_val = cell(0), cell(desc_col)
+        if cat_val and not any(ch.isdigit() for ch in cat_val):
+            current_cat = cat_val
+        if _budget_row_canon(cat_val, desc_val, current_cat) == canon_target:
+            if start is None:
+                start = ri
+            end = ri
+            out.append({'row': ri, 'desc': desc_val,
+                        'actual_raw': cell(actual_col), 'actual': _parse_money(cell(actual_col)),
+                        'template': bool(cat_val or cell(acct_col) or cell(due_col) or cell(budget_col))})
+        elif start is not None:
+            break
+    return out, {'desc': desc_col, 'actual': actual_col, 'budget': budget_col,
+                 'start': start, 'end': end}
+
+def _finance_sync_month(svc, month, csv_rows, purge=True, apply=True, subs_data=None):
+    """Make one month tab agree with the Rocket Money export.
+
+    purge=True (the current month) also removes sync-written rows the CSV no longer
+    contains, so the tab's total equals Rocket Money's. For older months the sync is
+    add-only — an export that only partly covers a past month must never wipe it.
+    apply=False plans the changes without touching the Sheet.
+
+    Returns a plan dict: added / updated / removed / manual counts and totals,
+    per-category detail, and any warnings."""
+    from collections import Counter
+
+    def norm(s):
+        return str(s or '').strip().lower()
+
+    tab = _resolve_month_tab(svc, month)
+    rows = _sheets_execute(svc.spreadsheets().values().get(
+        spreadsheetId=FINANCE_SHEET_ID, range=tab)).get('values', [])
+    max_cols = max((len(r) for r in rows), default=1)
+    rows = [list(r) + [''] * (max_cols - len(r)) for r in rows]
+
+    # -- what the CSV says this month's spending is --
+    desired_detail = {c: [] for c in DETAIL_TABLE_KEYWORDS}
+    desired_budget = {c: [] for c in BUDGET_TRANSACTION_CATEGORIES}
+    csv_total, by_category = 0.0, {}
+    for r in csv_rows:
+        if (r.get('date') or '')[:7] != month or _rocket_is_nonspend(r):
+            continue
+        cat  = _rocket_to_finance_category(r.get('category'), r.get('name'))
+        amt  = round(abs(r.get('amount') or 0), 2)
+        name = (r.get('name') or 'Transaction').strip()
+        csv_total = round(csv_total + amt, 2)
+        by_category[cat] = round(by_category.get(cat, 0) + amt, 2)
+        if cat in desired_detail:
+            # Gas/Groceries tables key column 1 on the date, Fun/Dining on the merchant.
+            label = name if cat in ('Fun', 'Dining and Drinks') else _format_short_date(r['date'])
+            desired_detail[cat].append({'label': label, 'amount': amt, 'date': r['date'], 'name': name})
+        elif cat in desired_budget:
+            desired_budget[cat].append({'name': name, 'amount': amt, 'date': r['date']})
+
+    state = _load(FINANCE_IMPORT_FILE, {"imported": []})
+    if not isinstance(state, dict):
+        state = {"imported": []}
+    prev = (state.get('managed') or {}).get(month) or {}
+    prev_detail = prev.get('detail') or {}
+    prev_budget = prev.get('budget') or {}
+
+    # Every label+amount the CSV can account for this month, in both the forms the
+    # detail tables use (merchant for Fun/Dining, short date for Gas/Groceries). A
+    # Sheet row matching one of these belongs to the CSV even if no earlier run
+    # recorded writing it — that is what lets the first reconciling sync collapse the
+    # duplicates the old importer left behind and re-home a charge Rocket Money has
+    # since re-categorized, while leaving hand-entered rows (cash, splits) alone.
+    # Budget-category charges are included too: a charge that moves out of a detail
+    # table into Utilities/Subscriptions (Google Cloud now being a subscription) must
+    # let go of its old detail row instead of being counted in both places.
+    csv_keys = set()
+    for lst in list(desired_detail.values()) + list(desired_budget.values()):
+        for d in lst:
+            csv_keys.add((norm(d.get('name') or d.get('label')), d['amount']))
+            csv_keys.add((norm(_format_short_date(d['date'])), d['amount']))
+
+    writes, warnings = [], []          # writes: (a1_range, [[...]]) for values.batchUpdate
+    added = updated = removed = 0
+    manual_total = 0.0
+    new_detail, new_budget = {}, {}
+
+    # -- detail tables: Gas / Fun / Groceries / Dining and Drinks --
+    for cat in DETAIL_TABLE_KEYWORDS:
+        want = [[d['label'], d['amount']] for d in
+                sorted(desired_detail[cat], key=lambda x: (x['date'], norm(x['label']), x['amount']))]
+        pos = _find_detail_table(rows, cat)
+        if not pos:
+            if want:
+                warnings.append(f"[{cat}] no detail table in '{tab}' — {len(want)} charges not written")
+            continue
+        hr, hc = pos
+        end = len(rows)
+        for ri in range(hr + 2, len(rows)):
+            c1 = norm(rows[ri][hc])
+            c2 = norm(rows[ri][hc + 1]) if hc + 1 < max_cols else ''
+            if 'total' in (c1 + c2):
+                end = ri
+                break
+        slots = max(0, end - (hr + 2))
+        cur_block = [[str(rows[ri][hc]), str(rows[ri][hc + 1] if hc + 1 < max_cols else '')]
+                     for ri in range(hr + 2, end)]
+        existing = [[c1, c2] for c1, c2 in cur_block if c1.strip() or c2.strip()]
+
+        # Rows an earlier run wrote, or that the CSV can account for, are the sync's to
+        # rewrite; anything else in the table was hand-entered and is preserved as-is.
+        owned_keys = {(norm(l), round(float(a), 2)) for l, a in (prev_detail.get(cat) or [])} | csv_keys
+        manual, mine = [], Counter()
+        for c1, c2 in existing:
+            key = (norm(c1), round(_parse_money(c2), 2))
+            if key in owned_keys:
+                mine[key] += 1
+            else:
+                manual.append([c1, c2])
+        want_c = Counter((norm(l), round(float(a), 2)) for l, a in want)
+
+        if purge:
+            body = manual + want
+            gone, fresh = mine - want_c, want_c - mine
+            # Same merchant, different amount = one charge whose amount changed
+            # (a tip settling, a pending charge posting), not a delete plus an add.
+            for (lbl, _amt), n in list(gone.items()):
+                same = [k for k in fresh if k[0] == lbl]
+                for k in same:
+                    moved = min(n, fresh[k])
+                    if not moved:
+                        continue
+                    updated += moved
+                    fresh[k] -= moved
+                    gone[(lbl, _amt)] -= moved
+                    n -= moved
+            added   += sum(v for v in fresh.values() if v > 0)
+            removed += sum(v for v in gone.values() if v > 0)
+            new_detail[cat] = want
+        else:
+            have = Counter((norm(c1), round(_parse_money(c2), 2)) for c1, c2 in existing)
+            extra = []
+            for w in want:
+                k = (norm(w[0]), round(float(w[1]), 2))
+                if have.get(k):
+                    have[k] -= 1
+                else:
+                    extra.append(w)
+            body = existing + extra
+            added += len(extra)
+            new_detail[cat] = [list(x) for x in (prev_detail.get(cat) or [])] + extra
+        manual_total = round(manual_total + sum(_parse_money(a) for _, a in manual), 2)
+
+        if len(body) > slots:
+            warnings.append(f"[{cat}] table has room for {slots} rows but needs {len(body)} — "
+                            f"{len(body) - slots} charges not written; add rows above its Total row")
+            body = body[:slots]
+        body = body + [['', '']] * (slots - len(body))
+        # Compare label + numeric amount, not raw strings: the Sheet hands back '6' for
+        # a 6.0 write, which would otherwise make every sync rewrite the whole block.
+        shape = lambda blk: [(str(a).strip(), round(_parse_money(b), 2) if str(b).strip() else None)
+                             for a, b in blk]
+        if shape(body) != shape(cur_block):
+            writes.append((f"'{tab}'!{_col_letter(hc)}{hr + 3}:{_col_letter(hc + 1)}{end}", body))
+
+    # -- budget sections: Utilities / Subscriptions (one row per recurring bill) --
+    appends = []          # (cat, merchant, amount) with no row to land on yet
+    for cat in sorted(desired_budget):
+        section, cols = _budget_section_scan(rows, cat)
+        want = sorted(desired_budget[cat], key=lambda x: x['date'])
+        if not section:
+            if want:
+                warnings.append(f"[{cat}] no '{cat}' section in '{tab}' — {len(want)} charges not written")
+            continue
+        # Rows the old importer appended carry only a description + actual. Treat all of
+        # them as sync-owned so a first run of this code cleans up the legacy duplicates.
+        prev_keys = {norm(k) for k in (prev_budget.get(cat) or {})}
+        was_ours = lambda s: ((not s['template']) or norm(s['desc']) in prev_keys
+                              or (norm(s['desc']), round(s['actual'], 2)) in csv_keys)
+        templates = [s for s in section if s['template'] and s['desc']]
+        artifacts = [s for s in section if not s['template'] and s['desc']]
+
+        assigned, mine = {}, {}
+        for d in want:
+            hit = None
+            for pool in (templates, artifacts):     # a real template row always wins
+                scored = [(_merchant_match_score(d['name'], s['desc']), -s['row'], s) for s in pool]
+                scored = [x for x in scored if x[0] >= _MERCHANT_MATCH_MIN]
+                if scored:
+                    hit = max(scored, key=lambda x: (x[0], x[1]))[2]
+                    break
+            if hit is None:
+                appends.append((cat, d['name'], d['amount']))
+                continue
+            # Several charges to the same bill in one month sum into its row.
+            assigned[hit['row']] = round(assigned.get(hit['row'], 0.0) + d['amount'], 2)
+            mine[hit['row']] = hit['desc']
+
+        for s in section:
+            target = assigned.get(s['row'])
+            actual_cell = f"'{tab}'!{_col_letter(cols['actual'])}{s['row'] + 1}"
+            desc_cell   = f"'{tab}'!{_col_letter(cols['desc'])}{s['row'] + 1}"
+            if target is not None:
+                if not s['actual_raw'].strip():
+                    added += 1
+                elif abs(s['actual'] - target) > 0.005:
+                    updated += 1
+                if not s['actual_raw'].strip() or abs(s['actual'] - target) > 0.005:
+                    writes.append((actual_cell, [[target]]))
+                new_budget.setdefault(cat, {})[s['desc']] = target
+                continue
+            if not purge:
+                if s['actual_raw'].strip() and not was_ours(s):
+                    manual_total = round(manual_total + s['actual'], 2)
+                continue
+            if not s['template'] and (s['desc'] or s['actual_raw'].strip()):
+                # Leftover import row with nothing behind it — clear the whole row.
+                writes.append((desc_cell, [['']]))
+                writes.append((actual_cell, [['']]))
+                if s['actual_raw'].strip():
+                    removed += 1
+                _set_cell(rows, s['row'], cols['desc'], '')
+                _set_cell(rows, s['row'], cols['actual'], '')
+            elif s['actual_raw'].strip() and was_ours(s):
+                writes.append((actual_cell, [['']]))   # bill we synced, now gone from the CSV
+                removed += 1
+                _set_cell(rows, s['row'], cols['actual'], '')
+            elif s['actual_raw'].strip():
+                manual_total = round(manual_total + s['actual'], 2)   # Parker typed this one
+
+    plan = {'tab': tab, 'month': month, 'purge': purge, 'applied': False,
+            'added': added, 'updated': updated, 'removed': removed,
+            'new_rows': len(appends), 'csv_total': csv_total,
+            'manual_total': round(manual_total, 2),
+            'expected_total': round(csv_total + manual_total, 2),
+            'by_category': by_category, 'warnings': warnings}
+    if not apply:
+        return plan
+
+    if writes:
+        _sheets_execute(svc.spreadsheets().values().batchUpdate(
+            spreadsheetId=FINANCE_SHEET_ID,
+            body={'valueInputOption': 'USER_ENTERED',
+                  'data': [{'range': a1, 'values': v} for a1, v in writes]}))
+
+    # Genuinely new bills/subscriptions: no row to update, so append one. Done after
+    # the batch above so freed-up artifact rows are reusable and row inserts (which
+    # shift indexes) can't invalidate the ranges computed above.
+    for cat, name, amt in appends:
+        try:
+            if _write_budget_transaction(svc, FINANCE_SHEET_ID, tab, rows, cat, name, amt):
+                added += 1
+                new_budget.setdefault(cat, {})[name] = amt
+            else:
+                warnings.append(f"[{cat}] no room for '{name}' — add a row to the {cat} section")
+        except Exception as e:
+            warnings.append(f"[{cat}] '{name}' failed: {e}")
+
+    # Subscriptions charged this month also feed the card's subscription list.
+    if subs_data is not None and month == datetime.now().strftime('%Y-%m'):
+        for d in desired_budget.get('Subscriptions', []):
+            if _upsert_subscription(subs_data, d['name'], d['amount'], d['date']):
+                plan['subs_added'] = plan.get('subs_added', 0) + 1
+
+    managed = state.setdefault('managed', {})
+    managed[month] = {'detail': new_detail, 'budget': new_budget,
+                      'synced_at': datetime.now().isoformat(timespec='seconds')}
+    # Keep only the last few months of ownership records.
+    for stale in sorted(managed)[:-6]:
+        managed.pop(stale, None)
+    _save(FINANCE_IMPORT_FILE, state)
+    _invalidate_finance_cache()
+    plan.update({'applied': True, 'added': added, 'warnings': warnings})
+    return plan
 
 def _finance_reconcile(apply=False):
     """Reconcile the current month's Finance tab against the newest Rocket Money
@@ -1976,12 +2324,20 @@ def finance_import_status():
 
 @app.route("/api/finance/import/drive", methods=["GET"])
 def finance_import_drive():
-    """Read the newest Rocket Money CSV export from the configured Drive folder, parse the
-    spending transactions, categorize them and write them to the finance Sheet — skipping
-    income/transfers/payments/pending/ignored rows and any already-imported row (by
-    fingerprint). Pass ?preview=1 to return the categorized rows WITHOUT writing."""
+    """Sync the finance Sheet to the newest Rocket Money CSV export in Drive.
+
+    The CSV is the point of truth for the month, so this reconciles rather than
+    appends: new charges are added, changed amounts are updated in place, rows a
+    previous sync wrote that the CSV no longer has are removed, and recurring bills
+    land on their existing template row instead of a fresh duplicate. Income,
+    transfers, card payments, pending and Rocket-Money-ignored rows are excluded, so
+    the tab's spend total matches Rocket Money's.
+
+    ?preview=1  categorize and plan without writing anything
+    ?days=N     import window (default 60); the current month is reconciled,
+                older months in the window are add-only
+    """
     preview = request.args.get("preview") in ("1", "true", "yes")
-    include_imported = request.args.get("include_imported") in ("1", "true", "yes")
     cfg = _load(GDRIVE_CONFIG_FILE, {})
     folder = cfg.get("finance_import_folder") or FINANCE_IMPORT_FOLDER
     if not folder:
@@ -1993,79 +2349,99 @@ def finance_import_drive():
         rows = _parse_rocket_csv(raw)
     except Exception as e:
         return jsonify({"error": f"Could not parse CSV: {e}"}), 400
-    # Only import recent transactions: a full-history export would flood old month tabs and
-    # blow the request timeout / Sheets write quota. Dedup (below) handles re-uploads. Widen
-    # the window with ?days= (e.g. to backfill an older month).
+    # A full-history export would rewrite old month tabs and blow the request timeout,
+    # so only recent months are synced. Widen with ?days= to backfill an older month.
     try:
         days = max(1, min(180, int(request.args.get("days", 60))))
     except (TypeError, ValueError):
         days = 60
     cutoff = (datetime.now().date() - timedelta(days=days)).isoformat()
-
-    state = _load(FINANCE_IMPORT_FILE, {"imported": []})
-    imported = set(state.get("imported", []))
-    written, failed, skipped, scanned, errors, preview_rows = 0, 0, 0, 0, [], []
-    sheet_cache = {}   # tab -> rows; one read per month tab for the whole import
-    subs_data, subs_changed = _load_subs(), False
     cur_month = datetime.now().strftime("%Y-%m")
-    for r in rows:
-        scanned += 1
-        if (r["date"] or "") < cutoff:          # outside the import window
-            skipped += 1
-            continue
-        if _rocket_is_nonspend(r):
-            skipped += 1
-            continue
-        fp = _rocket_fingerprint(r["date"], r["amount"], r["name"])
-        if fp in imported:
-            if preview and include_imported:   # audit mode: show already-written rows too
-                preview_rows.append({"date": r["date"], "name": r["name"],
-                                     "amount": round(abs(r["amount"]), 2),
-                                     "category": _rocket_to_finance_category(r.get("category"), r.get("name")),
-                                     "already_imported": True})
-            skipped += 1
-            continue
-        cat = _rocket_to_finance_category(r.get("category"), r.get("name"))
-        if preview:
-            preview_rows.append({"date": r["date"], "name": r["name"],
-                                 "amount": round(abs(r["amount"]), 2), "category": cat})
-            continue
-        try:
-            ok, detail = _record_expense(r["date"], r["name"] or "Transaction", abs(r["amount"]), cat,
-                                         rows_cache=sheet_cache)
-            if ok:
-                imported.add(fp); written += 1
-                # Subscriptions charged this month show up in the card's list too
-                # (the list resets on the 1st and refills from these imports).
-                if cat == 'Subscriptions' and (r["date"] or "")[:7] == cur_month:
-                    if _upsert_subscription(subs_data, r["name"], abs(r["amount"]), r["date"]):
-                        subs_changed = True
-                if written % 50 == 0:           # persist progress so a timeout can't re-import
-                    state["imported"] = list(imported); _save(FINANCE_IMPORT_FILE, state)
-            else:
-                failed += 1
-                if isinstance(detail, str) and detail not in errors:
-                    errors.append(detail)
-        except Exception as e:
-            failed += 1
-            if str(e) not in errors:
-                errors.append(str(e))
+
+    scanned = len(rows)
+    in_window = [r for r in rows if (r.get("date") or "") >= cutoff]
+    spend = [r for r in in_window if not _rocket_is_nonspend(r)]
+    skipped = scanned - len(spend)
+    months = sorted({(r["date"] or "")[:7] for r in spend if r.get("date")})
+
+    # Removing rows the CSV doesn't have is only safe when the CSV is actually current.
+    # A stale export sitting in Drive (last uploaded a week ago) would otherwise delete
+    # every charge since — so an old export is add-only. Override with ?purge=1/0.
+    csv_max_date = max((r["date"] for r in spend if r.get("date")), default="")
+    fresh_cutoff = (datetime.now().date() - timedelta(days=4)).isoformat()
+    arg_purge = request.args.get("purge")
+    allow_purge = (csv_max_date >= fresh_cutoff) if arg_purge is None \
+        else arg_purge in ("1", "true", "yes")
+
     if preview:
-        preview_rows.sort(key=lambda x: x["date"])
+        preview_rows = sorted(
+            [{"date": r["date"], "name": r["name"], "amount": round(abs(r["amount"]), 2),
+              "category": _rocket_to_finance_category(r.get("category"), r.get("name"))}
+             for r in spend], key=lambda x: x["date"])
         by_cat = {}
         for x in preview_rows:
             by_cat[x["category"]] = round(by_cat.get(x["category"], 0) + x["amount"], 2)
         return jsonify({"ok": True, "preview": True, "file": meta, "window_days": days,
-                        "scanned": scanned, "skipped": skipped,
+                        "scanned": scanned, "skipped": skipped, "months": months,
                         "count": len(preview_rows), "rows": preview_rows[:200],
                         "total": round(sum(x["amount"] for x in preview_rows), 2),
                         "by_category": by_cat})
-    state["imported"] = list(imported)
-    _save(FINANCE_IMPORT_FILE, state)
-    if subs_changed:
-        _save_subs(subs_data)
-    return jsonify({"ok": True, "file": meta, "window_days": days, "written": written,
-                    "failed": failed, "skipped": skipped, "scanned": scanned, "errors": errors[:5]})
+
+    if not FINANCE_SHEET_ID:
+        # No Sheet configured: fall back to the local transaction store, deduped on a
+        # date|amount|name fingerprint (the Sheet-side row matching needs a Sheet).
+        state = _load(FINANCE_IMPORT_FILE, {"imported": []})
+        imported = set(state.get("imported", []))
+        written = 0
+        for r in spend:
+            fp = _rocket_fingerprint(r["date"], r["amount"], r["name"])
+            if fp in imported:
+                continue
+            tool_add_transaction(r["name"] or "Transaction", abs(r["amount"]), "expense",
+                                 _rocket_to_finance_category(r.get("category"), r.get("name")), r["date"])
+            imported.add(fp); written += 1
+        state["imported"] = list(imported)
+        _save(FINANCE_IMPORT_FILE, state)
+        return jsonify({"ok": True, "file": meta, "window_days": days, "written": written,
+                        "failed": 0, "skipped": skipped, "scanned": scanned, "local": True,
+                        "errors": []})
+
+    svc = _sheets_svc()
+    subs_data = _load_subs()
+    totals = {"added": 0, "updated": 0, "removed": 0}
+    errors, warnings, per_month = [], [], []
+    for m in months:
+        try:
+            plan = _finance_sync_month(svc, m, spend, purge=(m == cur_month and allow_purge),
+                                       apply=True, subs_data=subs_data)
+        except Exception as e:
+            errors.append(f"{m}: {e}")
+            continue
+        for k in totals:
+            totals[k] += plan.get(k, 0)
+        warnings.extend(plan.get("warnings", []))
+        per_month.append(plan)
+    if any(p.get("subs_added") for p in per_month):
+        _save_subs(subs_data)      # only on change — this runs on every card load
+
+    cur = next((p for p in per_month if p["month"] == cur_month), None)
+    if not allow_purge and cur:
+        warnings.insert(0, f"Export only covers through {csv_max_date} — added new charges "
+                           f"but left existing rows alone. Upload a fresh Rocket Money export, "
+                           f"or sync with ?purge=1 to force a full reconcile.")
+    return jsonify({"ok": True, "file": meta, "window_days": days, "months": months,
+                    "csv_through": csv_max_date, "reconciled": bool(allow_purge),
+                    # `written` = rows touched, kept for the Finance card's toast
+                    "written": totals["added"] + totals["updated"],
+                    "added": totals["added"], "updated": totals["updated"],
+                    "removed": totals["removed"],
+                    "failed": len(errors), "skipped": skipped, "scanned": scanned,
+                    "csv_total": cur["csv_total"] if cur else None,
+                    "expected_total": cur["expected_total"] if cur else None,
+                    "manual_total": cur["manual_total"] if cur else None,
+                    "by_category": cur["by_category"] if cur else {},
+                    "months_detail": per_month,
+                    "warnings": warnings[:8], "errors": errors[:5]})
 
 
 # ── Google Sheets auto-sync helpers ──────────────────────────────────────────
@@ -2910,12 +3286,20 @@ def _write_budget_transaction(svc, spreadsheet_id, tab, rows, cat, desc, amt):
         {'range': f"'{tab}'!{_col_letter(desc_col)}{target_row + 1}", 'values': [[desc or cat]]},
         {'range': f"'{tab}'!{_col_letter(actual_col)}{target_row + 1}", 'values': [[amt]]},
     ]
+    # Stamp the category in col A like the rows Parker keeps by hand. That's what marks
+    # the row as a real line item rather than leftover import output, so the reconciling
+    # sync updates it next time instead of clearing it (see _budget_section_scan).
+    cur_a = str(rows[target_row][0]).strip() if target_row < len(rows) and rows[target_row] else ''
+    if not cur_a:
+        data.append({'range': f"'{tab}'!A{target_row + 1}", 'values': [[cat]]})
     _sheets_execute(svc.spreadsheets().values().batchUpdate(
         spreadsheetId=spreadsheet_id,
         body={'valueInputOption': 'USER_ENTERED', 'data': data}
     ))
     _set_cell(rows, target_row, desc_col, desc or cat)
     _set_cell(rows, target_row, actual_col, amt)
+    if not cur_a:
+        _set_cell(rows, target_row, 0, cat)
     return target_row, actual_col
 
 def _clear_sheet_values(svc, spreadsheet_id, tab, row, col, cols):
@@ -3076,7 +3460,7 @@ def _find_budget_section_slot(rows, canon_target):
 
     hdr_row_idx = 0
     for i, row in enumerate(padded[:5]):
-        rl = ' '.join(row).lower()
+        rl = ' '.join(str(c) for c in row).lower()
         if 'budget' in rl or 'actual amount' in rl:
             hdr_row_idx = i
             break
@@ -3086,7 +3470,7 @@ def _find_budget_section_slot(rows, canon_target):
     current_cat = ''
     for ri in range(hdr_row_idx + 1, len(padded)):
         row = padded[ri]
-        rl = ' '.join(row[:8]).lower()
+        rl = ' '.join(str(c) for c in row[:8]).lower()
         if any(kw in rl for kw in ['anticipated', 'actual total', 'roommate', 'savings total']):
             break
         cat_val = row[0].strip() if len(row) > 0 else ''
