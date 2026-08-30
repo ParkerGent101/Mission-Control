@@ -6,7 +6,9 @@ os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 from contextlib import contextmanager
 from datetime import datetime, timedelta, date
 from pathlib import Path
+import calendar
 import json
+import re
 import sqlite3
 import time
 import mimetypes
@@ -86,7 +88,8 @@ def _gcs():
 
 FINANCE_FILE     = DATA_DIR / "finances.json"
 SUBS_FILE        = DATA_DIR / "subscriptions.json"
-SAVINGS_FILE     = DATA_DIR / "savings.json"
+SAVINGS_FILE     = DATA_DIR / "savings.json"   # legacy: migrated into ACCOUNTS_FILE on first read
+ACCOUNTS_FILE    = DATA_DIR / "accounts.json"  # balances + dated snapshots for the net-worth trend
 DB_PATH          = DATA_DIR / "mission_control.db"
 FINANCE_SHEET_ID = os.environ.get("FINANCE_SHEET_ID", "")
 # Email to share rollover-generated finance files with (so Parker, not just the
@@ -1168,7 +1171,6 @@ _MERCHANT_STOP_TOKENS = {
 def _merchant_tokens(s):
     """Comparable words in a merchant name or Sheet description: lowercased, split
     on anything non-alphanumeric, with noise words and bare numbers dropped."""
-    import re
     return [t for t in re.split(r'[^a-z0-9]+', str(s or '').lower())
             if len(t) > 1 and not t.isdigit() and t not in _MERCHANT_STOP_TOKENS]
 
@@ -1807,12 +1809,10 @@ def _sheets_push_finances():
 # ── Google Drive / Sheets ─────────────────────────────────────────────────────
 
 def _extract_sheet_id(url_or_id):
-    import re
     m = re.search(r'/spreadsheets/d/([a-zA-Z0-9_-]+)', url_or_id)
     return m.group(1) if m else url_or_id.strip()
 
 def _extract_drive_folder_id(url_or_id):
-    import re
     m = re.search(r'/folders/([a-zA-Z0-9_-]+)', url_or_id or "")
     return m.group(1) if m else (url_or_id or "").strip()
 
@@ -1905,7 +1905,6 @@ def _resolve_month_tab(svc, yyyy_mm, spreadsheet_id=None):
             return t
     contains = [t for t in titles if want.lower() in t.lower()]
     if not contains:                                  # 'Jul 26', 'Jul-2026'
-        import re
         abbrev = want[:3].lower()
         contains = [t for t in titles
                     if re.search(r'(^|[^a-z])' + abbrev + r'([^a-z]|$)', t.lower())]
@@ -2625,7 +2624,6 @@ def _parse_transaction_rows(rows, tab=""):
             if amt <= 0:
                 continue
             desc, date_val = cell1, ''
-            import re
             if cell1 and re.match(r'^\d{1,2}[-/]\w+$|^\w{3,}[-/]\d{1,2}$', cell1):
                 date_val, desc = cell1, cat
             transactions.append({'description': desc, 'date': date_val,
@@ -2938,6 +2936,358 @@ def drive_push_finances():
 
 
 # ── TCPG Monitor ───────────────────────────────────────────────────────────────
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Bills & subscriptions calendar
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _parse_due_day(cell):
+    """Day-of-month from whatever the Sheet's due-date column holds: '5', '5th',
+    '2026-08-05', '8/5', '8/5/2026'. Returns 1-31, or None if there's no day in it."""
+    s = str(cell or "").strip()
+    if not s:
+        return None
+    m = re.search(r'^(\d{4})-(\d{2})-(\d{2})', s)          # ISO
+    if m:
+        return int(m.group(3))
+    m = re.search(r'^(\d{1,2})\s*/\s*(\d{1,2})', s)         # US M/D
+    if m:
+        return int(m.group(2))
+    m = re.search(r'(\d{1,2})', s)                          # bare day / '5th'
+    if m:
+        d = int(m.group(1))
+        return d if 1 <= d <= 31 else None
+    return None
+
+
+def _is_paid_flag(cell):
+    return str(cell or "").strip().lower() in ("y", "yes", "x", "true", "paid", "✓", "✔", "1")
+
+
+def _parse_budget_bills(rows):
+    """Per-ROW view of the budget section - one entry per line item that carries a
+    due date and/or an amount. _parse_budget_rows aggregates the same rows by
+    category; this keeps them separate so they can be laid out on a calendar."""
+    if not rows:
+        return []
+    max_cols = max((len(r) for r in rows), default=1)
+    rows = [r + [''] * (max_cols - len(r)) for r in rows]
+
+    hdr_idx, desc_col, due_col, actual_col = _finance_budget_columns(rows)
+    hdr = [str(c).lower().strip() for c in rows[hdr_idx]]
+    budget_col = next((i for i, h in enumerate(hdr) if 'budget' in h), 4)
+    paid_col = next((i for i, h in enumerate(hdr) if 'paid' in h), actual_col + 1)
+    acct_col = next((i for i, h in enumerate(hdr) if 'account' in h), 2)
+
+    out, current_cat = [], ''
+    for row in rows[hdr_idx + 1:]:
+        joined = ' '.join(row[:8]).lower()
+        if any(kw in joined for kw in ['anticipated', 'actual total', 'roommate', 'savings total']):
+            break
+        cat_val = row[0].strip()
+        if cat_val and not any(ch.isdigit() for ch in cat_val):
+            current_cat = cat_val
+        desc = row[desc_col].strip() if len(row) > desc_col else ''
+        canon = _budget_row_canon(cat_val, desc, current_cat)
+        if not canon:
+            continue
+        budgeted = _parse_money(row[budget_col]) if len(row) > budget_col else 0.0
+        actual = _parse_money(row[actual_col]) if len(row) > actual_col else 0.0
+        due_day = _parse_due_day(row[due_col]) if len(row) > due_col else None
+        # A row with no money and no due date is scaffolding, not a bill.
+        if not budgeted and not actual and due_day is None:
+            continue
+        out.append({
+            "name": desc or canon,
+            "category": canon,
+            "account": row[acct_col].strip() if len(row) > acct_col else '',
+            "budgeted": round(budgeted, 2),
+            "actual": round(actual, 2),
+            "due_day": due_day,
+            "paid": _is_paid_flag(row[paid_col]) if len(row) > paid_col else False,
+        })
+    return out
+
+
+def _bill_status(item, month, today):
+    """paid | posted | due | overdue.
+      paid    - the Sheet's paid column is ticked
+      posted  - no tick, but an actual amount has landed
+      overdue - nothing landed and the due day has passed
+      due     - nothing landed and it is still ahead (or undated)"""
+    if item.get("paid"):
+        return "paid"
+    if item.get("actual"):
+        return "posted"
+    day = item.get("due_day")
+    cur = today.strftime("%Y-%m")
+    if day and month < cur:
+        return "overdue"
+    if day and month == cur and day < today.day:
+        return "overdue"
+    return "due"
+
+
+@app.route("/api/finances/upcoming", methods=["GET"])
+def finances_upcoming():
+    """What is still going out this month, and when.
+
+    Merges the three places a recurring charge can live: the Sheet's budget rows
+    (which carry the due date and the paid tick), the subscriptions list the
+    Rocket Money import fills in, and the roommate's half of the utilities.
+    Returns items plus `committed_remaining` - everything expected but not yet
+    paid or posted."""
+    month = request.args.get("month") or datetime.now().strftime("%Y-%m")
+    today = datetime.now()
+    items = []
+
+    if FINANCE_SHEET_ID:
+        try:
+            svc = _sheets_svc()
+            tab = _resolve_month_tab(svc, month)
+            for b in _parse_budget_bills(_finance_rows(svc, tab)):
+                items.append({**b, "source": "sheet",
+                              "amount": b["actual"] or b["budgeted"],
+                              "status": _bill_status(b, month, today)})
+        except Exception as e:
+            app.logger.warning("Upcoming: budget rows unavailable for %s: %s", month, e)
+
+    # Subscriptions the import discovered. Skip any the Sheet already listed -
+    # a subscription with a budget row is the same bill seen twice.
+    seen = {i["name"].strip().lower() for i in items if i.get("name")}
+    for s in _load_subs()["items"]:
+        name = str(s.get("name", "")).strip()
+        if not name or name.lower() in seen:
+            continue
+        amt = round(float(s.get("amt") or 0), 2)
+        # The list only holds charges that already appeared in the export, so a
+        # subscription on it has posted by definition.
+        items.append({"name": name, "category": "Subscriptions", "account": s.get("acct", ""),
+                      "budgeted": amt, "actual": amt, "amount": amt,
+                      "due_day": _parse_due_day(s.get("due")), "paid": False,
+                      "source": "subscription", "status": "posted"})
+
+    try:
+        room = _load(ROOMMATE_FILE, None)
+        if isinstance(room, dict) and room.get("items"):
+            r = _roommate_from_items(room["items"])
+            if r["total"] > 0:
+                items.append({"name": "Roommate payment", "category": "Income",
+                              "account": "", "budgeted": r["total"], "actual": 0.0,
+                              "amount": r["total"], "due_day": None, "paid": False,
+                              "source": "roommate", "status": "due", "income": True})
+    except Exception:
+        pass
+
+    outgoing = [i for i in items if not i.get("income")]
+    committed = round(sum(i["amount"] for i in outgoing if i["status"] in ("due", "overdue")), 2)
+    items.sort(key=lambda i: (i.get("due_day") is None, i.get("due_day") or 0, i["name"].lower()))
+    return jsonify({
+        "month": month,
+        "items": items,
+        "committed_remaining": committed,
+        "paid_total": round(sum(i["amount"] for i in outgoing if i["status"] in ("paid", "posted")), 2),
+        "days_in_month": calendar.monthrange(int(month[:4]), int(month[5:7]))[1],
+    })
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Accounts & net worth
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _net_worth(accounts):
+    """Debt counts against you; everything else counts for you."""
+    return round(sum((-1 if a.get("type") == "debt" else 1) * float(a.get("balance") or 0)
+                     for a in accounts), 2)
+
+
+def _snapshot_from(accounts, date_str):
+    return {"date": date_str,
+            "balances": {str(a["id"]): round(float(a.get("balance") or 0), 2) for a in accounts},
+            "net_worth": _net_worth(accounts)}
+
+
+def _stamp_snapshot(data, date_str):
+    """One snapshot per day - re-saving on the same day updates it in place rather
+    than stacking duplicate points on the chart."""
+    snap = _snapshot_from(data["accounts"], date_str)
+    for i, s in enumerate(data["snapshots"]):
+        if s.get("date") == date_str:
+            data["snapshots"][i] = snap
+            break
+    else:
+        data["snapshots"].append(snap)
+    data["snapshots"].sort(key=lambda s: s.get("date", ""))
+    del data["snapshots"][:-400]          # ~13 months of daily points is plenty
+
+
+def _load_accounts():
+    """{accounts: [...], snapshots: [...]}, migrating the old flat savings.json
+    (account + one balance, no history) on first read."""
+    data = _load(ACCOUNTS_FILE, None)
+    if isinstance(data, dict) and "accounts" in data:
+        data.setdefault("snapshots", [])
+        return data
+    legacy = _load(SAVINGS_FILE, [])
+    accounts = []
+    for i, s in enumerate(legacy if isinstance(legacy, list) else [], start=1):
+        name = str(s.get("account") or f"Account {i}")
+        accounts.append({
+            "id": s.get("id") or i,
+            "name": name,
+            "type": "brokerage" if "robinhood" in name.lower() else "cash",
+            "balance": round(float(s.get("balance") or 0), 2),
+            "updated": s.get("date") or datetime.now().strftime("%Y-%m-%d"),
+        })
+    data = {"accounts": accounts, "snapshots": []}
+    if accounts:
+        # Seed one snapshot so the trend has a starting point rather than an empty
+        # chart until the second manual update.
+        data["snapshots"].append(_snapshot_from(accounts, accounts[0]["updated"]))
+        _save(ACCOUNTS_FILE, data)
+    return data
+
+
+@app.route("/api/accounts", methods=["GET"])
+def get_accounts():
+    data = _load_accounts()
+    prev = data["snapshots"][-2] if len(data["snapshots"]) >= 2 else None
+    for a in data["accounts"]:
+        was = (prev or {}).get("balances", {}).get(str(a["id"]))
+        a["change"] = round(float(a.get("balance") or 0) - was, 2) if was is not None else None
+    return jsonify({
+        "accounts": data["accounts"],
+        "net_worth": _net_worth(data["accounts"]),
+        "previous_net_worth": prev["net_worth"] if prev else None,
+        "snapshots": data["snapshots"],
+    })
+
+
+@app.route("/api/accounts", methods=["POST"])
+def post_accounts():
+    """Replace the account list. Body: {accounts: [{id?, name, type, balance}]}.
+    Editing a balance also stamps today's snapshot, so the trend follows the
+    numbers without a separate 'save history' step."""
+    d = request.json or {}
+    raw = d.get("accounts")
+    if not isinstance(raw, list):
+        return jsonify({"error": "accounts must be a list"}), 400
+    data = _load_accounts()
+    clean = []
+    next_id = max([a.get("id", 0) for a in data["accounts"]] or [0]) + 1
+    today = datetime.now().strftime("%Y-%m-%d")
+    for a in raw:
+        if not isinstance(a, dict):
+            continue
+        name = str(a.get("name", "")).strip()
+        if not name:
+            continue
+        try:
+            bal = float(str(a.get("balance", 0)).replace("$", "").replace(",", "").strip() or 0)
+        except (TypeError, ValueError):
+            return jsonify({"error": f"'{name}' has a balance that isn't a number"}), 400
+        acct_type = a.get("type") if a.get("type") in ("cash", "brokerage", "debt") else "cash"
+        aid = a.get("id")
+        if not isinstance(aid, int) or aid <= 0:
+            aid, next_id = next_id, next_id + 1
+        clean.append({"id": aid, "name": name, "type": acct_type,
+                      "balance": round(bal, 2), "updated": today})
+    data["accounts"] = clean
+    _stamp_snapshot(data, today)
+    _save(ACCOUNTS_FILE, data)
+    return jsonify({"ok": True, "accounts": clean, "net_worth": _net_worth(clean)})
+
+
+@app.route("/api/accounts/snapshot", methods=["POST"])
+def post_account_snapshot():
+    """Pin today's balances to the history without changing them."""
+    data = _load_accounts()
+    if not data["accounts"]:
+        return jsonify({"error": "No accounts to snapshot yet"}), 400
+    _stamp_snapshot(data, datetime.now().strftime("%Y-%m-%d"))
+    _save(ACCOUNTS_FILE, data)
+    return jsonify({"ok": True, "snapshots": len(data["snapshots"]),
+                    "net_worth": _net_worth(data["accounts"])})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Category trends across month tabs
+# ══════════════════════════════════════════════════════════════════════════════
+
+_TRENDS_CACHE = {}
+_TRENDS_TTL = 900          # 15 min - each miss is one Sheets read per month tab
+
+
+def _norm_tab(s):
+    return ''.join(str(s).lower().split())
+
+
+@app.route("/api/finances/trends", methods=["GET"])
+def finances_trends():
+    """Month-over-month income, expense and per-category actuals.
+
+    Reads one Sheet tab per month, so it is deliberately capped and cached hard:
+    the container runs gunicorn with a single worker and no threads, and an
+    uncached 12-month call is 12 serialized Sheets round-trips that block every
+    other request. Months whose tab is missing or unparseable are skipped rather
+    than failing the whole range - hand-made tabs drift."""
+    if not FINANCE_SHEET_ID:
+        return jsonify({"error": "No finance sheet configured"}), 400
+    try:
+        months = max(2, min(12, int(request.args.get("months", 6))))
+    except (TypeError, ValueError):
+        months = 6
+    end = request.args.get("end") or datetime.now().strftime("%Y-%m")
+
+    key = f"{end}:{months}"
+    hit = _TRENDS_CACHE.get(key)
+    if hit and (time.monotonic() - hit[0]) < _TRENDS_TTL:
+        return jsonify({**hit[1], "cached": True})
+
+    try:
+        y, m = int(end[:4]), int(end[5:7])
+    except (TypeError, ValueError):
+        return jsonify({"error": "end must be YYYY-MM"}), 400
+
+    wanted = []
+    for _ in range(months):
+        wanted.append(f"{y}-{m:02d}")
+        m -= 1
+        if m == 0:
+            m, y = 12, y - 1
+    wanted.reverse()
+
+    try:
+        svc = _sheets_svc()
+        titles = {_norm_tab(t) for t in _sheet_tab_titles(svc, FINANCE_SHEET_ID)}
+    except Exception as e:
+        return jsonify({"error": f"Couldn't list the sheet's tabs: {e}"}), 502
+
+    series, skipped = [], []
+    for ym in wanted:
+        tab = _resolve_month_tab(svc, ym)
+        if _norm_tab(tab) not in titles:
+            skipped.append(ym)
+            continue
+        try:
+            parsed = _parse_budget_rows(_finance_rows(svc, tab))
+        except Exception as e:
+            app.logger.warning("Trends: couldn't parse '%s': %s", tab, e)
+            skipped.append(ym)
+            continue
+        series.append({
+            "month": ym,
+            "tab": tab,
+            "income": parsed["income"],
+            "expense": parsed["expense"],
+            "categories": {c["name"]: c["actual"] for c in parsed["categories"]},
+        })
+
+    payload = {"months": series, "skipped": skipped, "requested": wanted}
+    _TRENDS_CACHE[key] = (time.monotonic(), payload)
+    return jsonify({**payload, "cached": False})
 
 
 # startup_sync removed — the contacts Google Sheet had corrupted data (songs as contacts)

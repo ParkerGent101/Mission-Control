@@ -1,18 +1,4 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="apple-mobile-web-app-title" content="Finances" />
-<meta name="theme-color" content="#110e0b" />
-<title>Finances</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
-<style>
+
   /* ─────────────────────────────────────────────────────────────────────────
      Tokens. A single warm-neutral dark ramp; one accent for chrome. Colour is
      never decorative here — green/red mean only "money in / money out", and the
@@ -613,41 +599,3 @@
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
   }
-</style>
-</head>
-<body>
-  <div id="root"></div>
-
-  <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
-  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
-
-  <!-- Load order matters: icons and finance-core declare the helpers every view
-       reads at module scope, and app.jsx renders, so it goes last. -->
-  {% if precompiled %}
-  <!-- Production: JSX precompiled to plain JS at build time (Dockerfile stage 1) —
-       no in-browser Babel download or transpile. Same order as the dev path below. -->
-  <script src="/static/icons.js?v={{ asset_version }}"></script>
-  <script src="/static/finance-core.js?v={{ asset_version }}"></script>
-  <script src="/static/finance-overview.js?v={{ asset_version }}"></script>
-  <script src="/static/finance-transactions.js?v={{ asset_version }}"></script>
-  <script src="/static/finance-bills.js?v={{ asset_version }}"></script>
-  <script src="/static/finance-accounts.js?v={{ asset_version }}"></script>
-  <script src="/static/finance-trends.js?v={{ asset_version }}"></script>
-  <script src="/static/settings.js?v={{ asset_version }}"></script>
-  <script src="/static/app.js?v={{ asset_version }}"></script>
-  {% else %}
-  <!-- Dev (localhost, PRECOMPILED_ASSETS unset): in-browser Babel transpiles the
-       JSX on the fly, so edits show on refresh with no build step. -->
-  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
-  <script type="text/babel" src="/static/icons.jsx?v={{ asset_version }}"></script>
-  <script type="text/babel" src="/static/finance-core.jsx?v={{ asset_version }}"></script>
-  <script type="text/babel" src="/static/finance-overview.jsx?v={{ asset_version }}"></script>
-  <script type="text/babel" src="/static/finance-transactions.jsx?v={{ asset_version }}"></script>
-  <script type="text/babel" src="/static/finance-bills.jsx?v={{ asset_version }}"></script>
-  <script type="text/babel" src="/static/finance-accounts.jsx?v={{ asset_version }}"></script>
-  <script type="text/babel" src="/static/finance-trends.jsx?v={{ asset_version }}"></script>
-  <script type="text/babel" src="/static/settings.jsx?v={{ asset_version }}"></script>
-  <script type="text/babel" src="/static/app.jsx?v={{ asset_version }}"></script>
-  {% endif %}
-</body>
-</html>

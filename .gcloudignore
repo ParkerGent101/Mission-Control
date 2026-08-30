@@ -41,3 +41,7 @@ node_modules/
 dist/
 build/
 coverage/
+
+# Dev-only render harness (fake data, no auth) - never ship it
+static/_harness.html
+static/_harness_css.txt

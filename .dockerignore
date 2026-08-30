@@ -28,3 +28,7 @@ data/*.db
 data/*.sqlite
 data/*.sqlite3
 data/local-*.png
+
+# Dev-only render harness (fake data, no auth) — never ship it
+static/_harness.html
+static/_harness_css.txt

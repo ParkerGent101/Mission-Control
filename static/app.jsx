@@ -1,134 +1,57 @@
-/* Mission Control — App shell */
-const { useState: useStateApp, useEffect: useEffectApp } = React;
+/* Mission Control — app shell.
+   One product now: personal finance. The shell owns the month (the app's primary
+   control), the shared month fetch, toasts, and the tab router. */
 
-const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
-  "accent": "#e0a857",
-  "accent2": "#6ed3b6",
-  "density": "balanced",
-  "sidebar": "full",
-  "modules": {
-    "finance": true, "band": true, "health": true, "tcpg": true
-  }
-}/*EDITMODE-END*/;
-
-const ACCENT_OPTIONS = ["#e0a857", "#6ed3b6", "#e07a5f", "#b69cf0", "#8fb3e0"];
-
-const SIDEBAR_NAV = [
-  { id: "finance",   icon: "wallet",     label: "Finance",   key: "F" },
-  { id: "band",      icon: "music",      label: "Band",      key: "B" },
-  { id: "health",    icon: "heart",      label: "Health",    key: "H" },
+const TABS = [
+  { id: "overview",     label: "Overview",     icon: "home"        },
+  { id: "transactions", label: "Transactions", icon: "inbox"       },
+  { id: "bills",        label: "Bills",        icon: "calendar"    },
+  { id: "accounts",     label: "Accounts",     icon: "wallet"      },
+  { id: "trends",       label: "Trends",       icon: "trending-up" },
 ];
-
-const MOBILE_NAV = [
-  { id: "health",    icon: "heart",  label: "Health"  },
-  { id: "finance",   icon: "wallet", label: "Finance" },
-  { id: "band",      icon: "music",  label: "Band"    },
-];
-
-// Statusbar flavor: rotating machine-cult litanies + the date in Imperial dating format.
-const LITANIES = [
-  "THE OMNISSIAH WATCHES",
-  "PRAISE THE MACHINE-SPIRIT",
-  "ALL SYSTEMS SANCTIFIED",
-  "RITES OF MAINTENANCE OBSERVED",
-  "01001111 01001011",
-  "AUSPEX SWEEP NOMINAL",
-  "GELLER FIELD HOLDING",
-  "COGITATION WITHIN TOLERANCES",
-];
-// Imperial dating: check digit 0 + year-fraction (3 digits) + last 3 digits of year + .M3
-const imperialDate = (d) => {
-  const start = new Date(d.getFullYear(), 0, 1);
-  const end = new Date(d.getFullYear() + 1, 0, 1);
-  const frac = String(Math.floor(((d - start) / (end - start)) * 1000)).padStart(3, "0");
-  const yy = String(d.getFullYear() % 1000).padStart(3, "0");
-  return "0 " + frac + " " + yy + ".M3";
-};
 
 const App = () => {
-  const [t, setTweak] = useTweaks(() => {
+  const [tab, setTab] = useState(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem('mc_tweaks') || 'null');
-      return saved ? { ...TWEAK_DEFAULTS, ...saved } : TWEAK_DEFAULTS;
-    } catch { return TWEAK_DEFAULTS; }
+      const saved = localStorage.getItem('mc_tab');
+      return TABS.some(t => t.id === saved) ? saved : 'overview';
+    } catch { return 'overview'; }
   });
-  const [now, setNow] = useStateApp(new Date());
-  const [toasts, setToasts] = useStateApp([]);
-  const [showSheet, setShowSheet] = useStateApp(false);
-  const [sheetDragY, setSheetDragY] = useStateApp(0);
-  const sheetTouchRef = React.useRef({startY:0, startT:0, lastY:0, dragging:false});
-  const sheetScrollRef = React.useRef(null);
-  const onSheetTouchStart = (e) => {
-    const t = e.touches[0];
-    const sc = sheetScrollRef.current;
-    // Only start a dismiss-drag when the scrollable content is at the top.
-    // Otherwise let the user scroll the sheet content normally.
-    const atTop = !sc || sc.scrollTop <= 0;
-    sheetTouchRef.current = {
-      startY: t.clientY, startT: Date.now(),
-      lastY: t.clientY, dragging: atTop,
-    };
-  };
-  const onSheetTouchMove = (e) => {
-    const st = sheetTouchRef.current;
-    if (!st.dragging) return;
-    const y = e.touches[0].clientY;
-    const dy = y - st.startY;
-    st.lastY = y;
-    if (dy > 0) {
-      setSheetDragY(dy);
-    } else {
-      setSheetDragY(0);
-    }
-  };
-  const onSheetTouchEnd = () => {
-    const st = sheetTouchRef.current;
-    if (!st.dragging) return;
-    const dy = st.lastY - st.startY;
-    const dt = Date.now() - st.startT;
-    const velocity = dy / Math.max(dt, 1); // px/ms
-    if (dy > 100 || velocity > 0.6) {
-      setShowSheet(false);
-    }
-    setSheetDragY(0);
-    sheetTouchRef.current.dragging = false;
-  };
-  useEffectApp(() => {
-    if (!showSheet) setSheetDragY(0);
-  }, [showSheet]);
-  const [needsOnboarding, setNeedsOnboarding] = useStateApp(null);
-  const [userName, setUserName] = useStateApp(() => localStorage.getItem('mc_name') || 'Parker');
-  const [showSettings, setShowSettings] = useStateApp(false);
+  const [month, setMonth] = useState(currentMonth());
+  const [toasts, setToasts] = useState([]);
+  const [showSettings, setShowSettings] = useState(false);
 
-  useEffectApp(() => {
-    fetch('/api/onboarding').then(r => r.json()).then(d => setNeedsOnboarding(d.needed)).catch(() => setNeedsOnboarding(false));
+  const data = useFinanceData(month);
+  const { syncing, ready: driveReady, sync } = useDriveSync(month, data.reload, data.reloadStatic);
+
+  useEffect(() => { try { localStorage.setItem('mc_tab', tab); } catch {} }, [tab]);
+
+  useEffect(() => {
+    window.__toast = (msg, type = "success") => {
+      const id = Date.now() + Math.random();
+      setToasts(ts => [...ts, { id, msg, type }]);
+      setTimeout(() => setToasts(ts => ts.filter(t => t.id !== id)), 3200);
+    };
   }, []);
 
-  useEffectApp(() => {
-    const onKey = (e) => { if (e.key === "Escape") setShowSettings(false); };
+  // 1-5 jump to a tab; Escape closes Settings. Ignored while typing.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") { setShowSettings(false); return; }
+      const el = document.activeElement;
+      if (el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const n = parseInt(e.key, 10);
+      if (n >= 1 && n <= TABS.length) setTab(TABS[n - 1].id);
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  useEffectApp(() => {
-    window.__toast = (msg, type = "success") => {
-      const id = Date.now() + Math.random();
-      setToasts(ts => [...ts, { id, msg, type }]);
-      setTimeout(() => setToasts(ts => ts.filter(t => t.id !== id)), 2800);
-    };
-  }, []);
-
-  useEffectApp(() => {
-    const id = setInterval(() => setNow(new Date()), 30_000);
-    return () => clearInterval(id);
-  }, []);
-
-  // Auto-refresh all cards every 3 min when the tab is visible, plus immediately
-  // when the tab becomes visible after being hidden (so returning to it is fresh).
-  // The interval is deliberately slow: a backgrounded tab never polls, so this also
-  // lets the Cloud Run instance scale to zero when you walk away. Cards subscribe
-  // via useRefreshListener.
-  useEffectApp(() => {
+  /* Refresh every 3 min while the tab is visible, and immediately on becoming
+     visible again. A backgrounded tab never polls, which also lets the Cloud Run
+     instance scale to zero when you walk away. Views subscribe via useRefreshListener. */
+  useEffect(() => {
     const fire = () => window.dispatchEvent(new CustomEvent('mc:refresh'));
     const tick = setInterval(() => {
       if (document.visibilityState === 'visible') fire();
@@ -141,182 +64,81 @@ const App = () => {
     };
   }, []);
 
-  useEffectApp(() => {
-    document.documentElement.style.setProperty("--accent", t.accent);
-    document.documentElement.style.setProperty("--accent-2", t.accent2 || "#6ed3b6");
-  }, [t.accent, t.accent2]);
-
-  useEffectApp(() => {
-    localStorage.setItem('mc_tweaks', JSON.stringify(t));
-  }, [t]);
-
-  const handleOnboardingComplete = ({ name, modules: newModules, theme }) => {
-    if (name && name.trim()) {
-      const first = name.trim().split(' ')[0];
-      setUserName(first);
-      localStorage.setItem('mc_name', first);
-    }
-    if (newModules && Object.keys(newModules).length) {
-      setTweak('modules', newModules);
-    }
-    if (theme) {
-      setTweak('accent', theme.accent);
-      setTweak('accent2', theme.accent2);
-    }
-    setNeedsOnboarding(false);
-  };
-
   const logout = async () => {
     await fetch('/api/logout', { method: 'POST' });
     window.location.href = '/login';
   };
 
-  const time = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-  const date = now.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-  const weekNum = Math.ceil((now - new Date(now.getFullYear(), 0, 1)) / 604800000);
+  const isCurrent = month === currentMonth();
+  const monthNeedsStepper = tab === 'overview' || tab === 'transactions' || tab === 'bills' || tab === 'trends';
 
-  const M = window.MissionModules;
-  const cards = [
-    { id: "health",   label: "Health & Fitness", icon: "heart",      el: <M.HealthCard cardProps={{}} /> },
-    { id: "finance",  label: "Finance",          icon: "wallet",     el: <M.FinanceCard cardProps={{}} /> },
-    { id: "band",     label: "Band",             icon: "music",      el: <M.BandCard cardProps={{}} /> },
-  ];
-
-  const pageTitle = "Dashboard";
+  const body = {
+    overview:     <OverviewTab month={month} data={data} />,
+    transactions: <TransactionsTab month={month} setMonth={setMonth} data={data} />,
+    bills:        <BillsTab month={month} />,
+    accounts:     <AccountsTab />,
+    trends:       <TrendsTab month={month} />,
+  }[tab];
 
   return (
-    <div className="app" data-density={t.density} data-sidebar={t.sidebar}>
-      {/* Top bar */}
-      <div className="topbar">
+    <div className="app">
+      <header className="topbar">
         <div className="brand">
-          <span className="brand-mark"/>
-          <span className="brand-name">MISSION CONTROL</span>
-          <span className="mobile-section-label">{pageTitle}</span>
+          <span className="brand-mark" />
+          <span className="brand-name">Finances</span>
         </div>
-        <div className="topbar-center"></div>
+
+        {monthNeedsStepper && (
+          <div className="month-stepper">
+            <button className="icon-btn" onClick={() => setMonth(m => shiftMonth(m, -1))}
+                    aria-label="Previous month" title="Previous month">‹</button>
+            <span className="month-label">{monthLabel(month)}</span>
+            <button className="icon-btn" onClick={() => setMonth(m => shiftMonth(m, 1))}
+                    aria-label="Next month" title="Next month">›</button>
+            {!isCurrent && (
+              <button className="btn ghost inline" onClick={() => setMonth(currentMonth())}>Today</button>
+            )}
+          </div>
+        )}
+
         <div className="topbar-right">
-          <span className="mono topbar-date" style={{ padding: "0 10px", color: "var(--ink-2)" }}>{date}</span>
+          {driveReady !== false && (
+            <button className="btn" disabled={syncing} onClick={() => sync({ manual: true })}
+                    title="Import the newest Rocket Money CSV export from your Google Drive folder">
+              <Icon name={syncing ? "loader" : "download"} size={13} />
+              <span className="btn-text">{syncing ? "Syncing…" : "Sync"}</span>
+            </button>
+          )}
           <button className="icon-btn" title="Settings" onClick={() => setShowSettings(true)}>
-            <Icon name="settings" size={15}/>
+            <Icon name="settings" size={15} />
           </button>
           <button className="icon-btn" title="Sign out" onClick={logout}>
-            <Icon name="logout" size={15}/>
+            <Icon name="logout" size={15} />
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* Sidebar */}
-      <nav className="sidebar">
-        <div className="sb-section">Modules</div>
-        {SIDEBAR_NAV.map((n) => (
-          <div key={n.id} className="sb-item">
-            <span className="sb-key">[{n.key}]</span>
-            <span className="sb-label">{n.label}</span>
-          </div>
+      <nav className="tabs" role="tablist" aria-label="Sections">
+        {TABS.map((t, i) => (
+          <button key={t.id} role="tab" aria-selected={tab === t.id}
+                  className={"tab" + (tab === t.id ? " on" : "")}
+                  onClick={() => setTab(t.id)} title={`${t.label} (${i + 1})`}>
+            <Icon name={t.icon} size={15} />
+            <span>{t.label}</span>
+          </button>
         ))}
       </nav>
 
-      {/* Main */}
-      <main>
-        <div className="page-head">
-          {pageTitle && <h1>{pageTitle}</h1>}
-          <span className="date">{date} — week {weekNum} of {now.getFullYear()}</span>
-          <div className="spacer"/>
-        </div>
-        <div className="grid">
-          {cards.map(c => (
-            <React.Fragment key={c.id}>{c.el}</React.Fragment>
-          ))}
-        </div>
-      </main>
-
-      {/* Status bar */}
-      <div className="statusbar">
-        <span><span className="dot" style={{ display: "inline-block", marginRight: 6 }}/>online</span>
-        <span className="sep"/>
-        <span>mission control</span>
-        <span className="sep"/>
-        <span>claude · connected</span>
-        <span className="sep"/>
-        <span className="litany">{LITANIES[Math.floor(now.getTime() / 45000) % LITANIES.length]}</span>
-        <span className="spacer"/>
-        <span className="mono litany-date">{imperialDate(now)}</span>
-        <span className="sep"/>
-        <span className="mono">{date} · {time}</span>
-      </div>
-
-      {/* Mobile bottom nav */}
-      <nav className="mobile-nav">
-        {MOBILE_NAV.map(n => (
-          <div key={n.id} className="mobile-nav-item">
-            <Icon name={n.icon} size={20}/>
-            <span>{n.label}</span>
-          </div>
-        ))}
-        <div className="mobile-nav-item" onClick={() => setShowSheet(true)}>
-          <Icon name="more" size={20}/>
-          <span>More</span>
-        </div>
-      </nav>
-
-      {/* Mobile bottom sheet */}
-      {showSheet && (
-        <div className="sheet-overlay" onClick={() => setShowSheet(false)}>
-          <div className="sheet" onClick={e => e.stopPropagation()}
-            ref={sheetScrollRef}
-            onTouchStart={onSheetTouchStart}
-            onTouchMove={onSheetTouchMove}
-            onTouchEnd={onSheetTouchEnd}
-            onTouchCancel={onSheetTouchEnd}
-            style={{
-              transform: sheetDragY ? `translateY(${sheetDragY}px)` : undefined,
-              transition: sheetDragY ? 'none' : 'transform .2s cubic-bezier(.32,.72,0,1)',
-            }}>
-            <div style={{position:'sticky',top:0,zIndex:2,background:'var(--bg-2)',
-                         margin:'-12px -16px 0',padding:'10px 12px 6px',
-                         display:'flex',alignItems:'center',gap:8}}>
-              <div className="sheet-handle" style={{margin:'0 auto',flex:'0 0 auto'}}/>
-              <button className="btn ghost" aria-label="Close"
-                onClick={() => setShowSheet(false)}
-                style={{position:'absolute',right:10,top:6,padding:'4px 10px',fontSize:16,lineHeight:1}}>
-                ✕
-              </button>
-            </div>
-            <div style={{display:'flex',gap:8,marginTop:4}}>
-              <button className="btn" style={{flex:1}} onClick={() => { setShowSettings(true); setShowSheet(false); }}>
-                <Icon name="settings" size={13}/>Settings
-              </button>
-              <button className="btn" style={{flex:1}} onClick={logout}>
-                <Icon name="logout" size={13}/>Sign out
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <main>{body}</main>
 
       {toasts.length > 0 && (
-        <div style={{ position:"fixed", bottom:120, right:16, display:"flex", flexDirection:"column", gap:6, zIndex:200, pointerEvents:"none" }}>
-          {toasts.map(t => (
-            <div key={t.id} className={`toast toast-${t.type}`}>{t.msg}</div>
-          ))}
+        <div className="toasts">
+          {toasts.map(t => <div key={t.id} className={`toast toast-${t.type}`}>{t.msg}</div>)}
         </div>
       )}
 
       {window.SettingsPanel && (
-        <window.SettingsPanel
-          open={showSettings}
-          onClose={() => setShowSettings(false)}
-          tweaks={t}
-          setTweak={setTweak}
-          userName={userName}
-          setUserName={setUserName}
-          onReEnroll={() => setNeedsOnboarding(true)}
-          onLogout={logout}
-        />
-      )}
-
-      {needsOnboarding === true && window.OnboardingWizard && (
-        <window.OnboardingWizard onComplete={handleOnboardingComplete} />
+        <window.SettingsPanel open={showSettings} onClose={() => setShowSettings(false)} onLogout={logout} />
       )}
     </div>
   );

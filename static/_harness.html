@@ -1,0 +1,141 @@
+<!doctype html>
+<!-- Dev-only render harness. Loads the real finance-*.jsx against stubbed API
+     responses so every view can be eyeballed without a Google Sheet connection
+     or a login. Served from /static, so it never passes through require_auth.
+     Not referenced by the app; delete it whenever. -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Finance render harness</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style id="app-css"></style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+// Pull the real stylesheet out of the app's own template so the harness can't
+// drift from what ships.
+fetch('/static/_harness_css.txt').then(r => r.ok ? r.text() : '').then(css => {
+  document.getElementById('app-css').textContent = css;
+});
+
+const DAY = new Date().getDate();
+const M = new Date().toISOString().slice(0, 7);
+const pad = n => String(n).padStart(2, '0');
+
+const FIXTURES = {
+  '/api/finances': [
+    { id: 1, description: 'Rent',            amount: 1150, type: 'expense', category: 'Utilities',         date: `${M}-01`, source: 'sheet' },
+    { id: 2, description: 'Ozark Electric',  amount: 132.4, type: 'expense', category: 'Utilities',        date: `${M}-05`, source: 'sheet' },
+    { id: 3, description: 'Harps',           amount: 88.12, type: 'expense', category: 'Groceries',        date: `${M}-06`, source: 'sheet' },
+    { id: 4, description: 'Aldi',            amount: 61.55, type: 'expense', category: 'Groceries',        date: `${M}-13`, source: 'sheet' },
+    { id: 5, description: 'Hugo’s',     amount: 44.20, type: 'expense', category: 'Dining and Drinks', date: `${M}-09`, source: 'sheet' },
+    { id: 6, description: 'JJ’s Grill', amount: 61.90, type: 'expense', category: 'Dining and Drinks', date: `${M}-16`, source: 'sheet' },
+    { id: 7, description: 'Casey’s',    amount: 52.00, type: 'expense', category: 'Gas',              date: `${M}-04`, source: 'sheet' },
+    { id: 8, description: 'Guitar strings',  amount: 38.00, type: 'expense', category: 'Fun',              date: `${M}-11`, source: 'sheet' },
+    { id: 9, description: 'Concert tickets', amount: 210.00, type: 'expense', category: 'Fun',             date: `${M}-18`, source: 'sheet' },
+    { id: 10, description: 'GLS paycheck',   amount: 2400, type: 'income',  category: 'Other',             date: `${M}-15`, source: 'sheet' },
+  ],
+  '/api/finances/budget': {
+    income: 4800, expense: 1838.17,
+    categories: [
+      { name: 'Utilities',         budgeted: 1437, actual: 1282.40 },
+      { name: 'Groceries',         budgeted: 400,  actual: 149.67 },
+      { name: 'Dining and Drinks', budgeted: 250,  actual: 311.40 },
+      { name: 'Fun',               budgeted: 500,  actual: 528.00 },
+      { name: 'Gas',               budgeted: 300,  actual: 52.00 },
+      { name: 'Subscriptions',     budgeted: 125,  actual: 0 },
+      { name: 'Loans',             budgeted: 500,  actual: 0 },
+    ],
+  },
+  '/api/finances/subscriptions': [
+    { id: 1, name: 'Realms Minecraft', acct: 'Capital One', amt: 3.99,  due: '2nd' },
+    { id: 2, name: 'Spotify',          acct: '',            amt: 11.99, due: '8th' },
+    { id: 3, name: 'iCloud',           acct: '',            amt: 2.99,  due: '20th' },
+  ],
+  '/api/finances/roommate': {
+    ok: true, source: 'config', total: 148.20,
+    items: [
+      { label: 'Electricity', full: 132.40, half: 66.20 },
+      { label: 'Internet',    full: 84.00,  half: 42.00 },
+      { label: 'Water',       full: 80.00,  half: 40.00 },
+    ],
+  },
+  '/api/finance/import/status': { connected: true, folder_configured: true },
+  '/api/finance/import/drive': { added: 0, updated: 0, removed: 0, csv_total: 1838.17, warnings: [], failed: 0 },
+  '/api/finances/upcoming': {
+    month: M, days_in_month: 31, committed_remaining: 596.99, paid_total: 1241.19,
+    items: [
+      { name: 'Realms Minecraft', category: 'Subscriptions', account: 'Capital One', amount: 3.99, budgeted: 3.99, actual: 3.99, due_day: 2, paid: false, source: 'subscription', status: 'posted' },
+      { name: 'Rent', category: 'Utilities', account: 'Checking', amount: 1150, budgeted: 1150, actual: 1150, due_day: 1, paid: true, source: 'sheet', status: 'paid' },
+      { name: 'Ozark Electric', category: 'Utilities', account: 'Checking', amount: 132.40, budgeted: 140, actual: 132.40, due_day: 5, paid: false, source: 'sheet', status: 'posted' },
+      { name: 'Spotify', category: 'Subscriptions', account: '', amount: 11.99, budgeted: 11.99, actual: 0, due_day: 8, paid: false, source: 'sheet', status: 'overdue' },
+      { name: 'Cox Internet', category: 'Utilities', account: 'Checking', amount: 84, budgeted: 84, actual: 0, due_day: 20, paid: false, source: 'sheet', status: 'due' },
+      { name: 'Car payment', category: 'Loans', account: 'Checking', amount: 489, budgeted: 489, actual: 0, due_day: 22, paid: false, source: 'sheet', status: 'due' },
+      { name: 'iCloud', category: 'Subscriptions', account: '', amount: 2.99, budgeted: 2.99, actual: 0, due_day: 26, paid: false, source: 'sheet', status: 'due' },
+      { name: 'Roommate payment', category: 'Income', account: '', amount: 148.20, budgeted: 148.20, actual: 0, due_day: null, paid: false, source: 'roommate', status: 'due', income: true },
+    ],
+  },
+  '/api/accounts': {
+    net_worth: 22740.11, previous_net_worth: 21992.53,
+    accounts: [
+      { id: 1, name: 'Robinhood',    type: 'brokerage', balance: 21980.11, updated: '2026-08-28', change: 724.58 },
+      { id: 2, name: 'SoFi Savings', type: 'cash',      balance: 1410.00,  updated: '2026-08-28', change: 673.00 },
+      { id: 3, name: 'Car loan',     type: 'debt',      balance: 650.00,   updated: '2026-08-28', change: -489.00 },
+    ],
+    snapshots: [
+      { date: '2026-05-10', net_worth: 21992.53, balances: {} },
+      { date: '2026-06-01', net_worth: 21440.02, balances: {} },
+      { date: '2026-07-01', net_worth: 22105.77, balances: {} },
+      { date: '2026-08-01', net_worth: 21880.40, balances: {} },
+      { date: '2026-08-28', net_worth: 22740.11, balances: {} },
+    ],
+  },
+  '/api/finances/trends': {
+    skipped: [], requested: [],
+    months: [
+      { month: '2026-03', tab: 'March',  income: 4600, expense: 3980, categories: { Utilities: 1402, Groceries: 372, 'Dining and Drinks': 188, Fun: 240, Gas: 268, Subscriptions: 119, Loans: 489 } },
+      { month: '2026-04', tab: 'April',  income: 4800, expense: 4120, categories: { Utilities: 1437, Groceries: 401, 'Dining and Drinks': 205, Fun: 310, Gas: 291, Subscriptions: 119, Loans: 489 } },
+      { month: '2026-05', tab: 'May',    income: 4800, expense: 3860, categories: { Utilities: 1419, Groceries: 355, 'Dining and Drinks': 162, Fun: 180, Gas: 244, Subscriptions: 119, Loans: 489 } },
+      { month: '2026-06', tab: 'June',   income: 5100, expense: 4310, categories: { Utilities: 1441, Groceries: 388, 'Dining and Drinks': 248, Fun: 420, Gas: 302, Subscriptions: 122, Loans: 489 } },
+      { month: '2026-07', tab: 'July',   income: 4800, expense: 4455, categories: { Utilities: 1460, Groceries: 412, 'Dining and Drinks': 276, Fun: 505, Gas: 315, Subscriptions: 128, Loans: 489 } },
+      { month: '2026-08', tab: 'August', income: 4800, expense: 1838, categories: { Utilities: 1282, Groceries: 150, 'Dining and Drinks': 106, Fun: 248, Gas: 52, Subscriptions: 0, Loans: 0 } },
+    ],
+  },
+  '/api/drive/status': { connected: true, email: 'parkergent7@gmail.com', sheet_finance: '1UaFkSQ3ww...', finance_import_folder: '1Smj1DGJ...' },
+  '/api/me': { email: 'parkergent7@gmail.com' },
+};
+
+const realFetch = window.fetch.bind(window);
+window.fetch = (url, opts) => {
+  const path = String(url).split('?')[0];
+  if (path.startsWith('/static/')) return realFetch(url, opts);
+  if (opts && opts.method && opts.method !== 'GET') {
+    console.log('[harness] swallowed', opts.method, path, opts.body);
+    return Promise.resolve(new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } }));
+  }
+  const body = FIXTURES[path];
+  if (body === undefined) {
+    console.warn('[harness] no fixture for', path);
+    return Promise.resolve(new Response(JSON.stringify({ error: 'no fixture' }), { status: 404, headers: { 'Content-Type': 'application/json' } }));
+  }
+  return Promise.resolve(new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } }));
+};
+</script>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<script type="text/babel" src="/static/icons.jsx"></script>
+<script type="text/babel" src="/static/finance-core.jsx"></script>
+<script type="text/babel" src="/static/finance-overview.jsx"></script>
+<script type="text/babel" src="/static/finance-transactions.jsx"></script>
+<script type="text/babel" src="/static/finance-bills.jsx"></script>
+<script type="text/babel" src="/static/finance-accounts.jsx"></script>
+<script type="text/babel" src="/static/finance-trends.jsx"></script>
+<script type="text/babel" src="/static/settings.jsx"></script>
+<script type="text/babel" src="/static/app.jsx"></script>
+</body>
+</html>
