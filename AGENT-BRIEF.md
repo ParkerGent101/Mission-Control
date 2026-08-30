@@ -48,21 +48,26 @@ your first edit — a worktree you did not create is read-and-build-from, **not*
 - Every Sheets/GCS call needs a local JSON fallback path.
 - `gunicorn --workers 1` is deliberate — `--threads 8` was OOM-killed. Do not "optimise" it.
 
-## Three claims in this repo's own docs that are false
+## Three things older notes get wrong
 
-Verified against code on 2026-08-03 (source: `wiki/projects/mission-control.md`). Believe the code.
+Verified against the code on 2026-08-30. Believe the code.
 
-1. `AGENTS.md` says there is **no frontend build step**. In production there is: the Dockerfile runs
-   `node:20-slim` + `@babel/cli` and sets `PRECOMPILED_ASSETS=1`.
-2. `CLAUDE.md` advertises the slash command `.claude\commands\review-before-deploy.md`. That directory
-   exists and is **empty**.
-3. `HANDOFF.md` is a stale May-2026 chat handoff — wrong module count, and it still names retired work.
-   **Do not cite it for anything.**
+1. **This is a finance-only app as of 2026-08-30.** The Claude agent, Band, Health, TCPG, tasks,
+   reminders, the agenda and the Warhammer-40k UI skin were all removed, and `static/modules.jsx`,
+   `planet.jsx`, `onboarding.jsx`, `tweaks-panel.jsx`, `deploy.sh` and `HANDOFF.md` no longer
+   exist. Anything you read that describes modules or an agent predates that. The last
+   multi-purpose commit is tagged `pre-finance-only`; `CLAUDE.md` was rewritten and is accurate.
+2. `AGENTS.md` used to claim there is **no frontend build step**. In production there is: the
+   Dockerfile runs `node:20-slim` + `@babel/cli` and sets `PRECOMPILED_ASSETS=1`. Both docs now
+   say so.
+3. **The Drive/Sheets refresh token is dead** (`invalid_grant`, checked 2026-08-30), so every
+   Sheet-backed feature silently falls back to local JSON and reads as empty rather than broken.
+   Only Parker can fix it - `scripts\sheets-reauth.ps1` needs his own Google sign-in. To work on
+   the UI meanwhile, open `static/_harness.html`: it renders every view against fixtures with no
+   Sheet and no login.
 
-Also stale, harmless unless you repeat it: `CLAUDE.md`'s "~2,500 lines", "22 tools", "31 JSON files".
-Real: 4,239 lines, 18 registered schemas over 19 `tool_*` functions (`tool_edit_show` is unregistered
-and uncallable), 30 JSON files. The Calendar, Practice, and Routines modules (and Google Calendar
-OAuth) were removed 2026-08-11 — MealPrep was removed just before that, on 2026-08-05.
+Current as of 2026-08-30: `app.py` is 3,304 lines over 48 routes, 10 JSON files in `data/`, zero
+`tool_*` functions, no `anthropic` dependency.
 
 ## Before you claim a task
 

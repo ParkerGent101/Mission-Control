@@ -27,16 +27,6 @@ if ($Setup) {
     gcloud storage buckets create "gs://$BUCKET" --location=$REGION --uniform-bucket-level-access 2>$null
     if ($LASTEXITCODE -ne 0) { Write-Host "  (bucket already exists, skipping)" }
 
-    Write-Host "==> [Setup] Storing API key in Secret Manager..." -ForegroundColor Yellow
-    $apiKey = Read-Host "Paste your ANTHROPIC_API_KEY"
-    $tmp = [System.IO.Path]::GetTempFileName()
-    [System.IO.File]::WriteAllText($tmp, $apiKey)
-    gcloud secrets create anthropic-api-key --data-file=$tmp 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        gcloud secrets versions add anthropic-api-key --data-file=$tmp
-    }
-    Remove-Item $tmp
-
     Write-Host "==> [Setup] Storing Flask secret..." -ForegroundColor Yellow
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
     $bytes = New-Object byte[] 32
@@ -55,10 +45,8 @@ if ($SkipData) {
     Write-Host "==> Syncing data to GCS (force-uploading key files)..." -ForegroundColor Cyan
     # Data files live at bucket ROOT (mounted at /data on Cloud Run), not in a data/ prefix
     $dataFiles = @(
-        "shows.json","band_songs.json","band_contacts.json","band_content.json",
-        "finances.json","savings.json","health.json","agenda.json","tasks.json",
-        "reminders.json","work_tasks.json",
-        "holidays.json","subscriptions.json","drive_config.json"
+        "finances.json","accounts.json","savings.json","subscriptions.json",
+        "roommate_payment.json","finance_import.json","drive_config.json"
     )
     foreach ($f in $dataFiles) {
         $local = "data\$f"
@@ -69,7 +57,7 @@ if ($SkipData) {
     }
 }
 
-$envVars = "DATA_DIR=/data,FINANCE_SHEET_ID=1UaFkSQ3wwrPt6pfZIfnNrlMQmerv-ZQ52KYyCF5rIvo,HEALTH_SHEET_ID=1IaAphdKbTYrX3OHL_CDsFieB1bi-H_DznRHdzaQwDfk,FINANCE_OWNER_EMAIL=parkergent7@gmail.com"
+$envVars = "DATA_DIR=/data,FINANCE_SHEET_ID=1UaFkSQ3wwrPt6pfZIfnNrlMQmerv-ZQ52KYyCF5rIvo,FINANCE_OWNER_EMAIL=parkergent7@gmail.com"
 
 # Sign-in (Google identity + MFA). Production is password-free: ALLOW_PASSWORD_LOGIN
 # is false, so /api/login is disabled and access requires Google sign-in + 2FA.
@@ -78,7 +66,10 @@ $envVars = "DATA_DIR=/data,FINANCE_SHEET_ID=1UaFkSQ3wwrPt6pfZIfnNrlMQmerv-ZQ52KY
 # run.app /api/auth/google/callback redirect URI.
 $envVars += ",ALLOWED_LOGIN_EMAILS=parkergent7@gmail.com,SESSION_LIFETIME_DAYS=7,ALLOW_PASSWORD_LOGIN=false"
 
-$secretBindings = "ANTHROPIC_API_KEY=anthropic-api-key:latest,FLASK_SECRET=flask-secret:latest,GITHUB_TOKEN=github-token:latest"
+# anthropic-api-key and github-token were unbound when the Claude agent and the
+# Band module were removed. The secrets still exist in Secret Manager; delete them
+# there once you are sure nothing else reads them.
+$secretBindings = "FLASK_SECRET=flask-secret:latest"
 
 Write-Host "==> Deploying to Cloud Run..." -ForegroundColor Cyan
 gcloud run deploy $SERVICE `

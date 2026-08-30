@@ -2,12 +2,14 @@
 
 ## Project
 
-Mission Control is a personal AI dashboard. It is a Python/Flask backend with React 18 JSX served directly through static files and browser Babel. There is no frontend build step.
+Mission Control is a personal **finance** app: a Python/Flask backend with React 18 JSX. Locally the JSX is transpiled in the browser (no build step); the production image precompiles it with Babel in the Dockerfile's first stage and sets `PRECOMPILED_ASSETS=1`.
+
+It used to cover Band, Health, TCPG, tasks and reminders behind a Claude agent. All of that was removed 2026-08-30 (tag `pre-finance-only`). Do not reintroduce it. See `CLAUDE.md`.
 
 ## Run And Deploy
 
 - Local: `python app.py` or `start.bat`, then open `http://localhost:5000`.
-- Production: `powershell -ExecutionPolicy Bypass -File deploy.ps1`.
+- Production: `powershell -ExecutionPolicy Bypass -File deploy.ps1` (the only deploy path).
 - Cloud Run uses `DATA_DIR=/data`; local development usually uses the repo `data/` folder as cache/fallback storage.
 
 ## Data Source Of Truth
