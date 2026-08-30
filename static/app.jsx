@@ -98,9 +98,16 @@ const App = () => {
   }, [showSheet]);
   const [needsOnboarding, setNeedsOnboarding] = useStateApp(null);
   const [userName, setUserName] = useStateApp(() => localStorage.getItem('mc_name') || 'Parker');
+  const [showSettings, setShowSettings] = useStateApp(false);
 
   useEffectApp(() => {
     fetch('/api/onboarding').then(r => r.json()).then(d => setNeedsOnboarding(d.needed)).catch(() => setNeedsOnboarding(false));
+  }, []);
+
+  useEffectApp(() => {
+    const onKey = (e) => { if (e.key === "Escape") setShowSettings(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   useEffectApp(() => {
@@ -189,6 +196,9 @@ const App = () => {
         <div className="topbar-center"></div>
         <div className="topbar-right">
           <span className="mono topbar-date" style={{ padding: "0 10px", color: "var(--ink-2)" }}>{date}</span>
+          <button className="icon-btn" title="Settings" onClick={() => setShowSettings(true)}>
+            <Icon name="settings" size={15}/>
+          </button>
           <button className="icon-btn" title="Sign out" onClick={logout}>
             <Icon name="logout" size={15}/>
           </button>
@@ -273,6 +283,9 @@ const App = () => {
               </button>
             </div>
             <div style={{display:'flex',gap:8,marginTop:4}}>
+              <button className="btn" style={{flex:1}} onClick={() => { setShowSettings(true); setShowSheet(false); }}>
+                <Icon name="settings" size={13}/>Settings
+              </button>
               <button className="btn" style={{flex:1}} onClick={logout}>
                 <Icon name="logout" size={13}/>Sign out
               </button>
@@ -287,6 +300,19 @@ const App = () => {
             <div key={t.id} className={`toast toast-${t.type}`}>{t.msg}</div>
           ))}
         </div>
+      )}
+
+      {window.SettingsPanel && (
+        <window.SettingsPanel
+          open={showSettings}
+          onClose={() => setShowSettings(false)}
+          tweaks={t}
+          setTweak={setTweak}
+          userName={userName}
+          setUserName={setUserName}
+          onReEnroll={() => setNeedsOnboarding(true)}
+          onLogout={logout}
+        />
       )}
 
       {needsOnboarding === true && window.OnboardingWizard && (
