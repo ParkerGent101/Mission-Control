@@ -226,7 +226,7 @@ def require_auth():
     p = request.path
     if p.startswith('/static/'):
         return None
-    if p in ('/login', '/privacy', '/healthz', '/api/login', '/api/logout', '/api/me',
+    if p in ('/login', '/privacy', '/api/healthz', '/api/login', '/api/logout', '/api/me',
              '/api/auth/google/start', '/api/auth/google/callback'):
         return None
     if session.get('authenticated'):
@@ -347,10 +347,14 @@ def _asset_version():
     except Exception:
         return "0"
 
-@app.route("/healthz")
+@app.route("/api/healthz")
 def healthz():
     """Unauthenticated liveness probe. Replaces the old /api/health, which was the
-    fitness module's endpoint rather than a health check."""
+    fitness module's endpoint rather than a health check.
+
+    Under /api/ deliberately: Google Frontend intercepts a bare /healthz on Cloud
+    Run and answers it with its own 404 before the request ever reaches the
+    container, so the obvious path silently doesn't work in production."""
     return jsonify({"ok": True}), 200
 
 @app.route("/")

@@ -77,7 +77,7 @@ by colouring every bar.
 
 ## Development rules
 - Every Flask route is covered by `require_auth()` via `@app.before_request`; the exempt list
-  is in that function. `/healthz` is intentionally unauthenticated.
+  is in that function. `/api/healthz` is intentionally unauthenticated (a bare `/healthz` is swallowed by Google Frontend on Cloud Run).
 - `_load(FILE, default)` and `_save(FILE, data)` are the only data-access primitives.
 - Google Sheets / GCS calls must have a local JSON fallback.
 - New env var: add it to `deploy.ps1` `--set-env-vars`, to `.env.example`, and guard with `if VAR:`.
