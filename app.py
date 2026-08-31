@@ -1084,6 +1084,7 @@ def _rocket_to_finance_category(rm_cat, name=""):
     DETAIL_TABLE_KEYWORDS / BUDGET_TRANSACTION_CATEGORIES and map it here."""
     blob = (str(rm_cat or "").lower() + " " + str(name or "").lower())
     if any(k in blob for k in ("subscript",) + _RM_SUBSCRIPTION_MERCHANTS):       return "Subscriptions"
+    if "shopping" in blob:                                                        return "Shopping"
     if any(k in blob for k in ("gas", "fuel", "auto & transport", "transport")):  return "Gas"
     if any(k in blob for k in ("grocer", "groceries")):                           return "Groceries"
     if any(k in blob for k in ("dining", "drinks", "restaurant")):                return "Dining and Drinks"
@@ -1271,16 +1272,29 @@ def _finance_sync_month(svc, month, csv_rows, purge=True, apply=True, subs_data=
     max_cols = max((len(r) for r in rows), default=1)
     rows = [list(r) + [''] * (max_cols - len(r)) for r in rows]
 
+    # A tab with no table for a detail category cannot receive those charges. Fold them
+    # into the documented fallback for this run instead of counting spending the tab can
+    # never show: older tabs predate Shopping, and a new one may not have it yet. Adding
+    # a 'Shopping Total' table to the Sheet is all it takes to switch this off.
+    reroute = {}
+    for cat_from, cat_to in DETAIL_TABLE_FALLBACK.items():
+        if not _find_detail_table(rows, cat_from) and _find_detail_table(rows, cat_to):
+            reroute[cat_from] = cat_to
+
     # -- what the CSV says this month's spending is --
     desired_detail = {c: [] for c in DETAIL_TABLE_KEYWORDS}
     desired_budget = {c: [] for c in BUDGET_TRANSACTION_CATEGORIES}
     csv_total, by_category = 0.0, {}
+    rerouted_total = {}       # cat_from -> amount folded into its fallback this run
     unplaceable = []          # charges with no home in the Sheet — see PLACEABLE_CATEGORIES
     for r in csv_rows:
         if (r.get('date') or '')[:7] != month or _rocket_is_nonspend(r):
             continue
         cat  = _rocket_to_finance_category(r.get('category'), r.get('name'))
         amt  = round(abs(r.get('amount') or 0), 2)
+        if cat in reroute:
+            rerouted_total[cat] = round(rerouted_total.get(cat, 0) + amt, 2)
+            cat = reroute[cat]
         name = (r.get('name') or 'Transaction').strip()
         csv_total = round(csv_total + amt, 2)
         by_category[cat] = round(by_category.get(cat, 0) + amt, 2)
@@ -1467,6 +1481,11 @@ def _finance_sync_month(svc, month, csv_rows, purge=True, apply=True, subs_data=
 
     # A charge counted toward csv_total but with nowhere to write it means the tab can
     # never reach that total. Report it loudly rather than letting the numbers drift.
+    for cat_from, amt in sorted(rerouted_total.items()):
+        warnings.append(
+            f"${amt:,.2f} of {cat_from} went into {reroute[cat_from]} — '{tab}' has no "
+            f"{cat_from} table. Add a '{cat_from} Total' table to the Sheet to track it separately.")
+
     if unplaceable:
         gap = round(sum(u['amount'] for u in unplaceable), 2)
         cats = sorted({u['category'] for u in unplaceable})
@@ -1480,6 +1499,7 @@ def _finance_sync_month(svc, month, csv_rows, purge=True, apply=True, subs_data=
             'new_rows': len(appends), 'csv_total': csv_total,
             'manual_total': round(manual_total, 2),
             'expected_total': round(csv_total + manual_total, 2),
+            'rerouted': rerouted_total,
             'unplaceable': unplaceable,
             'unplaceable_total': round(sum(u['amount'] for u in unplaceable), 2),
             'by_category': by_category, 'warnings': warnings}
@@ -2088,7 +2108,17 @@ DETAIL_TABLE_KEYWORDS = {
     'Fun':               ['fun total', 'fun totals'],
     'Groceries':         ['groceries total', 'grocery trip', 'grocery'],
     'Dining and Drinks': ['dining and drinks total', 'dining & drinks total', 'dining total'],
+    # Added 2026-08-30. Only takes effect on a tab that actually has a Shopping table —
+    # _finance_sync_month re-routes these to Fun (the historical home) on any tab that
+    # doesn't, so the month still reconciles. See DETAIL_TABLE_FALLBACK.
+    'Shopping':          ['shopping total', 'shopping totals'],
 }
+
+# Where a detail category goes on a tab that has no table for it. The month total must
+# reconcile against Rocket Money on every tab, including older ones written before the
+# category existed, so a missing table degrades to the old destination instead of
+# dropping the charge.
+DETAIL_TABLE_FALLBACK = {'Shopping': 'Fun'}
 BUDGET_TRANSACTION_CATEGORIES = {'Utilities', 'Subscriptions'}
 
 # The only categories a month tab can actually receive a charge into. _finance_sync_month

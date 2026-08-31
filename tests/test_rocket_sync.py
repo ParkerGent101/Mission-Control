@@ -26,13 +26,17 @@ SPEND_TOTAL = 3600.09
 DROPPED_TOTAL = 1032.44
 ROW_COUNT = 38
 
+# Shopping is split out as of 2026-08-30. On a tab with no Shopping table these fold
+# back into Fun (Fun 1299.23), which is what DETAIL_TABLE_FALLBACK is for.
 EXPECTED_BY_CATEGORY = {
     "Utilities": 1446.25,
-    "Fun": 1299.23,
+    "Shopping": 1158.34,
     "Dining and Drinks": 560.61,
     "Gas": 158.48,
+    "Fun": 140.89,
     "Subscriptions": 135.52,
 }
+FUN_IF_NO_SHOPPING_TABLE = 1299.23
 
 
 def _rows():
@@ -111,9 +115,11 @@ def test_known_merchants_land_where_they_should():
     assert m("Bills & Utilities", "AMER ELECT PWR") == "Utilities"
     # The curly apostrophe Rocket Money actually exports:
     assert m("Subscription’s", "Hulu") == "Subscriptions"
-    # Documented fallback: no Shopping section in the Sheet, so it lands in Fun.
-    assert m("Shopping", "REVERB.COM LLC") == "Fun"
+    assert m("Shopping", "REVERB.COM LLC") == "Shopping"
+    assert m("Shopping", "WM SUPERCENTER #5260") == "Shopping"
+    # Fun stays the catch-all for anything with no better home.
     assert m("Family Care", "GREENLIGHT N-766968") == "Fun"
+    assert m("Entertainment & Rec.", "Malco Pinnacle Hills") == "Fun"
 
 
 def test_pending_charges_are_held_back():
@@ -127,6 +133,37 @@ def test_income_and_transfers_never_count_as_spending():
     for cat in ("Investment", "Credit Card Payment", "Transfers", "Paycheck"):
         assert A._rocket_is_nonspend({"amount": 500, "category": cat, "name": "x"}), cat
     assert A._rocket_is_nonspend({"amount": -500, "category": "Dining & Drinks", "name": "refund"})
+
+
+
+
+
+def test_shopping_folds_into_fun_when_the_tab_has_no_shopping_table():
+    """DETAIL_TABLE_FALLBACK is what keeps older tabs reconcilable. Splitting Shopping
+    out must not strand those charges on a tab that has no table to put them in, so the
+    sync folds them back into Fun and says so. The month total is identical either way —
+    that is the property that matters."""
+    assert A.DETAIL_TABLE_FALLBACK["Shopping"] == "Fun"
+
+    rows = [r for r in _rows() if not A._rocket_is_nonspend(r)]
+    split, folded = defaultdict(float), defaultdict(float)
+    for r in rows:
+        cat = A._rocket_to_finance_category(r["category"], r["name"])
+        split[cat] += r["amount"]
+        folded[A.DETAIL_TABLE_FALLBACK.get(cat, cat)] += r["amount"]
+
+    assert round(folded["Fun"], 2) == FUN_IF_NO_SHOPPING_TABLE
+    assert "Shopping" not in folded
+    assert round(sum(split.values()), 2) == round(sum(folded.values()), 2) == SPEND_TOTAL
+
+
+def test_shopping_is_placeable_either_way():
+    """Whichever side of the fallback a charge lands on, it has a home — this is what
+    stops the split-out from silently dropping $1,158."""
+    assert "Shopping" in A.PLACEABLE_CATEGORIES
+    for src, dest in A.DETAIL_TABLE_FALLBACK.items():
+        assert src in A.PLACEABLE_CATEGORIES, src
+        assert dest in A.PLACEABLE_CATEGORIES, dest
 
 
 def main():

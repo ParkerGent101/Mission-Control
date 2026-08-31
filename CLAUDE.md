@@ -82,9 +82,13 @@ by colouring every bar.
 - **`_rocket_to_finance_category` must only ever return a category in `PLACEABLE_CATEGORIES`.**
   `_finance_sync_month` counts a charge toward `csv_total` before choosing where to write it,
   so a category the Sheet has no section for is counted as spending and never written, and the
-  tab can never reconcile. This is why the fallback is `Fun` and not `Other`. Rocket Money's
-  `Shopping` lands in Fun for the same reason — to split it out, give the Sheet a Shopping
-  section first, then map it. `tests/test_rocket_sync.py` fails if you get this wrong.
+  tab can never reconcile. This is why the catch-all is `Fun` and not `Other`.
+  `tests/test_rocket_sync.py` fails if you get this wrong.
+- **`DETAIL_TABLE_FALLBACK` lets a category exist before the Sheet has a table for it.**
+  Shopping maps to `Shopping`, but on a tab with no "Shopping Total" table the sync folds
+  those charges into Fun for that run and warns. The month total is identical either way.
+  Add a `Shopping Total` table to a month tab and it starts tracking separately with no
+  code change. Use the same pattern for any future category.
 - Google Sheets / GCS calls must have a local JSON fallback.
 - New env var: add it to `deploy.ps1` `--set-env-vars`, to `.env.example`, and guard with `if VAR:`.
 - Never commit `.env`, `token.json`, `drive_token.json`, `credentials.json`.
