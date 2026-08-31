@@ -28,11 +28,14 @@ distrust older notes that describe it. The last multi-purpose commit is tagged
 ## GCP infrastructure
 - Project `mission-control-496004`, Cloud Run service `mission-control`, region `us-central1`
 - GCS bucket `parker-mission-control-data`, mounted at `/data`
-- Secret Manager: `flask-secret` is the only one still bound. `anthropic-api-key` and
-  `github-token` still exist but nothing reads them — safe to delete.
+- Secret Manager: **`flask-secret` is the only secret that exists.** `anthropic-api-key`,
+  `github-token`, `plaid-client-id` and `plaid-secret` were deleted 2026-08-30.
 - Finance Sheet ID: `1UaFkSQ3wwrPt6pfZIfnNrlMQmerv-ZQ52KYyCF5rIvo`
-- Deploy: `powershell -ExecutionPolicy Bypass -File deploy.ps1` (the only deploy path;
-  `deploy.sh` was deleted — it still set `min-instances 1`, 512Mi, and password login)
+- Deploy: `powershell -ExecutionPolicy Bypass -File deploy.ps1 -SkipData` (the only deploy
+  path; `deploy.sh` was deleted — it still set `min-instances 1`, 512Mi, and password login).
+  **Use `-SkipData`** unless you actually mean to overwrite live bucket data with local files.
+- The data bucket holds 10 finance/auth files. A pre-cleanup backup of everything removed is in
+  `..\mission-control-archive-2026-08-30\`.
 
 ## Key files
 | File | What it is |
@@ -104,7 +107,7 @@ by colouring every bar.
 | `scripts\sheets-reauth.ps1` | Re-auth Google OAuth. **Needs Parker's interactive sign-in.** |
 | `scripts\health-check.ps1` | Ping the live URL + Cloud Run status + error logs |
 | `scripts\jsx_check.py` | Babel-parse a JSX file (needs playwright) |
-| `python tests	est_rocket_sync.py` | Pins the Rocket Money import arithmetic. Run it after touching `_rocket_*` or the category maps. |
+| `python tests\test_rocket_sync.py` | Pins the Rocket Money import arithmetic. Run it after touching `_rocket_*` or the category maps. |
 | `scripts\clean.ps1` | Preview/remove generated artifacts |
 
 ## Known issues
