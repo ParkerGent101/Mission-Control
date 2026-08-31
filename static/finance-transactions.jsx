@@ -284,6 +284,21 @@ const TransactionsTab = ({ month, setMonth, data }) => {
    folder — adding new charges, updating changed amounts in place, and dropping
    rows a previous sync wrote that the export no longer has. Lives here rather
    than inside the tab so the header button can trigger it from any tab. */
+/* How far the export actually reaches. Sync results are otherwise ambiguous: a month
+   with no recent spending looks identical to a sync that dropped rows, which is exactly
+   the confusion that sent us digging through Drive by hand. */
+const coverageNote = (d) => {
+  const c = d && d.coverage;
+  if (!c || !c.last_charge) return '';
+  const day = (iso) => {
+    const dt = new Date(iso + 'T12:00:00');
+    return isNaN(dt) ? iso : dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+  const bits = [`through ${day(c.last_charge)}`];
+  if (!c.reconciled) bits.push('add-only');
+  return ` (${bits.join(', ')})`;
+};
+
 const useDriveSync = (month, reload, reloadStatic) => {
   const [syncing, setSyncing] = useState(false);
   const [ready, setReady] = useState(null);   // null = unknown, false = not configured
@@ -315,11 +330,11 @@ const useDriveSync = (month, reload, reloadStatic) => {
         if (d.updated) bits.push(`${d.updated} updated`);
         if (d.removed) bits.push(`${d.removed} removed`);
         const total = typeof d.csv_total === 'number' ? ` — ${fmtMoney(d.csv_total)} this month` : '';
-        toastOk(`Synced with Rocket Money: ${bits.join(', ')}${total}`);
+        toastOk(`Synced with Rocket Money: ${bits.join(', ')}${total}${coverageNote(d)}`);
       } else if (opts.manual) {
         window.__toast && window.__toast(typeof d.csv_total === 'number'
-          ? `Already matches Rocket Money — ${fmtMoney(d.csv_total)} this month`
-          : 'Already up to date', 'info');
+          ? `Already matches Rocket Money — ${fmtMoney(d.csv_total)} this month${coverageNote(d)}`
+          : `Already up to date${coverageNote(d)}`, 'info');
       }
       if (opts.manual && d.warnings && d.warnings.length) {
         window.__toast && window.__toast(d.warnings[0], 'info');

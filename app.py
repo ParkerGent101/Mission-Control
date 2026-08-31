@@ -1755,12 +1755,27 @@ def finance_import_drive():
 
     # Removing rows the CSV doesn't have is only safe when the CSV is actually current.
     # A stale export sitting in Drive (last uploaded a week ago) would otherwise delete
-    # every charge since — so an old export is add-only. Override with ?purge=1/0.
-    csv_max_date = max((r["date"] for r in spend if r.get("date")), default="")
+    # every charge since, so an old export is add-only. Override with ?purge=1/0.
+    #
+    # Freshness is the age of the EXPORT, not of the newest charge inside it. Measuring it
+    # by the newest charge means a quiet stretch, a few days without spending or a card
+    # that posts in batches, reads as a stale file and silently drops the sync into
+    # add-only mode: exactly the confusing half-sync the guard exists to prevent. Fall
+    # back to the newest row only when Drive gave us no modifiedTime.
+    csv_max_date = max((r["date"] for r in rows if r.get("date")), default="")
+    export_date = (getattr(meta, "modified_time", "") or "")[:10] or csv_max_date
     fresh_cutoff = (datetime.now().date() - timedelta(days=4)).isoformat()
     arg_purge = request.args.get("purge")
-    allow_purge = (csv_max_date >= fresh_cutoff) if arg_purge is None \
+    allow_purge = (export_date >= fresh_cutoff) if arg_purge is None \
         else arg_purge in ("1", "true", "yes")
+
+    # What the export actually covers, so a half-populated month is legible in the UI
+    # rather than looking like the sync lost something.
+    _spend_dates = sorted(r["date"] for r in spend if r.get("date"))
+    coverage = {"file": str(meta), "exported": export_date,
+                "first_charge": _spend_dates[0] if _spend_dates else None,
+                "last_charge": _spend_dates[-1] if _spend_dates else None,
+                "newest_row": csv_max_date, "reconciled": bool(allow_purge)}
 
     if preview:
         preview_rows = sorted(
@@ -1815,10 +1830,17 @@ def finance_import_drive():
 
     cur = next((p for p in per_month if p["month"] == cur_month), None)
     if not allow_purge and cur:
-        warnings.insert(0, f"Export only covers through {csv_max_date} — added new charges "
-                           f"but left existing rows alone. Upload a fresh Rocket Money export, "
-                           f"or sync with ?purge=1 to force a full reconcile.")
-    return jsonify({"ok": True, "file": meta, "window_days": days, "months": months,
+        warnings.insert(0, f"Export was taken {export_date} - added new charges but left "
+                           f"existing rows alone. Upload a fresh Rocket Money export, or "
+                           f"sync with ?purge=1 to force a full reconcile.")
+    # Say where the data actually ends. Without this a month that simply has no recent
+    # spending is indistinguishable from a sync that lost rows.
+    if coverage["last_charge"] and coverage["last_charge"] < export_date:
+        warnings.append(f"Newest charge in the export is {coverage['last_charge']}, though the "
+                        f"export itself was taken {export_date}. If you have spent since then, "
+                        f"refresh your accounts in Rocket Money and re-export.")
+    return jsonify({"ok": True, "file": str(meta), "coverage": coverage,
+                    "window_days": days, "months": months,
                     "csv_through": csv_max_date, "reconciled": bool(allow_purge),
                     # `written` = rows touched, kept for the Finance card's toast
                     "written": totals["added"] + totals["updated"],
@@ -2818,10 +2840,24 @@ def _drive_files_service():
             return None, "auth_required"
     return build('drive', 'v3', credentials=creds), None
 
+class _CsvMeta(str):
+    """The export's filename, carrying its Drive modifiedTime alongside. Subclasses str
+    so existing callers that treat it as the filename keep working."""
+    def __new__(cls, name, modified_time=""):
+        self = super().__new__(cls, name or "")
+        self.modified_time = modified_time or ""
+        return self
+
+
 def _drive_newest_csv(folder_id):
-    """Return (raw_bytes, filename) for the most-recently-modified .csv in the given Drive
+    """Return (raw_bytes, meta) for the most-recently-modified .csv in the given Drive
     folder, or (None, err_message). Uploaded CSVs keep mimeType text/csv; a CSV that was
-    converted to a Google Sheet (application/vnd.google-apps.spreadsheet) is skipped."""
+    converted to a Google Sheet (application/vnd.google-apps.spreadsheet) is skipped.
+
+    `meta` is {"name", "modifiedTime"}. modifiedTime matters: it is when the export was
+    actually taken, which is the only honest measure of how current the data is. Judging
+    that by the newest transaction instead misreads a quiet stretch of days as a stale
+    file. str(meta) still reads as the filename for messages."""
     svc, err = _drive_files_service()
     if err:
         return None, f"Drive not connected: {err}"
@@ -2844,7 +2880,7 @@ def _drive_newest_csv(folder_id):
         done = False
         while not done:
             _, done = downloader.next_chunk()
-        return buf.getvalue(), csv_file["name"]
+        return buf.getvalue(), _CsvMeta(csv_file.get("name", ""), csv_file.get("modifiedTime", ""))
     except Exception as e:
         return None, str(e)
 

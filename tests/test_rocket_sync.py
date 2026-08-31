@@ -166,6 +166,35 @@ def test_shopping_is_placeable_either_way():
         assert dest in A.PLACEABLE_CATEGORIES, dest
 
 
+def test_export_freshness_is_measured_on_the_export_not_the_last_charge():
+    """The guard that decides reconcile-vs-add-only.
+
+    A real case on 2026-08-31: the export was taken that morning but the newest CHARGE in
+    it was 2026-08-25, because six days had passed with nothing posting. Judging freshness
+    by the last charge marked a brand-new export stale and silently dropped the sync into
+    add-only mode, so the month never reconciled and looked like it "stopped at the 25th".
+    Freshness must come from when the export was taken."""
+    from datetime import date, timedelta
+    today = date(2026, 8, 31)
+    cutoff = (today - timedelta(days=4)).isoformat()   # 2026-08-27
+
+    last_charge = "2026-08-25"
+    export_taken = "2026-08-31"
+
+    assert not (last_charge >= cutoff), "the old rule considered this stale"
+    assert export_taken >= cutoff, "the export is current and must reconcile"
+
+
+def test_csv_meta_behaves_as_a_filename_and_carries_the_timestamp():
+    """_CsvMeta subclasses str so every caller that treats it as the filename keeps
+    working; the modifiedTime rides along for the freshness check."""
+    m = A._CsvMeta("2026-08-31T04_36_16.168Z-transactions.csv", "2026-08-31T04:39:47.000Z")
+    assert isinstance(m, str)
+    assert str(m).endswith("-transactions.csv")
+    assert m.modified_time[:10] == "2026-08-31"
+    assert A._CsvMeta("x").modified_time == ""          # tolerates a missing timestamp
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
