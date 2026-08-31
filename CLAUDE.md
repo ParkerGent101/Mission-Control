@@ -79,6 +79,12 @@ by colouring every bar.
 - Every Flask route is covered by `require_auth()` via `@app.before_request`; the exempt list
   is in that function. `/api/healthz` is intentionally unauthenticated (a bare `/healthz` is swallowed by Google Frontend on Cloud Run).
 - `_load(FILE, default)` and `_save(FILE, data)` are the only data-access primitives.
+- **`_rocket_to_finance_category` must only ever return a category in `PLACEABLE_CATEGORIES`.**
+  `_finance_sync_month` counts a charge toward `csv_total` before choosing where to write it,
+  so a category the Sheet has no section for is counted as spending and never written, and the
+  tab can never reconcile. This is why the fallback is `Fun` and not `Other`. Rocket Money's
+  `Shopping` lands in Fun for the same reason — to split it out, give the Sheet a Shopping
+  section first, then map it. `tests/test_rocket_sync.py` fails if you get this wrong.
 - Google Sheets / GCS calls must have a local JSON fallback.
 - New env var: add it to `deploy.ps1` `--set-env-vars`, to `.env.example`, and guard with `if VAR:`.
 - Never commit `.env`, `token.json`, `drive_token.json`, `credentials.json`.
@@ -94,6 +100,7 @@ by colouring every bar.
 | `scripts\sheets-reauth.ps1` | Re-auth Google OAuth. **Needs Parker's interactive sign-in.** |
 | `scripts\health-check.ps1` | Ping the live URL + Cloud Run status + error logs |
 | `scripts\jsx_check.py` | Babel-parse a JSX file (needs playwright) |
+| `python tests	est_rocket_sync.py` | Pins the Rocket Money import arithmetic. Run it after touching `_rocket_*` or the category maps. |
 | `scripts\clean.ps1` | Preview/remove generated artifacts |
 
 ## Known issues

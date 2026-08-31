@@ -24,7 +24,10 @@ your first edit — a worktree you did not create is read-and-build-from, **not*
 ## Build and test, exactly
 
 - Run: `python app.py`, or `start.bat`. Serves `http://localhost:5000`.
-- **There is no test suite.** No pytest, no `package.json`, no `tests/`. Do not claim tests passed.
+- **`python tests/test_rocket_sync.py`** is the one real test: it pins the Rocket Money import
+  against a real August 2026 export (38 rows, $4,632.53 raw -> $3,600.09 reaching the Sheet).
+  Runs standalone; **pytest is not installed**, so don't invoke it that way. There is no other
+  test suite and no `package.json` — do not claim coverage you don't have.
 - The only automated check is `python scripts\jsx_check.py static\modules.jsx` — it drives Playwright +
   Chromium to run `Babel.transform` and exits 1 on a syntax error. **Playwright is not in
   `requirements.txt`**; if the check won't start, that is why, and installing it is a separate task.
