@@ -1070,6 +1070,18 @@ _RM_SUBSCRIPTION_MERCHANTS = (
 )
 
 def _rocket_to_finance_category(rm_cat, name=""):
+    """Map a Rocket Money category/merchant onto a category the month tab can hold.
+
+    The return value MUST be in PLACEABLE_CATEGORIES. _finance_sync_month counts a
+    charge toward csv_total before deciding where to put it, so a category with no
+    home in the Sheet would be counted as spending and never written — the tab could
+    then never reconcile to Rocket Money's total. That is why the fallback is 'Fun'
+    rather than the more natural 'Other': Fun has a detail table, Other does not.
+
+    Consequence worth knowing: Rocket Money's 'Shopping' has no home either, so
+    Walmart/Amazon/Reverb land in Fun and inflate it. To split them out, add a
+    'Shopping' detail table or budget section to the Sheet, then add it to
+    DETAIL_TABLE_KEYWORDS / BUDGET_TRANSACTION_CATEGORIES and map it here."""
     blob = (str(rm_cat or "").lower() + " " + str(name or "").lower())
     if any(k in blob for k in ("subscript",) + _RM_SUBSCRIPTION_MERCHANTS):       return "Subscriptions"
     if any(k in blob for k in ("gas", "fuel", "auto & transport", "transport")):  return "Gas"
@@ -1263,6 +1275,7 @@ def _finance_sync_month(svc, month, csv_rows, purge=True, apply=True, subs_data=
     desired_detail = {c: [] for c in DETAIL_TABLE_KEYWORDS}
     desired_budget = {c: [] for c in BUDGET_TRANSACTION_CATEGORIES}
     csv_total, by_category = 0.0, {}
+    unplaceable = []          # charges with no home in the Sheet — see PLACEABLE_CATEGORIES
     for r in csv_rows:
         if (r.get('date') or '')[:7] != month or _rocket_is_nonspend(r):
             continue
@@ -1277,6 +1290,10 @@ def _finance_sync_month(svc, month, csv_rows, purge=True, apply=True, subs_data=
             desired_detail[cat].append({'label': label, 'amount': amt, 'date': r['date'], 'name': name})
         elif cat in desired_budget:
             desired_budget[cat].append({'name': name, 'amount': amt, 'date': r['date']})
+        else:
+            # Counted toward csv_total above but with nowhere to go — the tab could never
+            # reach that total. Never silently: track it so the caller can report the gap.
+            unplaceable.append({'name': name, 'amount': amt, 'category': cat})
 
     state = _load(FINANCE_IMPORT_FILE, {"imported": []})
     if not isinstance(state, dict):
@@ -1448,11 +1465,23 @@ def _finance_sync_month(svc, month, csv_rows, purge=True, apply=True, subs_data=
             elif s['actual_raw'].strip():
                 manual_total = round(manual_total + s['actual'], 2)   # Parker typed this one
 
+    # A charge counted toward csv_total but with nowhere to write it means the tab can
+    # never reach that total. Report it loudly rather than letting the numbers drift.
+    if unplaceable:
+        gap = round(sum(u['amount'] for u in unplaceable), 2)
+        cats = sorted({u['category'] for u in unplaceable})
+        warnings.append(
+            f"{len(unplaceable)} charge(s) totalling ${gap:,.2f} have no home in '{tab}' "
+            f"(category: {', '.join(cats)}) — the tab cannot reconcile to Rocket Money until "
+            f"the Sheet gains a section for them")
+
     plan = {'tab': tab, 'month': month, 'purge': purge, 'applied': False,
             'added': added, 'updated': updated, 'removed': removed,
             'new_rows': len(appends), 'csv_total': csv_total,
             'manual_total': round(manual_total, 2),
             'expected_total': round(csv_total + manual_total, 2),
+            'unplaceable': unplaceable,
+            'unplaceable_total': round(sum(u['amount'] for u in unplaceable), 2),
             'by_category': by_category, 'warnings': warnings}
     if not apply:
         return plan
@@ -2061,6 +2090,13 @@ DETAIL_TABLE_KEYWORDS = {
     'Dining and Drinks': ['dining and drinks total', 'dining & drinks total', 'dining total'],
 }
 BUDGET_TRANSACTION_CATEGORIES = {'Utilities', 'Subscriptions'}
+
+# The only categories a month tab can actually receive a charge into. _finance_sync_month
+# counts a charge toward csv_total before choosing a destination, so anything outside this
+# set would be counted as spending and never written, and the tab could never reconcile to
+# Rocket Money's total. _rocket_to_finance_category must only ever return one of these.
+PLACEABLE_CATEGORIES = set(DETAIL_TABLE_KEYWORDS) | BUDGET_TRANSACTION_CATEGORIES
+
 FINANCE_CATEGORY_NAMES = {
     'Utilities', 'Subscriptions', 'Groceries', 'Dining and Drinks', 'Fun',
     'Gas', 'Shopping', 'Band', 'Loans', 'Other',
